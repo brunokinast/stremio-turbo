@@ -154,10 +154,10 @@ func TestFirewallCallback(t *testing.T) {
 	qt.Check(t, qt.IsTrue(asked > 0), qt.Commentf("firewall callback was never consulted"))
 }
 
-// Purego is available whatever the build selected, and an Implementation is a value that can be
+// PureGo is available whatever the build selected, and an Implementation is a value that can be
 // passed around and used without knowing which one it is.
 func TestPuregoAlwaysAvailable(t *testing.T) {
-	var impl Implementation = Purego
+	var impl Implementation = PureGo
 	qt.Check(t, qt.Equals(fmt.Sprint(impl), "purego"))
 	s, err := Listen(impl, "udp", "localhost:0")
 	qt.Assert(t, qt.IsNil(err))

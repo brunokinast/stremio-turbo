@@ -6,11 +6,11 @@
   but never released. The `utp` package is now this module's root, so the import path is
   `github.com/anacrolix/go-utp` rather than `github.com/anacrolix/go-libutp/utp`, and the pure Go
   implementation is `github.com/anacrolix/go-utp/purego`. go-libutp keeps the cgo wrapper around
-  the vendored C++ sources, and this module depends on it for `utp.Libutp`
+  the vendored C++ sources, and this module depends on it for `utp.LibUtp`
 - `utp` is one interface over both implementations, selected at build time. `utp.Default` is
-  libutp; the `purego` build tag or `CGO_ENABLED=0` makes it `utp.Purego` and leaves the C++
+  libutp; the `purego` build tag or `CGO_ENABLED=0` makes it `utp.PureGo` and leaves the C++
   sources uncompiled. `utp.Socket` and `utp.Implementation` are both interfaces, so code can be
-  handed either implementation as a value: `utp.Purego` is always available, `utp.Libutp` wherever
+  handed either implementation as a value: `utp.PureGo` is always available, `utp.LibUtp` wherever
   libutp is compiled. An `Implementation` makes a `Socket` over a `net.PacketConn`, and
   `utp.Listen` opens a port for one. `utp.NewSocket` and `utp.NewSocketFromPacketConn` use
   `utp.Default` and match the signatures of the constructors of those names in both underlying

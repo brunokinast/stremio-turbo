@@ -75,7 +75,7 @@ for {
 
 ## Picking an implementation
 
-`utp.Default` is libutp. The `purego` build tag, or cgo being off, makes it `utp.Purego` instead,
+`utp.Default` is libutp. The `purego` build tag, or cgo being off, makes it `utp.PureGo` instead,
 and the C++ sources are then not compiled at all — the tag and the package it selects share a name:
 
 ```sh
@@ -88,8 +88,8 @@ constructors of those names in both underlying packages, so moving a caller onto
 import change.
 
 `utp.Socket` is an interface, so code can be handed one without caring which is underneath, and so
-is `utp.Implementation` — `utp.Purego` and `utp.Libutp` are values of it, and `utp.Default` is
-whichever the build picked. `utp.Purego` is always available; `utp.Libutp` only exists where libutp
+is `utp.Implementation` — `utp.PureGo` and `utp.LibUtp` are values of it, and `utp.Default` is
+whichever the build picked. `utp.PureGo` is always available; `utp.LibUtp` only exists where libutp
 is being compiled. That's how the interop tests run each implementation against the other, and each
 against itself.
 
@@ -98,8 +98,8 @@ isn't its job, so `utp.Listen` does that for it, and code holding a PacketConn a
 straight over:
 
 ```go
-s, err := utp.Listen(utp.Purego, "udp", ":4242")
-s, err := utp.Purego.NewSocket(pc)
+s, err := utp.Listen(utp.PureGo, "udp", ":4242")
+s, err := utp.PureGo.NewSocket(pc)
 ```
 
 ## Sharing a port with non-µTP traffic

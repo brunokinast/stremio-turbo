@@ -6,9 +6,9 @@ import (
 	"github.com/anacrolix/go-utp/purego"
 )
 
-// Purego is the pure Go implementation, [github.com/anacrolix/go-utp/purego]. It is available
+// PureGo is the pure Go implementation, [github.com/anacrolix/go-utp/purego]. It is available
 // whatever the build selected as [Default].
-var Purego Implementation = &implementation{"purego", newPuregoSocket}
+var PureGo Implementation = &implementation{"purego", newPuregoSocket}
 
 // A purego Socket is already the right shape in full, so it needs no adapter: it's returned as
 // itself, and a caller that wants the implementation's own API can assert for it.

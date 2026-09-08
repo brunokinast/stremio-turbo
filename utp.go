@@ -12,7 +12,7 @@
 // [Default] is whichever one the build selected. [NewSocket] and [NewSocketFromPacketConn] use
 // it and have the same signatures as the constructors of those names in both underlying packages,
 // so switching a caller over to this package is an import change. Code that wants a particular
-// implementation rather than the default can name [Purego] or [Libutp] directly; Libutp only exists
+// implementation rather than the default can name [PureGo] or [LibUtp] directly; LibUtp only exists
 // where libutp is being compiled, which is to say not under the purego tag and not with cgo
 // disabled.
 //
@@ -28,8 +28,8 @@ import (
 	"time"
 )
 
-// An Implementation makes Sockets over a PacketConn. The two in this module are [Purego] and
-// [Libutp], and [Default] is whichever the build selected.
+// An Implementation makes Sockets over a PacketConn. The two in this module are [PureGo] and
+// [LibUtp], and [Default] is whichever the build selected.
 //
 // Owning a port is not part of it: use [Listen] to have one opened for an implementation. Both
 // values here also print as their name, so fmt.Sprint(utp.Default) is "libutp" or "purego".
@@ -140,7 +140,7 @@ func newOptions(opts []Option) (o options) {
 
 // The two implementations in this module, which differ only in the constructor they wrap.
 //
-// Used through a pointer so that Implementation values are comparable: Default == Libutp is a
+// Used through a pointer so that Implementation values are comparable: Default == LibUtp is a
 // reasonable thing to write, and a struct with a func field in it would panic.
 type implementation struct {
 	name      string

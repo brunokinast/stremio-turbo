@@ -26,7 +26,7 @@ import (
 
 // The implementations under test. Every test runs over each ordered pair of these, so as well as
 // purego against libutp in both roles, each is run against itself.
-var implementations = []utp.Implementation{utp.Libutp, utp.Purego}
+var implementations = []utp.Implementation{utp.LibUtp, utp.PureGo}
 
 const localhost = "localhost:0"
 

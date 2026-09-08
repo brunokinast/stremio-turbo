@@ -13,12 +13,12 @@ import (
 
 func TestDefaultImplementationIsLibutp(t *testing.T) {
 	qt.Check(t, qt.Equals(fmt.Sprint(Default), "libutp"))
-	qt.Check(t, qt.Equals(Default, Libutp))
+	qt.Check(t, qt.Equals(Default, LibUtp))
 }
 
 // libutp's Socket has no deadlines. Reporting that beats the panic the underlying package raises.
 func TestLibutpSocketDeadlinesUnsupported(t *testing.T) {
-	s, err := Listen(Libutp, "udp", "localhost:0")
+	s, err := Listen(LibUtp, "udp", "localhost:0")
 	qt.Assert(t, qt.IsNil(err))
 	defer s.Close()
 	qt.Check(t, qt.ErrorIs(s.SetDeadline(time.Now()), errors.ErrUnsupported))
@@ -29,10 +29,10 @@ func TestLibutpSocketDeadlinesUnsupported(t *testing.T) {
 // Both implementations are reachable by name when libutp is being compiled, which is what lets
 // the interop tests run each against the other.
 func TestBothImplementationsAvailable(t *testing.T) {
-	for _, impl := range []Implementation{Libutp, Purego} {
+	for _, impl := range []Implementation{LibUtp, PureGo} {
 		s, err := Listen(impl, "udp", "localhost:0")
 		qt.Assert(t, qt.IsNil(err), qt.Commentf("%v", impl))
 		qt.Check(t, qt.IsNil(s.Close()))
 	}
-	qt.Check(t, qt.Not(qt.Equals(Libutp, Purego)))
+	qt.Check(t, qt.Not(qt.Equals(LibUtp, PureGo)))
 }

@@ -12,7 +12,7 @@ import (
 
 func TestDefaultImplementationIsPurego(t *testing.T) {
 	qt.Check(t, qt.Equals(fmt.Sprint(Default), "purego"))
-	qt.Check(t, qt.Equals(Default, Purego))
+	qt.Check(t, qt.Equals(Default, PureGo))
 }
 
 // The pure implementation does support Socket deadlines, so the default Socket does here.
