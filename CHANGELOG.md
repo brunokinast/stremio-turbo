@@ -22,6 +22,10 @@
   control, selective acknowledgements and fast resend, retransmission timers and MTU search follow
   libutp closely, including its constants. It imports nothing outside the standard library, logs
   through `log/slog`, and passes `nettest.TestConn`
+- The `purego_utp` build tag selects the pure Go implementation too, for builds that want to say
+  that about µTP alone rather than setting the widely answered `purego` tag for everything they
+  depend on, or that want cgo out of µTP while leaving it on elsewhere. `CGO_ENABLED=0` and either
+  tag are equivalent here
 - `interop` tests the two implementations against each other on the wire: transfers in both
   directions, bidirectional transfers, ping-pong, and transfers over a link that drops, delays and
   duplicates packets. Every case runs over each ordered pair of implementations, so each is also

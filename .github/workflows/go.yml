@@ -37,4 +37,5 @@ jobs:
     - uses: extractions/setup-just@v2
     - run: go version
     - run: just test-purego
+    - run: just test-purego-utp
     - run: just test-nocgo

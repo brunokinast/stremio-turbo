@@ -1,4 +1,4 @@
-//go:build cgo && !purego
+//go:build cgo && !purego && !purego_utp
 
 package utp
 
@@ -12,13 +12,13 @@ import (
 )
 
 // LibUtp is the C++ reference implementation, [github.com/anacrolix/go-libutp], reached through
-// cgo. It only exists where libutp is being compiled: not under the purego tag, and not with cgo
-// disabled.
+// cgo. It only exists where libutp is being compiled: not under the purego or purego_utp tags,
+// and not with cgo disabled.
 var LibUtp Implementation = &implementation{"libutp", newLibutpSocket}
 
-// Default is the implementation this binary was built with: libutp here, because the build
-// neither set the purego tag nor disabled cgo. A program that wants to override the build's
-// choice can assign to it before making any sockets.
+// Default is the implementation this binary was built with: libutp here, because the build set
+// neither the purego nor the purego_utp tag, and didn't disable cgo. A program that wants to
+// override the build's choice can assign to it before making any sockets.
 var Default = LibUtp
 
 // Adapts a libutp Socket to the Socket interface.

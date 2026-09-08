@@ -75,13 +75,19 @@ for {
 
 ## Picking an implementation
 
-`utp.Default` is libutp. The `purego` build tag, or cgo being off, makes it `utp.PureGo` instead,
-and the C++ sources are then not compiled at all — the tag and the package it selects share a name:
+`utp.Default` is libutp. Either of two build tags, or cgo being off, makes it `utp.PureGo`
+instead, and the C++ sources are then not compiled at all:
 
 ```sh
-go build -tags purego ./...
+go build -tags purego ./...       # the package this tag selects shares its name
+go build -tags purego_utp ./...   # the same choice, for this module alone
 CGO_ENABLED=0 go build ./...
 ```
+
+`purego` is the tag a build sets to say it wants no cgo anywhere, and plenty of modules answer to
+it. `purego_utp` says it about µTP and nothing else — for a build that wants the pure
+implementation here without making that choice for everything it depends on, or that wants to keep
+cgo out of µTP while leaving it on elsewhere.
 
 `utp.NewSocket` and `utp.NewSocketFromPacketConn` use `Default` and have the same signatures as the
 constructors of those names in both underlying packages, so moving a caller onto this package is an
@@ -150,10 +156,11 @@ just tends to settle high. The cgo package doesn't act on ICMP either.
 The [justfile](justfile) mirrors the CI jobs, so what you run locally is what CI runs:
 
 ```sh
-just test          # go test -race -count 2 ./...
-just bench         # build/smoke the benchmarks
-just test-purego   # the pure Go implementation selected via the build tag
-just test-nocgo    # everything with cgo off entirely
+just test             # go test -race -count 2 ./...
+just bench            # build/smoke the benchmarks
+just test-purego      # the pure Go implementation selected via the build tag
+just test-purego-utp  # the same, via the µTP-only tag
+just test-nocgo       # everything with cgo off entirely
 ```
 
 ## Release history

@@ -18,6 +18,11 @@ bench:
 test-purego:
     go test -race -count 2 -tags purego ./...
 
+# purego_utp selects the same implementation as purego, for builds that only want to say it about
+# µTP. Only the root package's choice of Default changes with it, so only that is worth running.
+test-purego-utp:
+    go test -race -count 2 -tags purego_utp .
+
 # Everything has to build and pass with cgo off entirely, as in the CI `purego` job. -race needs
 # cgo, so it can't be used here, and the libutp wrapper can't build at all.
 test-nocgo:

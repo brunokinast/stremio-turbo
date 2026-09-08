@@ -1,4 +1,4 @@
-//go:build cgo && !purego
+//go:build cgo && !purego && !purego_utp
 
 // Package interop checks that the two µTP implementations agree on the wire.
 //

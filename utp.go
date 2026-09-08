@@ -2,19 +2,23 @@
 // at build time.
 //
 // By default it uses libutp, the C++ reference implementation, through cgo and
-// [github.com/anacrolix/go-libutp]. Building with the purego tag, or with cgo disabled, uses the
-// pure Go implementation in [github.com/anacrolix/go-utp/purego] instead — the tag and the
-// package it selects share a name:
+// [github.com/anacrolix/go-libutp]. Either of two build tags, or cgo being disabled, uses the
+// pure Go implementation in [github.com/anacrolix/go-utp/purego] instead:
 //
-//	go build -tags purego ./...
+//	go build -tags purego ./...       // the package this tag selects shares its name
+//	go build -tags purego_utp ./...   // the same choice, for this module alone
 //	CGO_ENABLED=0 go build ./...
+//
+// purego is the tag a build sets to say it wants no cgo anywhere, and plenty of modules answer
+// to it. purego_utp says it about µTP and nothing else, for a build that wants the pure
+// implementation here without making that choice for everything it depends on, or that wants to
+// keep cgo out of µTP while leaving it on elsewhere.
 //
 // [Default] is whichever one the build selected. [NewSocket] and [NewSocketFromPacketConn] use
 // it and have the same signatures as the constructors of those names in both underlying packages,
 // so switching a caller over to this package is an import change. Code that wants a particular
 // implementation rather than the default can name [PureGo] or [LibUtp] directly; LibUtp only exists
-// where libutp is being compiled, which is to say not under the purego tag and not with cgo
-// disabled.
+// where libutp is being compiled, which is to say under neither tag and not with cgo disabled.
 //
 // Implementations are values, so code that has to work with either can take an [Implementation]
 // and be handed one, rather than choosing at its own build time. An Implementation makes a Socket
