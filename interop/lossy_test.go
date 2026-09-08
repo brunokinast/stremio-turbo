@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-quicktest/qt"
 
-	"github.com/anacrolix/go-libutp/utp"
+	"github.com/anacrolix/go-utp"
 )
 
 // How often, as a percentage, a packet is dropped outright and how often it's held back to arrive

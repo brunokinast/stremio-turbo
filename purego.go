@@ -3,10 +3,10 @@ package utp
 import (
 	"net"
 
-	"github.com/anacrolix/go-libutp/purego"
+	"github.com/anacrolix/go-utp/purego"
 )
 
-// Purego is the pure Go implementation, [github.com/anacrolix/go-libutp/purego]. It is available
+// Purego is the pure Go implementation, [github.com/anacrolix/go-utp/purego]. It is available
 // whatever the build selected as [Default].
 var Purego Implementation = &implementation{"purego", newPuregoSocket}
 

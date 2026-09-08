@@ -1,10 +1,10 @@
-// Package utp provides one interface over both µTP implementations in this module, and picks one
-// of them at build time.
+// Package utp provides one interface over both µTP implementations for Go, and picks one of them
+// at build time.
 //
-// By default it uses libutp, the C++ reference implementation, through cgo. Building with the
-// purego tag, or with cgo disabled, uses the pure Go implementation in
-// [github.com/anacrolix/go-libutp/purego] instead — the tag and the package it selects share a
-// name:
+// By default it uses libutp, the C++ reference implementation, through cgo and
+// [github.com/anacrolix/go-libutp]. Building with the purego tag, or with cgo disabled, uses the
+// pure Go implementation in [github.com/anacrolix/go-utp/purego] instead — the tag and the
+// package it selects share a name:
 //
 //	go build -tags purego ./...
 //	CGO_ENABLED=0 go build ./...
@@ -105,7 +105,7 @@ type options struct {
 type Option func(*options)
 
 // WithLogger gives a Socket its own logger, instead of the implementation's package level one:
-// [github.com/anacrolix/go-libutp.Logger] or [github.com/anacrolix/go-libutp/purego.Logger],
+// [github.com/anacrolix/go-libutp.Logger] or [github.com/anacrolix/go-utp/purego.Logger],
 // either of which is slog's default until it's set. This is the logger the categories in
 // [Socket.SetLogging] write to, along with anything either implementation has to report about the
 // socket itself.

@@ -52,7 +52,7 @@ type rstInfo struct {
 // acknowledgement followed by a reset.
 //
 // It's an alias rather than a defined type so that this Socket satisfies interfaces declaring the
-// callback in their own terms, such as [github.com/anacrolix/go-libutp/utp.Socket], without a
+// callback in their own terms, such as [github.com/anacrolix/go-utp.Socket], without a
 // wrapper to convert between two identical function types.
 type FirewallCallback = func(net.Addr) bool
 

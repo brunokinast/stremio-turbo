@@ -1,6 +1,6 @@
 //go:build cgo && !purego
 
-// Package interop checks that this module's two µTP implementations agree on the wire.
+// Package interop checks that the two µTP implementations agree on the wire.
 //
 // Every test runs over each ordered pair of implementations, so as well as purego against
 // libutp in both roles, each is also tested against itself. libutp against libutp is the control:
@@ -21,7 +21,7 @@ import (
 
 	"github.com/go-quicktest/qt"
 
-	"github.com/anacrolix/go-libutp/utp"
+	"github.com/anacrolix/go-utp"
 )
 
 // The implementations under test. Every test runs over each ordered pair of these, so as well as
