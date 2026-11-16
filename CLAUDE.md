@@ -14,3 +14,4 @@ Personal fork of [rivulet-kodi/rivulet-engine](https://github.com/rivulet-kodi/r
 - Update upstream with `git fetch upstream && git merge upstream/main` (or a release tag).
 - Build: `CGO_ENABLED=0 go build -trimpath -o rivulet-engine.exe ./cmd/rivulet-engine`, then copy it to `C:\Users\bruno\Tools\rivulet\rivulet-engine.exe` with Stremio closed.
 - Repo uses LF line endings (`core.autocrlf=false`).
+- Test streaming changes against **4K HDR** sources (what the owner watches), muted, and stop playback when done; see the Testing section of stremio-web's CLAUDE.md.

@@ -7055,11 +7055,11 @@
     "/scrape": {
       "post": {
         "operationId": "scrapeTorrents",
-        "summary": "Tracker swarm sizes for a batch of torrents",
+        "summary": "Swarm sizes for a batch of torrents",
         "tags": [
           "Engine"
         ],
-        "description": "Asks trackers for seeders/leechers without adding the torrents as engines. Each torrent's trackers (bare announce URLs or peerSearch-style `tracker:<url>`; `dht:` entries ignored, loopback/link-local hosts dropped) are merged with the engine's ranked tracker list; every tracker is asked once, in parallel, with the largest figures kept. Answered results are cached for 5 minutes.",
+        "description": "Estimates seeders/leechers without adding the torrents as engines, from three sources run concurrently: trackers (each torrent's trackers — bare announce URLs or peerSearch-style `tracker:<url>`; `dht:` entries ignored, loopback/link-local hosts dropped — merged with the engine's ranked list, every tracker asked once), DHT scrapes (BEP 33 bloom filters unioned across all replying nodes, no announce) and, for torrents already open, their connected peers. The largest figures win. Answered results are cached for 5 minutes. With `Accept: application/x-ndjson` the response streams instead: one `ScrapeUpdate` JSON line each time a source improves a torrent's figures (cached and live answers first, trackers within about a second, DHT over the next seconds), then `{\"done\":true}`; a streamed call may run up to 60 s, a plain one 8 s.",
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -7073,11 +7073,16 @@
         },
         "responses": {
           "200": {
-            "description": "One result per requested torrent, in request order",
+            "description": "One result per requested torrent, in request order; or, when streaming, NDJSON update lines then a done line",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ScrapeResponse"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrapeUpdate"
                 }
               }
             }
@@ -8521,8 +8526,14 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
-                  "properties": {"error": {"type": "string"}}
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -8536,8 +8547,14 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
-                  "properties": {"error": {"type": "string"}}
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -12078,37 +12095,7 @@
           "results": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": [
-                "infoHash",
-                "seeders",
-                "leechers",
-                "completed",
-                "trackers"
-              ],
-              "properties": {
-                "infoHash": {
-                  "type": "string"
-                },
-                "seeders": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "description": "Largest seeder count any tracker reported."
-                },
-                "leechers": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "completed": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "trackers": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "description": "Trackers that answered; 0 means the counts are unknown, not zero."
-                }
-              }
+              "$ref": "#/components/schemas/ScrapeResult"
             }
           }
         }
@@ -12863,6 +12850,72 @@
             "type": "string"
           }
         }
+      },
+      "ScrapeResult": {
+        "type": "object",
+        "required": [
+          "infoHash",
+          "seeders",
+          "leechers",
+          "completed",
+          "trackers"
+        ],
+        "properties": {
+          "infoHash": {
+            "type": "string"
+          },
+          "seeders": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Largest seeder count any source reported (DHT figures are bloom-filter estimates)."
+          },
+          "leechers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "trackers": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Trackers that answered. With no tracker, dht or live answer the counts are unknown, not zero."
+          },
+          "dht": {
+            "type": "boolean",
+            "description": "DHT nodes returned scrape filters for the torrent."
+          },
+          "live": {
+            "type": "boolean",
+            "description": "Figures include an open engine's connected peers."
+          }
+        }
+      },
+      "ScrapeUpdate": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScrapeResult"
+          },
+          {
+            "type": "object",
+            "required": [
+              "source"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "cache",
+                  "tracker",
+                  "dht",
+                  "live"
+                ],
+                "description": "Source whose answer caused this update."
+              }
+            }
+          }
+        ]
       }
     }
   }

@@ -7,6 +7,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -67,5 +68,37 @@ func TestHandlerScrape_Rejects(t *testing.T) {
 				t.Errorf("status = %d; want %d", rec.Code, tt.want)
 			}
 		})
+	}
+}
+
+func TestHandlerScrape_Stream(t *testing.T) {
+	em := newFakeEM()
+	em.scrapeSeeders = map[string]int{testIH: 42}
+	h := New(em, &fakeSS{}, &fakeProber{}, types.Config{HTTPPort: 11470})
+
+	req := httptest.NewRequest(http.MethodPost, "/scrape", strings.NewReader(`{"torrents":[{"infoHash":"`+testIH+`"}]}`))
+	req.Header.Set("Accept", "application/x-ndjson")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body %s", rec.Code, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/x-ndjson" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	lines := strings.Split(strings.TrimSpace(rec.Body.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %q; want one update and done", lines)
+	}
+	var u types.ScrapeUpdate
+	if err := json.Unmarshal([]byte(lines[0]), &u); err != nil {
+		t.Fatal(err)
+	}
+	if u.InfoHash != testIH || u.Seeders != 42 || u.Source != "tracker" {
+		t.Errorf("update = %+v", u)
+	}
+	if lines[1] != `{"done":true}` {
+		t.Errorf("last line = %q", lines[1])
 	}
 }

@@ -134,13 +134,16 @@ func (m *fakeEM) AllStats() map[string]*types.Stats {
 	}
 	return out
 }
-func (m *fakeEM) Scrape(_ context.Context, reqs []types.ScrapeRequest) []types.ScrapeResult {
+func (m *fakeEM) Scrape(_ context.Context, reqs []types.ScrapeRequest, onUpdate func(types.ScrapeUpdate)) []types.ScrapeResult {
 	m.scrapeReqs = reqs
 	out := make([]types.ScrapeResult, len(reqs))
 	for i, r := range reqs {
 		out[i].InfoHash = r.InfoHash
 		if n, ok := m.scrapeSeeders[r.InfoHash]; ok {
 			out[i].Seeders, out[i].Trackers = n, 1
+			if onUpdate != nil {
+				onUpdate(types.ScrapeUpdate{ScrapeResult: out[i], Source: "tracker"})
+			}
 		}
 	}
 	return out

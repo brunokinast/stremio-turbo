@@ -112,7 +112,7 @@ func (m *disconnectFakeEM) RemoveEngine(_ string) error       { return nil }
 func (m *disconnectFakeEM) RemoveAll()                        {}
 func (m *disconnectFakeEM) ListEngines() []string             { return []string{m.e.ih} }
 func (m *disconnectFakeEM) AllStats() map[string]*types.Stats { return nil }
-func (m *disconnectFakeEM) Scrape(context.Context, []types.ScrapeRequest) []types.ScrapeResult {
+func (m *disconnectFakeEM) Scrape(context.Context, []types.ScrapeRequest, func(types.ScrapeUpdate)) []types.ScrapeResult {
 	return nil
 }
 func (m *disconnectFakeEM) Close() error { return nil }

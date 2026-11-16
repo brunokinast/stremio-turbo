@@ -324,9 +324,12 @@ type EngineManager interface {
 	ListEngines() []string
 	// AllStats returns torrent-level stats keyed by infoHash (for /stats.json).
 	AllStats() map[string]*Stats
-	// Scrape asks trackers for swarm sizes without joining the swarms (POST
-	// /scrape). Results are in request order, one per request.
-	Scrape(ctx context.Context, reqs []ScrapeRequest) []ScrapeResult
+	// Scrape estimates swarm sizes without joining the swarms (POST /scrape):
+	// trackers, DHT scrapes (BEP 33) and, for torrents already open, live
+	// peers. onUpdate (may be nil) receives a torrent's merged figures each
+	// time a source improves them, serialized; it is not called after Scrape
+	// returns. Results are in request order, one per request.
+	Scrape(ctx context.Context, reqs []ScrapeRequest, onUpdate func(ScrapeUpdate)) []ScrapeResult
 	Close() error
 }
 
@@ -337,15 +340,29 @@ type ScrapeRequest struct {
 	Trackers []string `json:"trackers,omitempty"`
 }
 
-// ScrapeResult reports the best (largest) swarm figures any tracker returned
-// for a torrent. Trackers is how many trackers answered; 0 means none did, so
-// the counts are unknown rather than zero.
+// ScrapeResult reports the best (largest) swarm figures any source returned
+// for a torrent. Trackers is how many trackers answered, DHT whether DHT
+// nodes returned scrape filters, Live whether the figures include an open
+// engine's connected peers. With none of them the counts are unknown rather
+// than zero.
 type ScrapeResult struct {
 	InfoHash  string `json:"infoHash"`
 	Seeders   int    `json:"seeders"`
 	Leechers  int    `json:"leechers"`
 	Completed int    `json:"completed"`
 	Trackers  int    `json:"trackers"`
+	DHT       bool   `json:"dht,omitempty"`
+	Live      bool   `json:"live,omitempty"`
+}
+
+// Known reports whether any source answered for the torrent.
+func (r ScrapeResult) Known() bool { return r.Trackers > 0 || r.DHT || r.Live }
+
+// ScrapeUpdate is one streamed improvement of a torrent's ScrapeResult, with
+// the source that caused it: "cache", "tracker", "dht" or "live".
+type ScrapeUpdate struct {
+	ScrapeResult
+	Source string `json:"source"`
 }
 
 // SettingsStore persists the user-facing server settings (cacheSize, bt*, ...).

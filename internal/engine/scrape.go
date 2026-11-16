@@ -38,6 +38,14 @@ const (
 	// scrapeMaxTrackersPerTorrent caps the caller-supplied trackers used per
 	// torrent (the engine's ranked list is always added on top).
 	scrapeMaxTrackersPerTorrent = 20
+	// dhtScrapeTimeout bounds one torrent's DHT scrape traversal; most
+	// answers arrive in the first few seconds.
+	dhtScrapeTimeout = 10 * time.Second
+	// dhtScrapeIdle ends a DHT scrape early once its estimate has not grown for
+	// this long.
+	dhtScrapeIdle = 3 * time.Second
+	// dhtScrapeConcurrency caps simultaneous DHT scrape traversals per call.
+	dhtScrapeConcurrency = 32
 )
 
 // scrapeCache holds recent scrape results keyed by lower-case info hash.
@@ -88,8 +96,14 @@ type scrapeCounts struct {
 }
 
 // Scrape implements types.EngineManager.
-func (m *manager) Scrape(ctx context.Context, reqs []types.ScrapeRequest) []types.ScrapeResult {
-	return scrapeAll(ctx, reqs, m.scrapeTrackers(), m.trackerScrapeFunc(), &m.scrapes, time.Now())
+func (m *manager) Scrape(ctx context.Context, reqs []types.ScrapeRequest, onUpdate func(types.ScrapeUpdate)) []types.ScrapeResult {
+	src := scrapeSources{
+		extraTrackers: m.scrapeTrackers(),
+		tracker:       m.trackerScrapeFunc(),
+		dht:           m.dhtScrapeFunc(),
+		live:          m.liveSwarm,
+	}
+	return scrapeAll(ctx, reqs, src, &m.scrapes, time.Now(), onUpdate)
 }
 
 // scrapeTrackers returns the engine's own trackers added to every scrape, or
@@ -157,30 +171,71 @@ func scrapeHTTPOpts(proxyURL string) trHttp.NewClientOpts {
 	return opts
 }
 
-// scrapeAll answers reqs from the cache where fresh, scrapes the rest (each
-// tracker once, batching its info hashes), and returns one result per request
-// in request order. Requests with an invalid info hash get a zero result.
-func scrapeAll(ctx context.Context, reqs []types.ScrapeRequest, extraTrackers []string, scrape scrapeFunc, cache *scrapeCache, now time.Time) []types.ScrapeResult {
-	results := make([]types.ScrapeResult, len(reqs))
-	pending := make(map[string]*types.ScrapeResult) // ih → aggregated result
-	byTracker := make(map[string][]string)          // tracker URL → ihs
-	var trackerOrder []string
+// scrapeSources are the ways a scrape learns swarm sizes. dht and live may be
+// nil (disabled).
+type scrapeSources struct {
+	extraTrackers []string
+	tracker       scrapeFunc
+	dht           dhtScrapeFunc
+	live          liveSwarmFunc
+}
 
-	for i, req := range reqs {
+// scrapeAgg folds every source's answers into one result per torrent and
+// reports each improvement. All access goes through mu, which also
+// serializes onUpdate.
+type scrapeAgg struct {
+	mu       sync.Mutex
+	pending  map[string]*types.ScrapeResult
+	onUpdate func(types.ScrapeUpdate)
+}
+
+// fold applies f to ih's result and reports it when f says it improved.
+func (a *scrapeAgg) fold(ih, source string, f func(r *types.ScrapeResult) bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	r, ok := a.pending[ih]
+	if !ok || !f(r) || a.onUpdate == nil {
+		return
+	}
+	a.onUpdate(types.ScrapeUpdate{ScrapeResult: *r, Source: source})
+}
+
+// raise sets *dst to v when v is larger, reporting whether it changed.
+func raise(dst *int, v int) bool {
+	if v > *dst {
+		*dst = v
+		return true
+	}
+	return false
+}
+
+// scrapeAll answers reqs from the cache where fresh and asks every source for
+// the rest concurrently: open engines at once, trackers once each (batching
+// their info hashes), the DHT per torrent in request order. Improvements are
+// reported through onUpdate as they arrive. It returns one result per request
+// in request order; requests with an invalid info hash get a zero result.
+func scrapeAll(ctx context.Context, reqs []types.ScrapeRequest, src scrapeSources, cache *scrapeCache, now time.Time, onUpdate func(types.ScrapeUpdate)) []types.ScrapeResult {
+	agg := &scrapeAgg{pending: make(map[string]*types.ScrapeResult), onUpdate: onUpdate}
+	byTracker := make(map[string][]string) // tracker URL → ihs
+	var trackerOrder, order, cached, toScrape []string
+
+	for _, req := range reqs {
 		ih := strings.ToLower(strings.TrimSpace(req.InfoHash))
-		results[i].InfoHash = ih
 		if _, err := hex.DecodeString(ih); err != nil || len(ih) != 40 {
 			continue
 		}
+		if _, ok := agg.pending[ih]; ok {
+			continue // duplicate request; filled from the same result below
+		}
+		order = append(order, ih)
 		if r, ok := cache.get(ih, now); ok {
-			results[i] = r
+			agg.pending[ih] = &r
+			cached = append(cached, ih)
 			continue
 		}
-		if _, ok := pending[ih]; ok {
-			continue // duplicate request; filled from pending below
-		}
-		pending[ih] = &types.ScrapeResult{InfoHash: ih}
-		for _, tr := range scrapeTrackerList(req.Trackers, extraTrackers) {
+		agg.pending[ih] = &types.ScrapeResult{InfoHash: ih}
+		toScrape = append(toScrape, ih)
+		for _, tr := range scrapeTrackerList(req.Trackers, src.extraTrackers) {
 			if _, seen := byTracker[tr]; !seen {
 				trackerOrder = append(trackerOrder, tr)
 			}
@@ -188,32 +243,62 @@ func scrapeAll(ctx context.Context, reqs []types.ScrapeRequest, extraTrackers []
 		}
 	}
 
-	if len(pending) > 0 {
-		runScrapes(ctx, trackerOrder, byTracker, pending, scrape)
-		fresh := make([]types.ScrapeResult, 0, len(pending))
-		for _, r := range pending {
-			// Only cache answers: a torrent no tracker answered for may just
-			// have hit a slow moment, so it is retried on the next call.
-			if r.Trackers > 0 {
-				fresh = append(fresh, *r)
+	for _, ih := range cached {
+		agg.fold(ih, "cache", func(*types.ScrapeResult) bool { return true })
+	}
+	if src.live != nil {
+		for _, ih := range order {
+			if seeders, leechers, ok := src.live(ih); ok {
+				agg.fold(ih, "live", func(r *types.ScrapeResult) bool {
+					first := !r.Live
+					r.Live = true
+					s, l := raise(&r.Seeders, seeders), raise(&r.Leechers, leechers)
+					return first || s || l
+				})
 			}
 		}
-		cache.put(fresh, now)
 	}
 
-	for i := range results {
-		if r, ok := pending[results[i].InfoHash]; ok {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		runScrapes(ctx, trackerOrder, byTracker, agg, src.tracker)
+	}()
+	go func() {
+		defer wg.Done()
+		runDHTScrapes(ctx, toScrape, agg, src.dht)
+	}()
+	wg.Wait()
+
+	agg.mu.Lock()
+	defer agg.mu.Unlock()
+	fresh := make([]types.ScrapeResult, 0, len(toScrape))
+	for _, ih := range toScrape {
+		// Only cache answers: a torrent no source answered for may just have
+		// hit a slow moment, so it is retried on the next call.
+		if r := agg.pending[ih]; r.Known() {
+			fresh = append(fresh, *r)
+		}
+	}
+	cache.put(fresh, now)
+
+	results := make([]types.ScrapeResult, len(reqs))
+	for i, req := range reqs {
+		ih := strings.ToLower(strings.TrimSpace(req.InfoHash))
+		results[i].InfoHash = ih
+		if r, ok := agg.pending[ih]; ok {
 			results[i] = *r
 		}
 	}
 	return results
 }
 
-// runScrapes issues every (tracker, batch) request concurrently and folds the
-// answers into pending, keeping the largest figures per torrent.
-func runScrapes(ctx context.Context, trackerOrder []string, byTracker map[string][]string, pending map[string]*types.ScrapeResult, scrape scrapeFunc) {
+// runScrapes issues every (tracker, batch) request concurrently and folds each
+// answer in as it arrives, keeping the largest figures per torrent. A
+// torrent's first tracker answer is always reported, even when it is zero.
+func runScrapes(ctx context.Context, trackerOrder []string, byTracker map[string][]string, agg *scrapeAgg, scrape scrapeFunc) {
 	var (
-		mu  sync.Mutex
 		wg  sync.WaitGroup
 		sem = make(chan struct{}, scrapeConcurrency)
 	)
@@ -242,19 +327,56 @@ func runScrapes(ctx context.Context, trackerOrder []string, byTracker map[string
 					logging.For("scrape").Debug("tracker scrape failed", "tracker", tr, "err", err)
 					return
 				}
-				mu.Lock()
-				defer mu.Unlock()
 				for i, ih := range batch {
-					r := pending[ih]
-					r.Trackers++
-					r.Seeders = max(r.Seeders, counts[i].seeders)
-					r.Leechers = max(r.Leechers, counts[i].leechers)
-					r.Completed = max(r.Completed, counts[i].completed)
+					c := counts[i]
+					agg.fold(ih, "tracker", func(r *types.ScrapeResult) bool {
+						r.Trackers++
+						s, l := raise(&r.Seeders, c.seeders), raise(&r.Leechers, c.leechers)
+						done := raise(&r.Completed, c.completed)
+						return r.Trackers == 1 || s || l || done
+					})
 				}
 			}(tr, batch)
 		}
 	}
 	wg.Wait()
+}
+
+// runDHTScrapes runs a DHT scrape per torrent, at most dhtScrapeConcurrency at
+// a time and in the given order, so the caller's first torrents settle first.
+func runDHTScrapes(ctx context.Context, ihs []string, agg *scrapeAgg, scrape dhtScrapeFunc) {
+	if scrape == nil {
+		return
+	}
+	var (
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, dhtScrapeConcurrency)
+	)
+	defer wg.Wait()
+	for _, ih := range ihs {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		wg.Add(1)
+		go func(ih string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			var hash infohash.T
+			_ = hash.FromHexString(ih) // validated by scrapeAll
+			tctx, cancel := context.WithTimeout(ctx, dhtScrapeTimeout)
+			defer cancel()
+			scrape(tctx, hash, func(seeds, peers int) {
+				agg.fold(ih, "dht", func(r *types.ScrapeResult) bool {
+					first := !r.DHT
+					r.DHT = true
+					s, l := raise(&r.Seeders, seeds), raise(&r.Leechers, peers)
+					return first || s || l
+				})
+			})
+		}(ih)
+	}
 }
 
 // scrapeTrackerList merges a request's trackers (capped) with the engine's
