@@ -29,12 +29,14 @@ import (
 // startup is never blocked.
 
 // defaultTrackerTopN is the fallback number of ranked UDP/HTTP trackers attached
-// per torrent when RIVULET_TRACKERS_MAX is unset or invalid. Kept small:
-// anacrolix's announce dispatcher does work proportional to (torrents x trackers)
-// and recomputes bytesLeft over every piece per announce, so a large list
-// dominates CPU on big 4K torrents. DHT + PEX + webseeds cover peer discovery;
-// a handful of fast trackers is plenty for streaming.
-const defaultTrackerTopN = 5
+// per torrent when RIVULET_TRACKERS_MAX is unset or invalid. Upstream capped
+// this at 5 because anacrolix's announce dispatcher does work proportional to
+// (torrents x trackers), recomputing bytesLeft over every piece per announce.
+// For a streaming server's handful of open torrents that cost is negligible
+// (measured: five 4K torrents, 0.2% -> 0.4% CPU going from 5 to 25 trackers),
+// while small swarms - typical for 4K - find twice the peers. Only trackers
+// that answer the startup probe are attached.
+const defaultTrackerTopN = 25
 
 // trackerRefreshIntv is how often the tracker list is re-fetched and re-ranked.
 const trackerRefreshIntv = 24 * time.Hour

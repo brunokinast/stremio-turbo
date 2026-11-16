@@ -88,7 +88,9 @@ func (e *disconnectFakeEngine) Ready(_ context.Context) error { return nil }
 func (e *disconnectFakeEngine) Files() []types.FileInfo {
 	return []types.FileInfo{{Name: "video.mkv", Path: "video.mkv", Length: 1 << 20}}
 }
-func (e *disconnectFakeEngine) GuessFileIdx() int { return 0 }
+func (e *disconnectFakeEngine) GuessFileIdx() int       { return 0 }
+func (e *disconnectFakeEngine) Peers() []types.PeerConn { return nil }
+func (e *disconnectFakeEngine) PrimeFile(int)           {}
 func (e *disconnectFakeEngine) NewReader(_ int) (io.ReadSeekCloser, int64, error) {
 	atomic.AddInt32(&e.openReaders, 1)
 	return e.rc, 1 << 20, nil
@@ -115,7 +117,9 @@ func (m *disconnectFakeEM) AllStats() map[string]*types.Stats { return nil }
 func (m *disconnectFakeEM) Scrape(context.Context, []types.ScrapeRequest, func(types.ScrapeUpdate)) []types.ScrapeResult {
 	return nil
 }
-func (m *disconnectFakeEM) Close() error { return nil }
+func (m *disconnectFakeEM) WriteStatus(io.Writer)                   {}
+func (m *disconnectFakeEM) Dials(string) ([]types.DialRecord, bool) { return nil, false }
+func (m *disconnectFakeEM) Close() error                            { return nil }
 
 var _ types.EngineManager = (*disconnectFakeEM)(nil)
 

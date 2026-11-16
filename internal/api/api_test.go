@@ -40,11 +40,15 @@ type fakeEngine struct {
 	ih    string
 	data  []byte
 	files []types.FileInfo
+	// primedFile records the last PrimeFile call.
+	primedFile *int
 }
 
 func (e *fakeEngine) InfoHash() string              { return e.ih }
 func (e *fakeEngine) Ready(_ context.Context) error { return nil }
 func (e *fakeEngine) Files() []types.FileInfo       { return e.files }
+func (e *fakeEngine) Peers() []types.PeerConn       { return nil }
+func (e *fakeEngine) PrimeFile(idx int)             { e.primedFile = &idx }
 func (e *fakeEngine) GuessFileIdx() int {
 	if len(e.files) > 0 {
 		return 0
@@ -133,6 +137,13 @@ func (m *fakeEM) AllStats() map[string]*types.Stats {
 		out[ih] = e.Stats(-1)
 	}
 	return out
+}
+func (m *fakeEM) WriteStatus(w io.Writer) { _, _ = io.WriteString(w, "status") }
+func (m *fakeEM) Dials(ih string) ([]types.DialRecord, bool) {
+	if _, ok := m.m[ih]; !ok {
+		return nil, false
+	}
+	return []types.DialRecord{{Address: "1.2.3.4:5", Outgoing: true, Result: types.DialRefused}}, true
 }
 func (m *fakeEM) Scrape(_ context.Context, reqs []types.ScrapeRequest, onUpdate func(types.ScrapeUpdate)) []types.ScrapeResult {
 	m.scrapeReqs = reqs

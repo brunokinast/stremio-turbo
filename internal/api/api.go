@@ -708,6 +708,22 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleAllStats(w, r)
 	case "scrape":
 		s.handleScrape(w, r)
+	case "debug":
+		if r.URL.Path == "/debug/status" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			s.em.WriteStatus(w)
+			return
+		}
+		if ih, ok := strings.CutPrefix(r.URL.Path, "/debug/dials/"); ok && isInfoHash(ih) {
+			dials, known := s.em.Dials(strings.ToLower(ih))
+			if !known {
+				writeJSON(w, http.StatusNotFound, []types.DialRecord{})
+				return
+			}
+			writeJSON(w, http.StatusOK, dials)
+			return
+		}
+		http.NotFound(w, r)
 	case "network-info":
 		s.handleNetworkInfo(w, r)
 	case "device-info":
@@ -1139,7 +1155,11 @@ type createBody struct {
 	Torrent         json.RawMessage `json:"torrent"`
 	FileMustInclude []string        `json:"fileMustInclude"`
 	GuessFileIdx    json.RawMessage `json:"guessFileIdx"`
-	PeerSearch      *struct {
+	// FileIdx names the file that will be played (e.g. a client preloading a
+	// season pack's episode), so its boundary pieces are primed rather than
+	// the largest file's. Optional; a fork extension.
+	FileIdx    *int `json:"fileIdx"`
+	PeerSearch *struct {
 		Sources []string `json:"sources"`
 	} `json:"peerSearch"`
 }
@@ -1160,6 +1180,9 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request, ih string)
 	if err != nil {
 		writeEngineErr(w, err)
 		return
+	}
+	if body.FileIdx != nil {
+		eng.PrimeFile(*body.FileIdx)
 	}
 	ctx, cancel := withTimeout(r, s.cfg.CreateMetadataWait)
 	defer cancel()
@@ -1182,6 +1205,9 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request, ih string)
 				if re.MatchString(f.Name) {
 					gi := i
 					stats.GuessedFileIdx = &gi
+					if body.FileIdx == nil {
+						eng.PrimeFile(gi) // the matched file, not the largest
+					}
 					break match
 				}
 			}
@@ -1290,40 +1316,20 @@ func (s *server) handleAllStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handlePeers serves GET /:infoHash/peers — a JSON array of connected peers.
-// Peer data is sourced from Stats.Wires (already available on the types.Engine
-// interface) so we don't need to reach into the concrete engine internals.
+// handlePeers serves GET /:infoHash/peers — a JSON array of the torrent's live
+// peer connections (address, transport, direction, source, client, metadata
+// and data received), for diagnosing swarms that connect but don't deliver.
 func (s *server) handlePeers(w http.ResponseWriter, r *http.Request, ih string) {
 	eng, ok := s.em.GetEngine(ih)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, []any{})
 		return
 	}
-	st := eng.Stats(-1)
-	if st == nil {
-		writeJSON(w, http.StatusOK, []any{})
-		return
+	peers := eng.Peers()
+	if peers == nil {
+		peers = []types.PeerConn{} // always a JSON array
 	}
-	type peerInfo struct {
-		Addr      string  `json:"addr"`
-		AmInt     bool    `json:"amInterested"`
-		IsSeeder  bool    `json:"isSeeder"`
-		DownSpeed float64 `json:"downloadSpeed"`
-		UpSpeed   float64 `json:"uploadSpeed"`
-		Requests  int     `json:"requests"`
-	}
-	out := make([]peerInfo, 0, len(st.Wires))
-	for _, wire := range st.Wires {
-		out = append(out, peerInfo{
-			Addr:      wire.Address,
-			AmInt:     wire.AmInterested,
-			IsSeeder:  wire.IsSeeder,
-			DownSpeed: wire.DownSpeed,
-			UpSpeed:   wire.UpSpeed,
-			Requests:  wire.Requests,
-		})
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, peers)
 }
 
 // handleStreamSubtitles serves GET /:infoHash/:fileIdx/subtitles.vtt.

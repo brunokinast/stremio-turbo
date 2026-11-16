@@ -9533,7 +9533,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Connected peers (currently always empty because Stats.wires is never populated)",
+            "description": "Live peer connections: address, transport, direction, how the peer was found, client, metadata and data received",
             "content": {
               "application/json": {
                 "schema": {
@@ -10092,6 +10092,78 @@
           }
         }
       }
+    },
+    "/debug/status": {
+      "get": {
+        "operationId": "getDebugStatus",
+        "summary": "BitTorrent client diagnostic status",
+        "tags": [
+          "Stats"
+        ],
+        "description": "The torrent library's human-readable status dump: DHT servers, every torrent, its peer connections (choke/interest flags, requests, rates) and piece states. For diagnosing swarms that connect but don't deliver.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Plain-text status",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/dials/{infoHash}": {
+      "get": {
+        "operationId": "getDebugDials",
+        "summary": "Connection log of a torrent",
+        "tags": [
+          "Stats"
+        ],
+        "description": "Every outgoing connection attempt (with its outcome and duration) and every accepted incoming connection, oldest first, capped at the latest 2000. For diagnosing peer acquisition.",
+        "parameters": [
+          {
+            "name": "infoHash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DialRecord"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown torrent (empty array)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DialRecord"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -10568,6 +10640,11 @@
                 "description": "`tracker:<url>` entries add trackers; `dht:` entries are ignored"
               }
             }
+          },
+          "fileIdx": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Index of the file that will be played (e.g. one episode of a season pack). Its first and last pieces are prioritized instead of the largest file's. A fileMustInclude match does the same when fileIdx is absent."
           }
         }
       },
@@ -11736,34 +11813,61 @@
       },
       "PeerInfo": {
         "type": "object",
+        "required": [
+          "address",
+          "network",
+          "outgoing",
+          "source",
+          "client",
+          "extended",
+          "metadataChunks",
+          "downloaded",
+          "downloadSpeed",
+          "pieces"
+        ],
         "properties": {
-          "addr": {
+          "address": {
             "type": "string"
           },
-          "amInterested": {
-            "type": "boolean"
+          "network": {
+            "type": "string",
+            "description": "Transport, e.g. tcp4, tcp6, utp4, utp6."
           },
-          "isSeeder": {
-            "type": "boolean"
+          "outgoing": {
+            "type": "boolean",
+            "description": "True when we dialled the peer."
+          },
+          "source": {
+            "type": "string",
+            "description": "How the peer was found (anacrolix code: Hg DHT, Tr tracker, X PEX, I incoming)."
+          },
+          "client": {
+            "type": "string"
+          },
+          "extended": {
+            "type": "boolean",
+            "description": "Supports the extension protocol (needed to fetch metadata)."
+          },
+          "metadataChunks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "downloaded": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Useful piece bytes received."
           },
           "downloadSpeed": {
-            "type": "number"
+            "type": "number",
+            "minimum": 0,
+            "description": "Bytes per second."
           },
-          "uploadSpeed": {
-            "type": "number"
-          },
-          "requests": {
-            "type": "integer"
+          "pieces": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pieces the peer has."
           }
-        },
-        "required": [
-          "addr",
-          "amInterested",
-          "isSeeder",
-          "downloadSpeed",
-          "uploadSpeed",
-          "requests"
-        ]
+        }
       },
       "PeerSearch": {
         "type": "object",
@@ -12916,6 +13020,55 @@
             }
           }
         ]
+      },
+      "DialRecord": {
+        "type": "object",
+        "required": [
+          "address",
+          "source",
+          "network",
+          "outgoing",
+          "startedMs",
+          "durationMs",
+          "result"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "How the peer was found (anacrolix code: Hg DHT, Tr tracker, X PEX, I incoming)."
+          },
+          "network": {
+            "type": "string",
+            "description": "Transport that connected (tcp4, utp6, ...); empty for a failed attempt."
+          },
+          "outgoing": {
+            "type": "boolean"
+          },
+          "startedMs": {
+            "type": "integer",
+            "description": "Milliseconds since the torrent was added."
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "refused",
+              "timeout",
+              "handshake",
+              "other"
+            ]
+          },
+          "error": {
+            "type": "string"
+          }
+        }
       }
     }
   }

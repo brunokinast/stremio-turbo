@@ -116,7 +116,7 @@ func TestHandlerPeers_KnownEngine(t *testing.T) {
 		t.Errorf("status = %d; want 200", rec.Code)
 	}
 	arr := decodeJSONArray(t, rec.Body.Bytes())
-	// fakeEngine.Stats returns Wires: []Wire{} → empty peer list
+	// fakeEngine.Peers returns nil → still a JSON array
 	if arr == nil {
 		t.Error("peers response must not be nil")
 	}
@@ -1125,4 +1125,38 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestHandlerCreate_PrimesNamedFile(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int // -1: PrimeFile not called
+	}{
+		{"no hint", `{}`, -1},
+		{"explicit fileIdx", `{"fileIdx":1}`, 1},
+		{"fileMustInclude match", `{"fileMustInclude":["S06E02"]}`, 1},
+		{"explicit fileIdx wins over a match", `{"fileIdx":0,"fileMustInclude":["S06E02"]}`, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			eng := testEngine()
+			eng.files = []types.FileInfo{
+				{Name: "Show.S06E01.mkv", Path: "Show.S06E01.mkv", Length: 16},
+				{Name: "Show.S06E02.mkv", Path: "Show.S06E02.mkv", Length: 16, Offset: 16},
+			}
+			h := newHandler(t, eng)
+			rec := serve(t, h, http.MethodPost, "/"+testIH+"/create", strings.NewReader(c.body))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d; body %s", rec.Code, rec.Body)
+			}
+			got := -1
+			if eng.primedFile != nil {
+				got = *eng.primedFile
+			}
+			if got != c.want {
+				t.Errorf("primed file = %d; want %d", got, c.want)
+			}
+		})
+	}
 }

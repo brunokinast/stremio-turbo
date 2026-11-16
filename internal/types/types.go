@@ -311,6 +311,61 @@ type Engine interface {
 	// GuessFileIdx returns the index of the most likely playable file
 	// (largest video file), or -1 when none.
 	GuessFileIdx() int
+	// PrimeFile names the file that will be played, so its boundary (head and
+	// tail) pieces are prioritized instead of the largest file's (POST
+	// /:infoHash/create with fileIdx, or a fileMustInclude match).
+	PrimeFile(idx int)
+	// Peers lists the torrent's live peer connections (GET /:infoHash/peers).
+	Peers() []PeerConn
+}
+
+// DialRecord is one entry of a torrent's connection log (GET
+// /debug/dials/:infoHash).
+type DialRecord struct {
+	Address string `json:"address"`
+	// Source is how the peer was found (anacrolix code, e.g. "Hg" DHT, "Tr"
+	// tracker, "X" PEX, "I" incoming).
+	Source string `json:"source"`
+	// Network is the transport that connected (e.g. "tcp4", "utp6"); empty
+	// for a failed attempt.
+	Network  string `json:"network"`
+	Outgoing bool   `json:"outgoing"`
+	// StartedMs is when the attempt started, in ms since the torrent was added.
+	StartedMs  int64  `json:"startedMs"`
+	DurationMs int64  `json:"durationMs"`
+	Result     string `json:"result"` // DialConnected, DialRefused, DialTimeout, DialHandshake or DialOther
+	Error      string `json:"error,omitempty"`
+}
+
+// DialRecord results.
+const (
+	DialConnected = "connected"
+	DialRefused   = "refused"
+	DialTimeout   = "timeout"
+	DialHandshake = "handshake"
+	DialOther     = "other"
+)
+
+// PeerConn describes one live peer connection, for diagnosing why a swarm
+// does or doesn't deliver (e.g. connected peers that never send metadata).
+type PeerConn struct {
+	Address string `json:"address"`
+	// Network is the transport, e.g. "tcp4", "tcp6", "utp4", "utp6".
+	Network string `json:"network"`
+	// Outgoing is true when we dialled the peer, false when it connected to us.
+	Outgoing bool `json:"outgoing"`
+	// Source is how the peer was found (anacrolix peer source code, e.g. "Hg"
+	// DHT, "Tr" tracker, "X" PEX, "I" incoming).
+	Source string `json:"source"`
+	Client string `json:"client"`
+	// Extended is whether the peer supports the extension protocol, needed
+	// to fetch metadata from it.
+	Extended       bool    `json:"extended"`
+	MetadataChunks int64   `json:"metadataChunks"`
+	Downloaded     int64   `json:"downloaded"`
+	DownloadSpeed  float64 `json:"downloadSpeed"`
+	// Pieces the peer has (0 until it tells us).
+	Pieces int `json:"pieces"`
 }
 
 // EngineManager owns the anacrolix client and the set of live engines.
@@ -330,6 +385,13 @@ type EngineManager interface {
 	// time a source improves them, serialized; it is not called after Scrape
 	// returns. Results are in request order, one per request.
 	Scrape(ctx context.Context, reqs []ScrapeRequest, onUpdate func(ScrapeUpdate)) []ScrapeResult
+	// WriteStatus writes the BitTorrent client's human-readable diagnostic
+	// status (every torrent, peer connection and piece state) to w.
+	WriteStatus(w io.Writer)
+	// Dials returns a torrent's connection log (outgoing attempts and their
+	// outcome, accepted incoming connections), oldest first; false when the
+	// torrent is unknown.
+	Dials(infoHash string) ([]DialRecord, bool)
 	Close() error
 }
 

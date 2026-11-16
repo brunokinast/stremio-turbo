@@ -140,7 +140,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		WebUI:               getenv(lookup, "WEB_UI_LOCATION", "https://web.stremio.com/"),
 		PublicURL:           publicURL,
 		Version:             version,
-		TrackersMax:         envInt(lookup, "RIVULET_TRACKERS_MAX", 5),
+		TrackersMax:         envInt(lookup, "RIVULET_TRACKERS_MAX", 25),
 		ProxyPassword:       getenv(lookup, "RIVULET_PROXY_PASSWORD", ""),
 		ProxySecret:         proxySecretVal,
 		ProxyIPACL:          getenv(lookup, "RIVULET_PROXY_IP_ACL", ""),

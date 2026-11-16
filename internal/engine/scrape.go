@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anacrolix/dht/v2/krpc"
 	"github.com/anacrolix/torrent/tracker"
 	trHttp "github.com/anacrolix/torrent/tracker/http"
 	"github.com/anacrolix/torrent/types/infohash"
@@ -102,6 +103,7 @@ func (m *manager) Scrape(ctx context.Context, reqs []types.ScrapeRequest, onUpda
 		tracker:       m.trackerScrapeFunc(),
 		dht:           m.dhtScrapeFunc(),
 		live:          m.liveSwarm,
+		hints:         m.addPeerHints,
 	}
 	return scrapeAll(ctx, reqs, src, &m.scrapes, time.Now(), onUpdate)
 }
@@ -171,13 +173,14 @@ func scrapeHTTPOpts(proxyURL string) trHttp.NewClientOpts {
 	return opts
 }
 
-// scrapeSources are the ways a scrape learns swarm sizes. dht and live may be
-// nil (disabled).
+// scrapeSources are the ways a scrape learns swarm sizes, plus where peer
+// addresses it comes across go. dht, live and hints may be nil.
 type scrapeSources struct {
 	extraTrackers []string
 	tracker       scrapeFunc
 	dht           dhtScrapeFunc
 	live          liveSwarmFunc
+	hints         func(ih string, addrs []krpc.NodeAddr)
 }
 
 // scrapeAgg folds every source's answers into one result per torrent and
@@ -267,7 +270,7 @@ func scrapeAll(ctx context.Context, reqs []types.ScrapeRequest, src scrapeSource
 	}()
 	go func() {
 		defer wg.Done()
-		runDHTScrapes(ctx, toScrape, agg, src.dht)
+		runDHTScrapes(ctx, toScrape, agg, src.dht, src.hints)
 	}()
 	wg.Wait()
 
@@ -344,7 +347,7 @@ func runScrapes(ctx context.Context, trackerOrder []string, byTracker map[string
 
 // runDHTScrapes runs a DHT scrape per torrent, at most dhtScrapeConcurrency at
 // a time and in the given order, so the caller's first torrents settle first.
-func runDHTScrapes(ctx context.Context, ihs []string, agg *scrapeAgg, scrape dhtScrapeFunc) {
+func runDHTScrapes(ctx context.Context, ihs []string, agg *scrapeAgg, scrape dhtScrapeFunc, hints func(ih string, addrs []krpc.NodeAddr)) {
 	if scrape == nil {
 		return
 	}
@@ -374,6 +377,10 @@ func runDHTScrapes(ctx context.Context, ihs []string, agg *scrapeAgg, scrape dht
 					s, l := raise(&r.Seeders, seeds), raise(&r.Leechers, peers)
 					return first || s || l
 				})
+			}, func(addrs []krpc.NodeAddr) {
+				if hints != nil {
+					hints(ih, addrs)
+				}
 			})
 		}(ih)
 	}

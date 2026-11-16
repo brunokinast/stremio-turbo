@@ -102,3 +102,28 @@ func TestHandlerScrape_Stream(t *testing.T) {
 		t.Errorf("last line = %q", lines[1])
 	}
 }
+
+func TestHandlerDebugStatus(t *testing.T) {
+	h := newHandler(t)
+	rec := serve(t, h, http.MethodGet, "/debug/status", nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "status" {
+		t.Errorf("status = %d, body %q; want 200 with the client status", rec.Code, rec.Body)
+	}
+	if rec := serve(t, h, http.MethodGet, "/debug/other", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("/debug/other = %d; want 404", rec.Code)
+	}
+}
+
+func TestHandlerDebugDials(t *testing.T) {
+	h := newHandler(t, testEngine())
+	rec := serve(t, h, http.MethodGet, "/debug/dials/"+strings.ToUpper(testIH), nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"result":"refused"`) {
+		t.Errorf("known: status %d body %s", rec.Code, rec.Body)
+	}
+	if rec := serve(t, h, http.MethodGet, "/debug/dials/00112233445566778899aabbccddeeff00112233", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown torrent = %d; want 404", rec.Code)
+	}
+	if rec := serve(t, h, http.MethodGet, "/debug/dials/nothex", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("bad hash = %d; want 404", rec.Code)
+	}
+}

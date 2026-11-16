@@ -6,6 +6,7 @@ package engine
 
 import (
 	"context"
+	"io"
 	"math"
 	"sync"
 	"time"
@@ -17,9 +18,10 @@ import (
 )
 
 // dhtScrapeFunc estimates one torrent's swarm from the DHT, calling report
-// with the (seeds, peers) estimate each time it grows, until ctx ends or the
-// traversal is exhausted. Swappable in tests.
-type dhtScrapeFunc func(ctx context.Context, ih infohash.T, report func(seeds, peers int))
+// with the (seeds, peers) estimate each time it grows and found with the peer
+// addresses storing nodes return, until ctx ends or the traversal is
+// exhausted. Swappable in tests.
+type dhtScrapeFunc func(ctx context.Context, ih infohash.T, report func(seeds, peers int), found func([]krpc.NodeAddr))
 
 // liveSwarmFunc reports an open engine's connected seeders and other peers;
 // ok is false when the torrent is not open.
@@ -37,17 +39,18 @@ func (m *manager) dhtScrapeFunc() dhtScrapeFunc {
 	if len(servers) == 0 {
 		return nil
 	}
-	return func(ctx context.Context, ih infohash.T, report func(seeds, peers int)) {
-		dhtScrape(ctx, servers, ih, report)
+	return func(ctx context.Context, ih infohash.T, report func(seeds, peers int), found func([]krpc.NodeAddr)) {
+		dhtScrape(ctx, servers, ih, report, found)
 	}
 }
 
 // dhtScrape walks the DHT toward ih on every server, without announcing, and
-// unions the seed and peer bloom filters (BEP 33) that storing nodes return.
+// unions the seed and peer bloom filters (BEP 33) that storing nodes return,
+// passing on the peer addresses they list too.
 // Each node only knows the peers that announced to it, so the union of all
 // filters estimates the whole DHT-visible swarm far better than any single
 // node's filter does.
-func dhtScrape(ctx context.Context, servers []*dht.Server, ih infohash.T, report func(seeds, peers int)) {
+func dhtScrape(ctx context.Context, servers []*dht.Server, ih infohash.T, report func(seeds, peers int), found func([]krpc.NodeAddr)) {
 	var (
 		mu                   sync.Mutex
 		seeds, peers         krpc.ScrapeBloomFilter
@@ -77,6 +80,9 @@ func dhtScrape(ctx context.Context, servers []*dht.Server, ih infohash.T, report
 				case pv, ok := <-a.Peers:
 					if !ok {
 						return
+					}
+					if len(pv.Peers) > 0 {
+						found(pv.Peers)
 					}
 					if pv.BFsd == nil && pv.BFpe == nil {
 						continue
@@ -119,6 +125,11 @@ func bloomCount(f *krpc.ScrapeBloomFilter) int {
 		return 0
 	}
 	return int(math.Round(f.EstimateCount()))
+}
+
+// WriteStatus implements types.EngineManager with anacrolix's own status dump.
+func (m *manager) WriteStatus(w io.Writer) {
+	m.client.WriteStatus(w)
 }
 
 // liveSwarm implements liveSwarmFunc from the engine's torrent stats.

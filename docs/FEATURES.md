@@ -18,6 +18,10 @@ The complete feature list, with the routes and behaviours behind the summary in 
   scrapes (BEP 33 filters unioned across nodes) and open engines' peers, with
   a 5 min cache. Optionally streamed as NDJSON so a client can show figures as
   each source answers and rank sources by real health before playing.
+- **Peer hints** - peers a DHT scrape finds are kept for 10 minutes and handed
+  to the torrent when it is opened (or straight away if it already is), so
+  playing from a just-scraped stream list starts with known peers instead of
+  a cold lookup.
 - **HLSv2 transcoding** - on-demand ffmpeg with multi-platform hardware accel
   (VAAPI / NVENC / QSV / VideoToolbox / V4L2M2M, verified at startup, libx264
   fallback), multi-audio + embedded-subtitle renditions, and seek-aware segments.

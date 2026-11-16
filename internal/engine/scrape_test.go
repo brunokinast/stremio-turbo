@@ -147,9 +147,10 @@ func TestScrapeAll_StreamsAndMergesSources(t *testing.T) {
 	f := &fakeScrape{table: map[string]map[string]scrapeCounts{tr: {ihA: {seeders: 5, leechers: 2}, ihB: {}}}}
 	src := scrapeSources{
 		tracker: f.fn,
-		dht: func(_ context.Context, ih infohash.T, report func(seeds, peers int)) {
+		dht: func(_ context.Context, ih infohash.T, report func(seeds, peers int), found func([]krpc.NodeAddr)) {
 			if ih.HexString() == ihA {
 				report(30, 10)
+				found([]krpc.NodeAddr{{IP: net.IPv4(1, 2, 3, 4), Port: 6881}})
 				report(80, 12)
 			}
 		},
@@ -163,7 +164,13 @@ func TestScrapeAll_StreamsAndMergesSources(t *testing.T) {
 	var (
 		mu      sync.Mutex
 		updates []types.ScrapeUpdate
+		hinted  = map[string][]krpc.NodeAddr{}
 	)
+	src.hints = func(ih string, addrs []krpc.NodeAddr) {
+		mu.Lock()
+		defer mu.Unlock()
+		hinted[ih] = append(hinted[ih], addrs...)
+	}
 	reqs := []types.ScrapeRequest{{InfoHash: ihA, Trackers: []string{tr}}, {InfoHash: ihB, Trackers: []string{tr}}}
 	got := scrapeAll(context.Background(), reqs, src, &scrapeCache{}, time.Now(), func(u types.ScrapeUpdate) {
 		mu.Lock()
@@ -190,6 +197,9 @@ func TestScrapeAll_StreamsAndMergesSources(t *testing.T) {
 	}
 	if last[ihA] != want[0] || last[ihB] != want[1] {
 		t.Errorf("last updates = %+v", last)
+	}
+	if h := hinted[ihA]; len(h) != 1 || h[0].String() != "1.2.3.4:6881" {
+		t.Errorf("peer hints = %v", hinted)
 	}
 }
 
@@ -230,5 +240,41 @@ func TestBloomUnionAndCount(t *testing.T) {
 	// 40 distinct addresses overall, 10 of them in both filters.
 	if n := bloomCount(&u); n < 36 || n > 44 {
 		t.Errorf("union count = %d; want about 40", n)
+	}
+}
+
+func TestPeerHints(t *testing.T) {
+	var h peerHints
+	now := time.Now()
+	a := krpc.NodeAddr{IP: net.IPv4(1, 1, 1, 1), Port: 1}
+	b := krpc.NodeAddr{IP: net.IPv4(2, 2, 2, 2), Port: 2}
+	h.add(ihA, []krpc.NodeAddr{a, b, a, {IP: net.IPv4(3, 3, 3, 3)}}, now) // dup and port 0 dropped
+	if got := h.get(ihA, now); len(got) != 2 {
+		t.Fatalf("hints = %v; want a, b", got)
+	}
+	if got := h.get(ihA, now.Add(peerHintTTL+time.Second)); got != nil {
+		t.Errorf("expired hints = %v", got)
+	}
+
+	many := make([]krpc.NodeAddr, peerHintMax+10)
+	for i := range many {
+		many[i] = krpc.NodeAddr{IP: net.IPv4(10, 0, byte(i/256), byte(i)), Port: 6881}
+	}
+	h.add(ihB, many, now)
+	got := h.get(ihB, now)
+	if len(got) != peerHintMax || got[len(got)-1].String() != many[len(many)-1].String() {
+		t.Errorf("capped hints: len %d, last %v; want %d ending with the newest", len(got), got[len(got)-1], peerHintMax)
+	}
+}
+
+func TestMaxUnverifiedBytes(t *testing.T) {
+	if got := maxUnverifiedBytes(0); got != diskMaxUnverifiedBytes {
+		t.Errorf("disk = %d; want %d", got, diskMaxUnverifiedBytes)
+	}
+	if got := maxUnverifiedBytes(512 << 20); got != 128<<20 {
+		t.Errorf("512 MiB RAM cache = %d; want 128 MiB", got)
+	}
+	if got := maxUnverifiedBytes(16 << 30); got != diskMaxUnverifiedBytes {
+		t.Errorf("16 GiB RAM cache = %d; want the disk cap", got)
 	}
 }

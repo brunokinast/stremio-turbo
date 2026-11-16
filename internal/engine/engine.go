@@ -100,6 +100,18 @@ type engine struct {
 	prefetched       map[int]struct{} // source file idx -> next-file boundary already prefetched (once each)
 	onceMetaPriority sync.Once        // ensures boundary-piece prioritization runs exactly once
 
+	// fileMu serializes the choice of which file's boundary pieces are primed:
+	// the largest-file guess (applyBoundaryPriorities), an explicit PrimeFile,
+	// and a stream selecting its file (ensureDownloading). Without it the guess
+	// could land after a stream picked another file and keep the wrong
+	// episode's head and tail at top priority (two 16 MiB pieces of a 4K
+	// season pack, fetched before the played file's first piece).
+	fileMu sync.Mutex
+	// fileChosen: a stream or caller named the file, so the guess must not prime.
+	fileChosen bool
+	// chosenFile is the file PrimeFile named before metadata arrived (-1: none).
+	chosenFile int
+
 	// boundaryMu serializes explicit piece-priority writes (primeBoundary /
 	// prefetchNext raises vs. releaseBoundary resets) and guards bprio.
 	// Lock order: boundaryMu -> mu. Never held while calling into anacrolix
@@ -146,6 +158,9 @@ func (e *engine) ensureDownloading(idx int) {
 	if idx >= len(files) {
 		return
 	}
+	e.fileMu.Lock()
+	defer e.fileMu.Unlock()
+	e.fileChosen = true
 	e.mu.Lock()
 	if e.selected == nil {
 		e.selected = map[int]struct{}{}
@@ -195,7 +210,8 @@ func (e *engine) ensureDownloading(idx int) {
 
 // manager owns the anacrolix Client and the live engine map, satisfying types.EngineManager.
 type manager struct {
-	maxEngines  int // active-engine cap; <=0 unlimited
+	dials       *dialLog // per-torrent connection log (GET /debug/dials/:infoHash)
+	maxEngines  int      // active-engine cap; <=0 unlimited
 	client      *torrent.Client
 	cfg         types.Config
 	downLimiter *rate.Limiter // shared pointer in cc.DownloadRateLimiter; updated by SetLimitFn
@@ -254,6 +270,8 @@ type manager struct {
 
 	// scrapes caches recent tracker scrape results (see Scrape).
 	scrapes scrapeCache
+	// peerHints holds peers recent scrapes found, for torrents opened later.
+	peerHints peerHints
 }
 
 // Compile-time interface satisfaction checks.
@@ -360,6 +378,12 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	cc.HalfOpenConnsPerTorrent = half
 	cc.TorrentPeersHighWater = high
 
+	cc.MaxUnverifiedBytes = maxUnverifiedBytes(cfg.MemoryCacheSize)
+
+	dials := newDialLog()
+	cc.Callbacks.OutgoingConnResult = append(cc.Callbacks.OutgoingConnResult, dials.onOutgoing)
+	cc.Callbacks.PeerConnAdded = append(cc.Callbacks.PeerConnAdded, dials.onPeerConnAdded)
+
 	// Honor the documented contract: 0 = OS-assigned (random) port. anacrolix's
 	// NewDefaultClientConfig hardcodes 42069, so we must set it unconditionally
 	// or two instances (and the test suite) collide on that port.
@@ -429,6 +453,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	}
 
 	m := &manager{
+		dials:                      dials,
 		client:                     client,
 		cfg:                        cfg,
 		downLimiter:                downLimiter,
@@ -596,9 +621,14 @@ func (m *manager) EnsureEngine(infoHash string, opts types.AddOptions) (types.En
 			lastAccess: time.Now(),
 			optsSource: m.statsOptsSource,
 			mem:        m.mem,
+			chosenFile: -1,
 		}
 		m.engines[ih] = e
 		m.mu.Unlock()
+		m.dials.begin(ih, e.lastAccess)
+
+		// Start from the peers a recent scrape found rather than a cold lookup.
+		m.seedPeerHints(ih, t)
 
 		// Spawn a one-shot goroutine that boosts container-metadata (moov-atom /
 		// codec-init) reads once the torrent info dict is available.
@@ -634,6 +664,7 @@ func (m *manager) GetEngine(infoHash string) (types.Engine, bool) {
 func (m *manager) beginPurge(ih string, e *engine) func() {
 	e.t.Drop()
 	delete(m.engines, ih)
+	m.dials.forget(ih)
 	done := make(chan struct{})
 	m.purging[ih] = done
 	return func() {
@@ -1416,9 +1447,14 @@ func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
 	e.mu.Unlock()
 	e.ensureDownloading(idx) // fetch the file being played; demote abandoned ones
 	e.primeBoundary(idx)     // top-priority the header/moov so playback starts fast
-	e.warmMoov(idx)          // pre-read the tail so the moov downloads with the front
-	e.prefetchNext(idx)      // opportunistically warm the next episode's header (binge UX)
+	if os.Getenv("RIVULET_EXPERIMENT_TAIL") != "high" {
+		e.warmMoov(idx) // pre-read the tail so the moov downloads with the front
+	}
+	e.prefetchNext(idx) // opportunistically warm the next episode's header (binge UX)
 	r := f.NewReader()
+	if os.Getenv("RIVULET_EXPERIMENT_RESPONSIVE") == "1" { // EXPERIMENT (research/findings/02): serve blocks before the piece verifies
+		r.SetResponsive()
+	}
 	r.SetReadahead(e.streamReadahead(cachedSpeed))
 	now := time.Now()
 	// ctx is the reader's long-lived context: it lives for the reader's
@@ -1616,6 +1652,26 @@ const (
 	readaheadAdjustInterval time.Duration = 3 * time.Second  // how often a live reader recomputes its window
 	startupReadTimeout      time.Duration = 90 * time.Second // bound the first read so a dead swarm errors instead of hanging
 )
+
+// diskMaxUnverifiedBytes caps the pieces the client may have partly
+// downloaded at once, across all torrents. anacrolix's 64 MiB default counts
+// each requestable piece's full length, so with 4K releases' 16 MiB pieces
+// only 4 pieces could be wanted client-wide: peers without those exact pieces
+// were not interesting, never unchoked us, and a 45 GB torrent stalled at
+// 20 MB in 3 minutes while qBittorrent pulled 300 MB from the same swarm.
+// On disk, partial pieces cost no RAM, so the cap only needs to keep requests
+// from spreading too thin: 1 GiB is 64 such pieces (several per racing torrent).
+const diskMaxUnverifiedBytes int64 = 1 << 30
+
+// maxUnverifiedBytes returns the client's partial-piece budget. With the in-RAM
+// cache, partial pieces live in that budget, so they get at most a quarter of
+// it (the stream readahead takes half).
+func maxUnverifiedBytes(memoryCacheSize int64) int64 {
+	if memoryCacheSize > 0 {
+		return min(diskMaxUnverifiedBytes, memoryCacheSize/4)
+	}
+	return diskMaxUnverifiedBytes
+}
 
 // readaheadFor returns the streaming readahead window for a measured download
 // speed: ~2 s of throughput, clamped to [minReadahead, maxReadahead].
@@ -1891,6 +1947,29 @@ func (e *engine) nextVideoIdx(idx int) int {
 
 // GuessFileIdx returns the index of the largest video file, falling back to the
 // largest file overall, or -1 if the torrent has no files yet.
+// Peers implements types.Engine.
+func (e *engine) Peers() []types.PeerConn {
+	conns := e.t.PeerConns()
+	out := make([]types.PeerConn, 0, len(conns))
+	for _, pc := range conns {
+		st := pc.Stats()
+		client, _ := pc.PeerClientName.Load().(string)
+		out = append(out, types.PeerConn{
+			Address:        pc.RemoteAddr.String(),
+			Network:        pc.Network,
+			Outgoing:       pc.Discovery != torrent.PeerSourceIncoming,
+			Source:         string(pc.Discovery),
+			Client:         client,
+			Extended:       pc.PeerExtensionBytes.SupportsExtended(),
+			MetadataChunks: st.MetadataChunksRead.Int64(),
+			Downloaded:     st.BytesReadUsefulData.Int64(),
+			DownloadSpeed:  st.DownloadRate,
+			Pieces:         st.RemotePieceCount,
+		})
+	}
+	return out
+}
+
 func (e *engine) GuessFileIdx() int {
 	if !e.hasInfo() {
 		return -1
@@ -2225,12 +2304,54 @@ func applyBoundaryPriorities(e *engine) {
 			return
 		}
 
+		e.fileMu.Lock()
+		defer e.fileMu.Unlock()
+		if e.chosenFile >= 0 {
+			e.primeBoundary(e.chosenFile)
+			return
+		}
+		if e.fileChosen {
+			return // a stream already picked (and primed) its file
+		}
 		idx := e.GuessFileIdx()
 		if idx < 0 {
 			return
 		}
 		e.primeBoundary(idx)
 	})
+}
+
+// PrimeFile implements types.Engine: it names the file that will be played
+// (e.g. a preload that knows it), so its boundary pieces are primed instead of
+// the largest file's. Before metadata it is remembered for
+// applyBoundaryPriorities; after, any guessed file's boundary is released and
+// idx is primed now.
+func (e *engine) PrimeFile(idx int) {
+	if idx < 0 {
+		return
+	}
+	e.fileMu.Lock()
+	defer e.fileMu.Unlock()
+	e.fileChosen = true
+	if !e.hasInfo() {
+		e.chosenFile = idx
+		return
+	}
+	if idx >= len(e.t.Files()) {
+		return
+	}
+	e.mu.Lock()
+	var demote []int
+	for i := range e.primed {
+		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 {
+			demote = append(demote, i)
+			delete(e.primed, i)
+			delete(e.prefetched, i)
+		}
+	}
+	e.mu.Unlock()
+	e.releaseBoundary(demote)
+	e.primeBoundary(idx)
 }
 
 // Boundary priming windows: byte ranges (not fixed piece counts) at the head
@@ -2338,7 +2459,12 @@ func (e *engine) primeBoundary(idx int) {
 		return
 	}
 	headEnd, tailBegin := primeBoundaryRange(begin, end, info.PieceLength, headWindowBytes, tailWindowBytes)
-	e.raiseBoundary([]pieceSpan{{begin, headEnd}, {tailBegin, end}}, torrent.PiecePriorityNow, e.setPiecePriority)
+	if os.Getenv("RIVULET_EXPERIMENT_TAIL") == "high" { // EXPERIMENT (research/findings/02): head before tail
+		e.raiseBoundary([]pieceSpan{{begin, headEnd}}, torrent.PiecePriorityNow, e.setPiecePriority)
+		e.raiseBoundary([]pieceSpan{{tailBegin, end}}, torrent.PiecePriorityHigh, e.setPiecePriority)
+	} else {
+		e.raiseBoundary([]pieceSpan{{begin, headEnd}, {tailBegin, end}}, torrent.PiecePriorityNow, e.setPiecePriority)
+	}
 	logging.For("engine").Debug("boundary-prioritized pieces", "info_hash", e.infoHash, "file_idx", idx,
 		"begin", begin, "end", end,
 		"head_bytes", headWindowBytes, "head_pieces", headEnd-begin,
