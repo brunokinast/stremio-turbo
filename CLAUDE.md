@@ -20,9 +20,16 @@ Personal fork of [Stremio/stremio-web](https://github.com/Stremio/stremio-web) w
 
 ## Workflow
 
+- Discuss and explore first, then write a plan; one part at a time, each with its own plan. For UI choices, present a few options (with previews) rather than picking one.
 - Commit straight to `main` and push to `origin` (brunokinast/stremio-web) once a change works. Never push to Stremio's repositories or force-push.
 - Before committing: `pnpm run lint` and `pnpm run build` pass, and the change has been tried in the real app.
 - Pull upstream with `git fetch upstream && git merge upstream/development`.
+
+## Testing
+
+- The user watches **4K HDR**: test and judge playback changes against 4K HDR sources, not 1080p. Healthy lower qualities prove little.
+- Test playback **muted**, and **stop it** (pause and leave the player) as soon as the test is done, so it doesn't disturb the user.
+- Restarting Stremio for testing (e.g. to install a new Rivulet build) is fine; no need to ask.
 
 ## The user's Stremio setup
 

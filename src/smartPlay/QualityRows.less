@@ -1,0 +1,224 @@
+@import (reference) '~stremio/routes/Details/variables.less';
+
+@healthy: #22c55e;
+@weak: #f59e0b;
+
+.quality-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+.tier {
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--border-radius);
+    background-color: var(--overlay-color);
+}
+
+.row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+}
+
+.play {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.875rem 1.125rem;
+    border-radius: var(--border-radius);
+    transition: background-color 0.15s @ease;
+
+    &:hover,
+    &:focus-visible {
+        .play-icon {
+            background-color: var(--secondary-accent-color);
+            color: #ffffff;
+        }
+    }
+
+    &:hover,
+    &:focus-visible {
+        background-color: @overlay-hover;
+    }
+}
+
+// Same round play button as the stream cards.
+.play-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin-left: auto;
+    border-radius: 50%;
+    background-color: var(--overlay-color);
+    color: var(--primary-foreground-color);
+    transition: background-color 0.15s @ease;
+
+    .icon {
+        width: 1rem;
+        height: 1rem;
+    }
+}
+
+.label {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--primary-foreground-color);
+    white-space: nowrap;
+}
+
+.flag {
+    height: 1.25rem;
+    padding: 0 0.375rem;
+    border-radius: 4px;
+    background-color: var(--tertiary-accent-color);
+    font-size: 0.65625rem;
+    font-weight: 800;
+    line-height: 1.25rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--secondary-foreground-color);
+}
+
+.seeders {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: @text-secondary;
+    white-space: nowrap;
+}
+
+// Live count inside a source card's description line.
+.inline-seeders {
+    display: inline-flex;
+    vertical-align: middle;
+
+    .seeders {
+        gap: 0.375rem;
+        font-size: inherit;
+        color: inherit;
+    }
+}
+
+.dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background-color: @healthy;
+
+    &.weak {
+        background-color: @weak;
+    }
+
+    &.unknown {
+        background-color: @text-tertiary;
+    }
+}
+
+// Counts still coming in.
+.checking {
+    animation: checking 1.2s ease-in-out infinite;
+}
+
+@keyframes checking {
+    50% {
+        opacity: 0.3;
+    }
+}
+
+// Watch progress, on its own line under the label (as on stream cards).
+.progress {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    max-width: 10rem;
+    margin: -0.375rem 1.125rem 0.75rem;
+}
+
+.expand {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-right: 0.375rem;
+    border-radius: 50%;
+    color: var(--primary-foreground-color);
+
+    &:hover,
+    &:focus-visible {
+        background-color: @overlay-hover;
+    }
+
+    .icon {
+        width: 1rem;
+        height: 1rem;
+        transition: transform 0.15s @ease;
+
+        &.open {
+            transform: rotate(180deg);
+        }
+    }
+}
+
+.sources {
+    display: flex;
+    flex-direction: column;
+    padding: 0 0.25rem 0.375rem;
+}
+
+.racing {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1.125rem;
+    border-radius: var(--border-radius);
+    background-color: var(--overlay-color);
+}
+
+.racing-label {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--primary-foreground-color);
+}
+
+.racing-warning {
+    font-size: 0.875rem;
+    color: @weak;
+}
+
+.racing-line {
+    height: 2px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, transparent, var(--secondary-accent-color), transparent);
+    background-size: 50% 100%;
+    background-repeat: no-repeat;
+    animation: racing 1.2s linear infinite;
+}
+
+.racing-cancel {
+    align-self: flex-start;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    background-color: @overlay-hover;
+    font-weight: 600;
+    color: var(--primary-foreground-color);
+
+    &:hover,
+    &:focus-visible {
+        background-color: @overlay-strong;
+    }
+}
+
+@keyframes racing {
+    from {
+        background-position: -50% 0;
+    }
+
+    to {
+        background-position: 150% 0;
+    }
+}

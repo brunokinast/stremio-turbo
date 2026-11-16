@@ -7,6 +7,7 @@ import type { PrimaryAction } from './Actions';
 import useStreamPlay from './Streams/useStreamPlay';
 import useEpisodeNavigation from './useEpisodeNavigation';
 import { getEpisodeLabel, getMinutesLeft } from './format';
+import { hasRememberedQuality, offersRememberedQuality, requestAutoplay } from 'stremio/smartPlay';
 
 type ContinueWatchingPreview = {
     items: { _id: string, state: { videoId: string | null }, deepLinks: LibraryItemDeepLinks }[],
@@ -32,6 +33,10 @@ const usePrimaryAction = (metaItem: MetaItemMetaDetails | null, video: Video | n
     }, [video, streams]);
     const { href, target, download, play } = useStreamPlay(lastUsed, { videoId: video?.id, videoReleased: video?.released, canMarkWatched });
     const { openEpisode } = useEpisodeNavigation();
+    // Smart play: resume with the show's remembered quality when offered.
+    const smartResume = profile.settings.playerType === null && metaItem !== null && (
+        video !== null ? offersRememberedQuality(metaItem.id, video.id, streams) : hasRememberedQuality(metaItem.id)
+    );
 
     return useMemo(() => {
         if (metaItem === null) {
@@ -40,8 +45,17 @@ const usePrimaryAction = (metaItem: MetaItemMetaDetails | null, video: Video | n
 
         if (video !== null) {
             const minutes = getMinutesLeft(libraryItem, video.id);
-            if (minutes === null || href === null) {
+            if (minutes === null || (href === null && !smartResume)) {
                 return null;
+            }
+
+            if (smartResume) {
+                return {
+                    label: t('LIBRARY_RESUME'),
+                    sublabel: t('CONTINUE_WATCHING_TIME_LEFT', { minutes }),
+                    href: null,
+                    onClick: () => requestAutoplay(metaItem.id, video.id),
+                };
             }
 
             return {
@@ -64,10 +78,16 @@ const usePrimaryAction = (metaItem: MetaItemMetaDetails | null, video: Video | n
         return {
             label: episode !== null ? `${t('LIBRARY_RESUME')} ${episode}` : t('LIBRARY_RESUME'),
             sublabel: t('CONTINUE_WATCHING_TIME_LEFT', { minutes }),
-            href: resumeHref,
-            onClick: resumeHref === null ? () => openEpisode(current.deepLinks.metaDetailsStreams) : undefined,
+            href: smartResume ? null : resumeHref,
+            onClick: smartResume ?
+                () => {
+                    requestAutoplay(metaItem.id, current.id);
+                    openEpisode(current.deepLinks.metaDetailsStreams);
+                }
+                :
+                resumeHref === null ? () => openEpisode(current.deepLinks.metaDetailsStreams) : undefined,
         };
-    }, [metaItem, video, libraryItem, href, target, download, play, resumeHref, openEpisode, t]);
+    }, [metaItem, video, libraryItem, href, target, download, play, resumeHref, openEpisode, smartResume, t]);
 };
 
 export default usePrimaryAction;

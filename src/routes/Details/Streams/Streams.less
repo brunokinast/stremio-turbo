@@ -116,6 +116,34 @@
         }
     }
 
+    .all-streams {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1.125rem;
+        border-radius: var(--border-radius);
+        font-size: 0.8125rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: @text-tertiary;
+
+        &:hover,
+        &:focus-visible {
+            color: var(--primary-foreground-color);
+        }
+
+        .all-streams-icon {
+            width: 0.75rem;
+            height: 0.75rem;
+            transition: transform 0.15s @ease;
+
+            &.open {
+                transform: rotate(90deg);
+            }
+        }
+    }
+
     .message {
         display: flex;
         flex-direction: column;

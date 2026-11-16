@@ -225,6 +225,9 @@ const Details = () => {
                             video={video}
                             type={streamPath.type}
                             canMarkWatched={canMarkWatched}
+                            metaId={metaItem?.id ?? id ?? null}
+                            videoId={streamPath.id}
+                            libraryItem={details.libraryItem}
                             onEpisodeSearch={onEpisodeSearch}
                         />
                         :

@@ -34,6 +34,7 @@ const { default: useCastDevice } = require('./useCastDevice');
 const { default: useKeyboardSeek } = require('./useKeyboardSeek');
 const { default: usePlaybackSpeedHold } = require('./usePlaybackSpeedHold');
 const { default: useStatistics } = require('./useStatistics');
+const { requestAutoplay } = require('stremio/smartPlay');
 const useVideo = require('./useVideo');
 const { default: useAudio } = require('./useAudio');
 const { default: useSubtitles } = require('./useSubtitles');
@@ -222,26 +223,27 @@ const Player = () => {
 
     const HOLD_DELAY = 400;
 
-    const handleNextVideoNavigation = React.useCallback((deepLinks, bingeWatching, ended) => {
-        if (ended) {
-            if (bingeWatching) {
-                if (deepLinks.player) {
-                    navigate(toPath(deepLinks.player), { replace: true });
-                } else if (deepLinks.metaDetailsStreams) {
-                    navigate(toPath(deepLinks.metaDetailsStreams), { replace: true });
-                }
-            } else {
-                goBack();
-            }
-
-        } else {
-            if (deepLinks.player) {
-                navigate(toPath(deepLinks.player), { replace: true });
-            } else if (deepLinks.metaDetailsStreams) {
-                navigate(toPath(deepLinks.metaDetailsStreams), { replace: true });
-            }
+    const navigateToNextVideo = React.useCallback((deepLinks) => {
+        // Smart play: with a remembered quality for the show, let the next
+        // episode's streams list pick its healthiest source of that quality.
+        const metaId = player.metaItem?.type === 'Ready' ? player.metaItem.content.id : null;
+        const nextVideoId = player.nextVideo?.id ?? null;
+        if (deepLinks.metaDetailsStreams && metaId !== null && nextVideoId !== null && requestAutoplay(metaId, nextVideoId)) {
+            navigate(toPath(deepLinks.metaDetailsStreams), { replace: true });
+        } else if (deepLinks.player) {
+            navigate(toPath(deepLinks.player), { replace: true });
+        } else if (deepLinks.metaDetailsStreams) {
+            navigate(toPath(deepLinks.metaDetailsStreams), { replace: true });
         }
-    }, [navigate, goBack]);
+    }, [player.metaItem, player.nextVideo, navigate]);
+
+    const handleNextVideoNavigation = React.useCallback((deepLinks, bingeWatching, ended) => {
+        if (ended && !bingeWatching) {
+            goBack();
+        } else {
+            navigateToNextVideo(deepLinks);
+        }
+    }, [navigateToNextVideo, goBack]);
 
     const onEnded = React.useCallback(() => {
         ended();

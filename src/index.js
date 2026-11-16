@@ -26,6 +26,8 @@ const { name: os } = require('./common/Platform/device');
 const translations = Object.fromEntries(Object.entries(stremioTranslations()).map(([key, value]) => [key, {
     translation: value
 }]));
+// The fork's own strings (English only).
+Object.assign(translations['en-US'].translation, require('./smartPlay/i18n.en.json'));
 
 i18n
     .use(initReactI18next)

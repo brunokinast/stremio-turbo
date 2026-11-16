@@ -16,6 +16,7 @@ import Message from '../Message';
 import EpisodePicker from '../EpisodePicker';
 import Stream from './Stream';
 import useStreamsByAddon from './useStreamsByAddon';
+import { QualityRows, useSmartPlay } from 'stremio/smartPlay';
 import styles from './Streams.less';
 
 type Props = {
@@ -24,18 +25,31 @@ type Props = {
     type: string,
     canMarkWatched: boolean,
     title?: string,
+    metaId?: string | null,
+    videoId?: string | null,
+    libraryItem?: LibraryItem | null,
     onBack?: () => void,
     onEpisodeSearch?: (season: number, episode: number) => void,
 };
 
 const ALL_ADDONS_KEY = 'ALL';
 
-const Streams = ({ streams, video, type, canMarkWatched, title, onBack, onEpisodeSearch }: Props) => {
+const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, videoId = null, libraryItem = null, onBack, onEpisodeSearch }: Props) => {
     const { t } = useTranslation();
     const profile = useProfile();
     const goBack = useGoBack();
     const { openVideos } = useEpisodeNavigation();
     const { groups, loadingCount, total } = useStreamsByAddon(streams);
+    const smartPlay = useSmartPlay({
+        groups,
+        streamsLoading: loadingCount > 0,
+        metaId,
+        videoId,
+        libraryItem,
+        enabled: profile.settings.playerType === null,
+    });
+    const hasQualities = smartPlay.tiers.length > 0;
+    const [allStreamsOpen, setAllStreamsOpen] = useState(false);
     const [selectedAddon, setSelectedAddon] = useState(ALL_ADDONS_KEY);
     const effectiveSelectedAddon = groups.some(({ addon }) => addon.transportUrl === selectedAddon) ? selectedAddon : ALL_ADDONS_KEY;
 
@@ -158,7 +172,33 @@ const Streams = ({ streams, video, type, canMarkWatched, title, onBack, onEpisod
                             :
                             <div ref={groupsRef} className={styles['groups']}>
                                 {
-                                    visibleGroups.map(({ addon, streams }) => (
+                                    hasQualities ?
+                                        <React.Fragment>
+                                            <QualityRows
+                                                tiers={smartPlay.tiers}
+                                                settled={smartPlay.settled}
+                                                remembered={smartPlay.remembered}
+                                                racing={smartPlay.racing}
+                                                videoId={video?.id}
+                                                videoReleased={video?.released}
+                                                canMarkWatched={canMarkWatched}
+                                                onPlay={smartPlay.play}
+                                                onCancel={smartPlay.cancel}
+                                            />
+                                            <Button
+                                                className={styles['all-streams']}
+                                                aria-expanded={allStreamsOpen}
+                                                onClick={() => setAllStreamsOpen(!allStreamsOpen)}
+                                            >
+                                                <Icon className={classNames(styles['all-streams-icon'], { [styles['open']]: allStreamsOpen })} name={'caret-right'} />
+                                                {t('SMART_PLAY_ALL_STREAMS', { count: total })}
+                                            </Button>
+                                        </React.Fragment>
+                                        :
+                                        null
+                                }
+                                {
+                                    (hasQualities && !allStreamsOpen ? [] : visibleGroups).map(({ addon, streams }) => (
                                         <section key={addon.transportUrl} className={styles['group']} aria-label={addon.manifest.name}>
                                             {
                                                 effectiveSelectedAddon === ALL_ADDONS_KEY ?

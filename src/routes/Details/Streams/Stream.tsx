@@ -22,6 +22,8 @@ type Props = {
     canMarkWatched?: boolean,
     card?: boolean,
     onPlay?: (stream: Stream) => void,
+    // Renders the description's content (fork: smart play's live seeders).
+    renderDescription?: (description: string) => React.ReactNode,
 };
 
 type LabelProps = React.ComponentProps<typeof Button> & {
@@ -38,7 +40,7 @@ const COPY_MESSAGES: Record<CopyKind, { success: string, error: string }> = {
 
 const renderThumbnailFallback = () => <Icon className={styles['thumbnail-fallback']} name={'ic_broken_link'} />;
 
-const Stream = ({ className, stream, addonName, videoId, videoReleased, canMarkWatched, card, onPlay }: Props) => {
+const Stream = ({ className, stream, addonName, videoId, videoReleased, canMarkWatched, card, onPlay, renderDescription }: Props) => {
     const { t } = useTranslation();
     const toast = useToast();
     const { open, closeMenu, labelProps, menuProps } = useRowMenu();
@@ -114,7 +116,7 @@ const Stream = ({ className, stream, addonName, videoId, videoReleased, canMarkW
                 </div>
                 {
                     stream.description ?
-                        <div className={styles['description']} title={stream.description}>{stream.description}</div>
+                        <div className={styles['description']} title={stream.description}>{renderDescription ? renderDescription(stream.description) : stream.description}</div>
                         :
                         null
                 }
@@ -130,7 +132,7 @@ const Stream = ({ className, stream, addonName, videoId, videoReleased, canMarkW
             </div>
             {children}
         </Button>
-    ), [lastUsed, card, addonName, href, target, download, onClick, thumbnail, name, stream.description, progress, external, t]);
+    ), [lastUsed, card, addonName, href, target, download, onClick, thumbnail, name, stream.description, renderDescription, progress, external, t]);
 
     const renderMenu = useCallback(() => (
         <div className={styles['menu']} {...menuProps}>

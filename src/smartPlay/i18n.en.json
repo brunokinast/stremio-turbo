@@ -1,0 +1,14 @@
+{
+    "SMART_PLAY_SEEDERS_one": "{{count}} seeder",
+    "SMART_PLAY_SEEDERS_other": "{{count}} seeders",
+    "SMART_PLAY_CHECKING": "Still counting…",
+    "SMART_PLAY_UNKNOWN": "Seeders unknown",
+    "SMART_PLAY_WEAK_HINT": "Few seeders, may buffer",
+    "SMART_PLAY_LAST_PLAYED": "Last played",
+    "SMART_PLAY_LAST_PLAYED_HINT": "Resume and the next episode play this quality automatically",
+    "SMART_PLAY_SOURCES": "Show sources",
+    "SMART_PLAY_ALL_STREAMS": "All streams ({{count}})",
+    "SMART_PLAY_FINDING": "Finding the best {{quality}} source…",
+    "SMART_PLAY_WEAK_WARNING": "Few seeders for {{quality}} — playback may buffer",
+    "SMART_PLAY_CANCEL": "Cancel"
+}
