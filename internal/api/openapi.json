@@ -7052,6 +7052,55 @@
         }
       }
     },
+    "/scrape": {
+      "post": {
+        "operationId": "scrapeTorrents",
+        "summary": "Tracker swarm sizes for a batch of torrents",
+        "tags": [
+          "Engine"
+        ],
+        "description": "Asks trackers for seeders/leechers without adding the torrents as engines. Each torrent's trackers (bare announce URLs or peerSearch-style `tracker:<url>`; `dht:` entries ignored, loopback/link-local hosts dropped) are merged with the engine's ranked tracker list; every tracker is asked once, in parallel, with the largest figures kept. Answered results are cached for 5 minutes.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScrapeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One result per requested torrent, in request order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrapeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body is not valid JSON, has more than 200 torrents, or an infoHash is not 40 hex characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenOrigin"
+          },
+          "405": {
+            "description": "Method other than POST"
+          }
+        }
+      }
+    },
     "/settings": {
       "get": {
         "operationId": "getSettings",
@@ -11988,6 +12037,81 @@
         "type": "object",
         "maxProperties": 0,
         "description": "Always `{}`"
+      },
+      "ScrapeRequest": {
+        "type": "object",
+        "required": [
+          "torrents"
+        ],
+        "properties": {
+          "torrents": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "required": [
+                "infoHash"
+              ],
+              "properties": {
+                "infoHash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{40}$"
+                },
+                "trackers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Announce URLs or `tracker:<url>` sources known for this torrent (first 20 used)."
+                }
+              }
+            }
+          }
+        }
+      },
+      "ScrapeResponse": {
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "infoHash",
+                "seeders",
+                "leechers",
+                "completed",
+                "trackers"
+              ],
+              "properties": {
+                "infoHash": {
+                  "type": "string"
+                },
+                "seeders": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Largest seeder count any tracker reported."
+                },
+                "leechers": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "completed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "trackers": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Trackers that answered; 0 means the counts are unknown, not zero."
+                }
+              }
+            }
+          }
+        }
       },
       "SessionKeyResponse": {
         "type": "object",

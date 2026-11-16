@@ -91,6 +91,10 @@ func (e *fakeEngine) Stats(idx int) *types.Stats {
 // fakeEM implements types.EngineManager.
 type fakeEM struct {
 	m map[string]*fakeEngine
+	// scrapeReqs records the last Scrape call; scrapeSeeders answers it
+	// (seeders per info hash, Trackers=1 for every known hash).
+	scrapeReqs    []types.ScrapeRequest
+	scrapeSeeders map[string]int
 }
 
 func newFakeEM(engines ...*fakeEngine) *fakeEM {
@@ -127,6 +131,17 @@ func (m *fakeEM) AllStats() map[string]*types.Stats {
 	out := make(map[string]*types.Stats, len(m.m))
 	for ih, e := range m.m {
 		out[ih] = e.Stats(-1)
+	}
+	return out
+}
+func (m *fakeEM) Scrape(_ context.Context, reqs []types.ScrapeRequest) []types.ScrapeResult {
+	m.scrapeReqs = reqs
+	out := make([]types.ScrapeResult, len(reqs))
+	for i, r := range reqs {
+		out[i].InfoHash = r.InfoHash
+		if n, ok := m.scrapeSeeders[r.InfoHash]; ok {
+			out[i].Seeders, out[i].Trackers = n, 1
+		}
 	}
 	return out
 }

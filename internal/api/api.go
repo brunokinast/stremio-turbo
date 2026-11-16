@@ -706,6 +706,8 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleRemoveAll(w, r)
 	case "stats.json":
 		s.handleAllStats(w, r)
+	case "scrape":
+		s.handleScrape(w, r)
 	case "network-info":
 		s.handleNetworkInfo(w, r)
 	case "device-info":

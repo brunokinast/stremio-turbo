@@ -251,6 +251,9 @@ type manager struct {
 	// scan memoises the last under-budget cache walk so the janitor can skip
 	// re-walking the cache on ticks where nothing could have grown (evictTick).
 	scan diskScan
+
+	// scrapes caches recent tracker scrape results (see Scrape).
+	scrapes scrapeCache
 }
 
 // Compile-time interface satisfaction checks.

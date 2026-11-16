@@ -13,6 +13,9 @@ The complete feature list, with the routes and behaviours behind the summary in 
 - **Full enginefs API** - `create`/`stats.json`/`remove`, Range/206 streaming
   with DLNA headers, `network-info`, `device-info`, `settings`, `opensubHash`,
   `subtitlesTracks`, `/probe`, `/tracks`, `/list`, `/:ih/peers`.
+- **Tracker scrape** (`POST /scrape`) - live seeders/leechers for a batch of
+  torrents without joining their swarms (parallel, batched per tracker, 5 min
+  cache), so a client can rank sources by real health before playing.
 - **HLSv2 transcoding** - on-demand ffmpeg with multi-platform hardware accel
   (VAAPI / NVENC / QSV / VideoToolbox / V4L2M2M, verified at startup, libx264
   fallback), multi-audio + embedded-subtitle renditions, and seek-aware segments.

@@ -324,7 +324,28 @@ type EngineManager interface {
 	ListEngines() []string
 	// AllStats returns torrent-level stats keyed by infoHash (for /stats.json).
 	AllStats() map[string]*Stats
+	// Scrape asks trackers for swarm sizes without joining the swarms (POST
+	// /scrape). Results are in request order, one per request.
+	Scrape(ctx context.Context, reqs []ScrapeRequest) []ScrapeResult
 	Close() error
+}
+
+// ScrapeRequest is one torrent to scrape: its info hash plus the trackers the
+// caller knows for it (merged with the engine's own tracker list).
+type ScrapeRequest struct {
+	InfoHash string   `json:"infoHash"`
+	Trackers []string `json:"trackers,omitempty"`
+}
+
+// ScrapeResult reports the best (largest) swarm figures any tracker returned
+// for a torrent. Trackers is how many trackers answered; 0 means none did, so
+// the counts are unknown rather than zero.
+type ScrapeResult struct {
+	InfoHash  string `json:"infoHash"`
+	Seeders   int    `json:"seeders"`
+	Leechers  int    `json:"leechers"`
+	Completed int    `json:"completed"`
+	Trackers  int    `json:"trackers"`
 }
 
 // SettingsStore persists the user-facing server settings (cacheSize, bt*, ...).
