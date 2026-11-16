@@ -95,9 +95,44 @@ const readRange = async (url: URL, offset: number, bytes: number, signal: AbortS
     return read;
 };
 
+type TorrentStats = {
+    peers: number,
+    // Bytes per second.
+    downloadSpeed: number,
+    // Empty until the torrent's metadata is known.
+    files: unknown[],
+};
+
+// A torrent's live stats, or null when the server doesn't have it open.
+const stats = (baseUrl: string, infoHash: string): Promise<TorrentStats | null> => {
+    return fetch(new URL(`${infoHash}/stats.json`, baseUrl))
+        .then((response) => response.ok ? response.json() as Promise<TorrentStats | null> : null)
+        .then((result) => result !== null ? { ...result, files: result.files ?? [] } : null)
+        .catch(() => null);
+};
+
+// Opens a torrent on the server without reading it: it finds peers and
+// fetches metadata (plus the file's first and last pieces) in the background,
+// so playing it later starts at once. Unplayed torrents close on their own
+// after the server's idle timeout.
+// Starts a torrent ahead of playback. fileIdx names the episode in a season
+// pack, so the server primes that file's first and last pieces instead of
+// guessing the largest file.
+const preload = (baseUrl: string, infoHash: string, fileIdx: number | null, trackers: string[]): void => {
+    fetch(new URL(`${infoHash}/create`, baseUrl), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            torrent: { infoHash },
+            ...(fileIdx !== null ? { fileIdx } : {}),
+            peerSearch: { sources: trackers.map((tracker) => `tracker:${tracker}`) },
+        }),
+    }).catch(() => undefined);
+};
+
 const remove = (baseUrl: string, infoHash: string): Promise<void> => {
     return fetch(new URL(`${infoHash}/remove`, baseUrl)).then(() => undefined, () => undefined);
 };
 
-export type { ScrapeResult, ScrapeTorrent };
-export { isKnown, scrapeStream, streamUrl, readRange, remove };
+export type { ScrapeResult, ScrapeTorrent, TorrentStats };
+export { isKnown, scrapeStream, streamUrl, readRange, stats, preload, remove };

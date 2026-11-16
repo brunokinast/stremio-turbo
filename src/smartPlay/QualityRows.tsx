@@ -7,6 +7,7 @@ import ProgressBar from 'stremio/components/ProgressBar';
 import StreamCard from 'stremio/routes/Details/Streams/Stream';
 import { LISTED_SEEDERS, WEAK_SEEDERS } from './groupByQuality';
 import type { RankedTier } from './groupByQuality';
+import type { RacerProgress } from './race';
 import styles from './QualityRows.less';
 
 type Props = {
@@ -14,7 +15,7 @@ type Props = {
     // Every live count has come in; until then figures may still grow.
     settled: boolean,
     remembered: string | null,
-    racing: { tierKey: string, label: string, weak: boolean } | null,
+    racing: { tierKey: string, label: string, weak: boolean, racers: RacerProgress[] } | null,
     videoId?: string | null,
     videoReleased?: string | null,
     canMarkWatched: boolean,
@@ -59,6 +60,17 @@ const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoRelease
         );
     }, [renderSeeders]);
 
+    const racerStatus = (racer: RacerProgress) => {
+        switch (racer.phase) {
+            case 'metadata':
+                return t('SMART_PLAY_RACER_METADATA');
+            case 'connecting':
+                return t('SMART_PLAY_RACER_CONNECTING', { count: racer.peers });
+            default:
+                return t('SMART_PLAY_RACER_DOWNLOADING', { speed: (racer.speed / 1048576).toFixed(1) });
+        }
+    };
+
     if (racing !== null) {
         return (
             <div className={styles['racing']} role={'status'}>
@@ -70,6 +82,16 @@ const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoRelease
                         null
                 }
                 <div className={styles['racing-line']} />
+                <div className={styles['racers']}>
+                    {
+                        racing.racers.map((racer) => (
+                            <div key={racer.infoHash} className={styles['racer']}>
+                                {renderSeeders(racer.seeders)}
+                                <span className={styles['racer-status']}>{racerStatus(racer)}</span>
+                            </div>
+                        ))
+                    }
+                </div>
                 <Button className={styles['racing-cancel']} onClick={onCancel}>{t('SMART_PLAY_CANCEL')}</Button>
             </div>
         );
