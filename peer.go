@@ -43,6 +43,9 @@ type (
 		closedCtx               context.Context
 		closedCtxCancel         context.CancelFunc
 		lastUsefulChunkReceived time.Time
+		// Requests outstanding for longer than ClientConfig.PieceTimeout without a useful
+		// chunk. Cleared when one arrives. See request-health.go.
+		snubbed bool
 
 		lastStartedExpectingToReceiveChunks time.Time
 		cumulativeExpectedToReceiveChunks   time.Duration
@@ -120,6 +123,10 @@ const (
 const (
 	peerUpdateRequestsPeerCancelReason   updateRequestReason = "Peer.cancel"
 	peerUpdateRequestsRemoteRejectReason updateRequestReason = "Peer.remoteRejectedRequest"
+	// Another peer was snubbed and its requests were cancelled.
+	peerUpdateRequestsSnubbedReason updateRequestReason = "Peer.snubbed"
+	// A periodic retry of an unchoked, interesting peer that has no requests.
+	peerUpdateRequestsIdleReason updateRequestReason = "Peer.idle"
 )
 
 // Returns the Torrent a Peer belongs to. Shouldn't change for the lifetime of the Peer. May be nil
@@ -435,6 +442,7 @@ func (c *Peer) receiveChunkPrologue(msg *pp.Message) (_ *pendingChunkWrite, err 
 		f(ReceivedUsefulDataEvent{c, msg})
 	}
 	c.lastUsefulChunkReceived = time.Now()
+	c.snubbed = false
 
 	// Record that the chunk hasn't been written yet before we do anything with it.
 	pw := piece.incrementPendingWrites()

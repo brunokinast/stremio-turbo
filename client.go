@@ -126,6 +126,7 @@ type Client struct {
 
 type clientWebseedState struct {
 	webseedRequestTimer   *time.Timer
+	requestHealthTimer    *time.Timer
 	webseedUpdateReason   updateRequestReason
 	activeWebseedRequests map[webseedUniqueRequestKey]*webseedRequest
 	aprioriMap            map[webseedUniqueRequestKey]aprioriMapValue
@@ -420,6 +421,7 @@ func (cl *Client) init(cfg *ClientConfig) {
 	}
 
 	cl.webseedRequestTimer = time.AfterFunc(webseedRequestUpdateTimerInterval, cl.updateWebseedRequestsTimerFunc)
+	cl.requestHealthTimer = time.AfterFunc(requestHealthInterval, cl.requestHealthTimerFunc)
 }
 
 // Creates a new Client. Takes ownership of the ClientConfig. Create another one if you want another
@@ -613,6 +615,7 @@ func (cl *Client) Close() (errs []error) {
 	// Close atomically, allow systems to break early if we're contended on the Client lock.
 	cl.closed.Set()
 	cl.webseedRequestTimer.Stop()
+	cl.requestHealthTimer.Stop()
 	var closeGroup sync.WaitGroup // For concurrent cleanup to complete before returning
 	cl.lock()
 	for t := range cl.torrents {
@@ -1025,6 +1028,7 @@ func (cl *Client) outgoingConnection(
 	opts outgoingConnOpts,
 	attemptKey outgoingConnAttemptKey,
 ) {
+	started := time.Now()
 	c, err := cl.dialAndCompleteHandshake(opts)
 	if err == nil {
 		c.conn.SetWriteDeadline(time.Time{})
@@ -1033,6 +1037,21 @@ func (cl *Client) outgoingConnection(
 	defer cl.unlock()
 	// Don't release lock between here and addPeerConn, unless it's for failure.
 	cl.noLongerHalfOpen(opts.t, opts.peerInfo.Addr.String(), attemptKey)
+	if cbs := cl.config.Callbacks.OutgoingConnResult; len(cbs) > 0 {
+		ev := OutgoingConnResultEvent{
+			InfoHash: *opts.t.canonicalShortInfohash(),
+			Peer:     opts.peerInfo,
+			Started:  started,
+			Duration: time.Since(started),
+			Err:      err,
+		}
+		if err == nil {
+			ev.Network = c.Network
+		}
+		for _, f := range cbs {
+			f(ev)
+		}
+	}
 	if err != nil {
 		if cl.config.Debug {
 			cl.logger.Levelf(

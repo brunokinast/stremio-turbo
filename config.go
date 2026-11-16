@@ -156,6 +156,17 @@ type ClientConfig struct {
 	// sent scales with round-trip time, so on a LAN the cost of a steal is near zero and on a
 	// tunnelled path it is not.
 	StealRequestGrace time.Duration
+	// How much of a peer's measured download rate to keep requested from it. Once a connection
+	// has a rate, its request queue is capped at rate x RequestQueueTime (at least 2 requests),
+	// like libtorrent's request_queue_time. Without the cap the queue grows to twice its recent
+	// peak, so one fast peer can hold most of a large piece while other unchoked peers have
+	// nothing to fetch. Zero or negative disables the cap.
+	RequestQueueTime time.Duration
+	// A peer that has had a request outstanding without delivering a useful chunk for this long
+	// is snubbed: its requests are cancelled so other peers can take them, and it gets one
+	// request at a time until it delivers again (libtorrent's piece_timeout). Zero or negative
+	// disables snubbing.
+	PieceTimeout time.Duration
 
 	// User-provided Client peer ID. If not present, one is generated automatically.
 	PeerID string
@@ -340,6 +351,8 @@ func NewDefaultClientConfig() *ClientConfig {
 		AcceptPeerConnections:  true,
 		MaxUnverifiedBytes:     64 << 20,
 		StealRequestGrace:      initDurationFromEnv(stealRequestGraceEnvKey, defaultStealRequestGrace),
+		RequestQueueTime:       defaultRequestQueueTime,
+		PieceTimeout:           defaultPieceTimeout,
 		DialRateLimiter:        rate.NewLimiter(10, 10),
 		PieceHashersPerTorrent: 2,
 	}

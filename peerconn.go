@@ -1774,7 +1774,16 @@ func (me *PeerConn) peerPtr() *Peer {
 
 // The actual value to use as the maximum outbound requests.
 func (cn *PeerConn) nominalMaxRequests() maxRequests {
-	return max(1, min(cn.PeerMaxRequests, cn.peakRequests*2, maxLocalToRemoteRequests))
+	if cn.snubbed {
+		return 1
+	}
+	n := max(1, min(cn.PeerMaxRequests, cn.peakRequests*2, maxLocalToRemoteRequests))
+	if cn.t != nil {
+		if byRate, ok := rateRequestQueue(cn.downloadRate(), cn.t.cl.config.RequestQueueTime, int(cn.t.chunkSize)); ok {
+			n = min(n, byRate)
+		}
+	}
+	return n
 }
 
 // Set the Peer loggers. This is given Client loggers, and later Torrent loggers when the Torrent is
@@ -1845,6 +1854,9 @@ func (cn *PeerConn) statusFlags() (ret string) {
 	}
 	if cn.peerChoking {
 		c('c')
+	}
+	if cn.snubbed {
+		c('s')
 	}
 	return
 }

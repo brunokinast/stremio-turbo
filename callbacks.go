@@ -1,6 +1,8 @@
 package torrent
 
 import (
+	"time"
+
 	"github.com/anacrolix/torrent/mse"
 	pp "github.com/anacrolix/torrent/peer_protocol"
 )
@@ -38,6 +40,23 @@ type Callbacks struct {
 	// Sends status event updates. Useful to inform the user of specific events as they happen,
 	// for logging or to action on.
 	StatusUpdated []func(StatusUpdatedEvent)
+
+	// Called when an outgoing connection attempt finishes, whether it connected and completed the
+	// BitTorrent handshake or failed. Useful for diagnosing peer acquisition (which addresses
+	// fail, how, and how long that takes). The Client lock is held: handlers must be quick and
+	// must not call back into the Client.
+	OutgoingConnResult []func(OutgoingConnResultEvent)
+}
+
+type OutgoingConnResultEvent struct {
+	InfoHash InfoHash
+	Peer     PeerInfo
+	// The transport that connected, e.g. "tcp4" or "utp6". Empty when the attempt failed.
+	Network  string
+	Started  time.Time
+	Duration time.Duration
+	// Nil when the connection was established and handshaken.
+	Err error
 }
 
 type ReceivedUsefulDataEvent = PeerMessageEvent
