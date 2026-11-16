@@ -8,6 +8,8 @@ Personal fork of [Stremio/stremio-web](https://github.com/Stremio/stremio-web) w
 - **Build on what exists.** Look at how the codebase already does things (core models and actions, `src/common` hooks, components, routes, i18n, styles) and reuse them instead of rebuilding.
 - **Keep it simple.** Solve what's needed now; no over-engineering or production polish.
 - **Keep upstream updates easy.** Prefer self-contained additions with small touch points in upstream files, so merging Stremio's `development` stays painless.
+- **Own the code we change.** When a fix belongs in another component (the streaming server, core, shell), fork it and change its source properly, then merge its upstream ourselves when we choose to. No patch scripts, runtime monkey-patching or env-var workarounds standing in for a real change. Closed-source parts we can't own get replaced by open alternatives (that's why the server is our Rivulet fork).
+- **Research before proposing.** Search the relevant code, docs and the web for existing options and how others solve the problem, then present the options with trade-offs.
 - **Ask when unsure** about what the user wants.
 
 ## Conventions
@@ -24,6 +26,7 @@ Personal fork of [Stremio/stremio-web](https://github.com/Stremio/stremio-web) w
 
 ## The user's Stremio setup
 
-- `server.js` in `%LOCALAPPDATA%\Programs\Stremio` is closed source and replaced on every update. Any server fix goes in a re-runnable patch script, never a hand edit.
+- `scripts/start-stremio.ps1` starts our Rivulet build on `127.0.0.1:11470` and the official shell with `--development --webui-url=<fork>` (so the shell doesn't start Stremio's closed `server.js`), and stops Rivulet when the shell exits.
+- Streaming server = our fork of Rivulet Engine (open-source `server.js` replacement, Go): github.com/brunokinast/rivulet-engine, cloned at `C:\Users\bruno\Documents\git\rivulet-engine`, `upstream` = rivulet-kodi/rivulet-engine. Server changes are made there, following its `AGENTS.md`.
 - Back up before changing the user's account (add-ons, library) or server settings, and only do it when asked.
 - Never commit or log auth keys or the server IPC key.
