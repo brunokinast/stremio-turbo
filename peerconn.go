@@ -261,6 +261,45 @@ func (cn *PeerConn) connectionFlags() string {
 	return sb.String()
 }
 
+// NetConn returns the connection the peer protocol runs over, for diagnostics such as reading
+// transport statistics. Don't read from or write to it.
+func (cn *PeerConn) NetConn() net.Conn {
+	return cn.conn
+}
+
+// PeerRequestStats is a snapshot of a connection's request and choke state, for diagnostics.
+type PeerRequestStats struct {
+	// Requests on the wire, and cancels sent that are still waiting for a reply.
+	Outstanding, Cancelled int
+	// How many requests the connection may currently have outstanding.
+	MaxRequests int
+	// Our side: interested in the peer, choking the peer. Their side likewise.
+	Interested, Choking, PeerInterested, PeerChoking bool
+	Snubbed                                          bool
+	Outgoing, UTP                                    bool
+	// When the last chunk we wanted arrived. Zero if none yet.
+	LastUsefulChunk time.Time
+}
+
+// RequestStats returns a snapshot of the connection's request and choke state.
+func (cn *PeerConn) RequestStats() PeerRequestStats {
+	cn.locker().RLock()
+	defer cn.locker().RUnlock()
+	return PeerRequestStats{
+		Outstanding:     int(cn.requestState.Requests.GetCardinality()),
+		Cancelled:       int(cn.requestState.Cancelled.GetCardinality()),
+		MaxRequests:     cn.nominalMaxRequests(),
+		Interested:      cn.requestState.Interested,
+		Choking:         cn.choking,
+		PeerInterested:  cn.peerInterested,
+		PeerChoking:     cn.peerChoking,
+		Snubbed:         cn.snubbed,
+		Outgoing:        cn.outgoing,
+		UTP:             cn.utp(),
+		LastUsefulChunk: cn.lastUsefulChunkReceived,
+	}
+}
+
 func (cn *PeerConn) utp() bool {
 	return parseNetworkString(cn.Network).Udp
 }

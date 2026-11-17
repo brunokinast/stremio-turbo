@@ -3,6 +3,8 @@ package torrent
 import (
 	"fmt"
 	"reflect"
+	"runtime"
+	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -19,15 +21,51 @@ type lockWithDeferreds struct {
 	// Currently unlocking, defers should not occur?
 	allowDefers bool
 	client      *Client
+	// Set by Lock only while Config.LockHoldCallback is set.
+	lockedAt   time.Time
+	lockedAtPC [1]uintptr
 }
 
 func (me *lockWithDeferreds) Lock() {
 	me.internal.Lock()
 	panicif.True(me.allowDefers)
 	me.allowDefers = true
+	if me.lockHoldCallback() != nil {
+		me.lockedAt = time.Now()
+		// Skip Callers, Lock and the Client.lock wrapper.
+		runtime.Callers(3, me.lockedAtPC[:])
+	}
+}
+
+func (me *lockWithDeferreds) lockHoldCallback() func(time.Duration, string) {
+	if me.client == nil || me.client.config == nil {
+		return nil
+	}
+	return me.client.config.LockHoldCallback
 }
 
 func (me *lockWithDeferreds) Unlock() {
+	cb := me.lockHoldCallback()
+	if cb == nil || me.lockedAt.IsZero() {
+		me.unlock()
+		return
+	}
+	lockedAt, pc := me.lockedAt, me.lockedAtPC[0]
+	me.lockedAt = time.Time{}
+	me.unlock()
+	held := time.Since(lockedAt)
+	if held < me.client.config.LockHoldThreshold {
+		return
+	}
+	where := "unknown"
+	if fn := runtime.FuncForPC(pc); fn != nil {
+		file, line := fn.FileLine(pc)
+		where = fmt.Sprintf("%s (%s:%d)", fn.Name(), file, line)
+	}
+	cb(held, where)
+}
+
+func (me *lockWithDeferreds) unlock() {
 	// If this doesn't happen other clean up handlers will block on the lock.
 	defer me.internal.Unlock()
 	panicif.False(me.allowDefers)

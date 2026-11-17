@@ -163,3 +163,5 @@ retract (
 	// Indefinite outgoing requests on storage write errors. https://github.com/anacrolix/torrent/issues/889
 	[v1.29.0, v1.53.2]
 )
+
+replace github.com/anacrolix/go-utp => ../go-utp

@@ -167,6 +167,11 @@ type ClientConfig struct {
 	// request at a time until it delivers again (libtorrent's piece_timeout). Zero or negative
 	// disables snubbing.
 	PieceTimeout time.Duration
+	// Diagnostics: when set, called after the client's write lock was held for at least
+	// LockHoldThreshold, with the hold time (including deferred unlock actions) and where the lock
+	// was taken. It runs after the lock is released. Nil disables the measurement entirely.
+	LockHoldCallback  func(held time.Duration, lockedAt string)
+	LockHoldThreshold time.Duration
 
 	// User-provided Client peer ID. If not present, one is generated automatically.
 	PeerID string
