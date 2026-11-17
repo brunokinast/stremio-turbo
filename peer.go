@@ -79,6 +79,9 @@ type (
 		lastBecameInterested time.Time
 		priorInterest        time.Duration
 
+		// Queue sizing when ClientConfig.InitialRequestQueue is set.
+		reqQueue peerRequestQueue
+
 		choking bool
 
 		// Stuff controlled by the remote peer.
@@ -452,6 +455,13 @@ func (c *Peer) receiveChunkPrologue(msg *pp.Message) (_ *pendingChunkWrite, err 
 		f(ReceivedUsefulDataEvent{c, msg})
 	}
 	c.lastUsefulChunkReceived = time.Now()
+	if initial := c.t.cl.config.InitialRequestQueue; initial > 0 {
+		if c.snubbed {
+			// Back from a snub: start the queue over rather than at a stale limit.
+			c.reqQueue.reset(maxRequests(initial))
+		}
+		c.reqQueue.onUsefulChunk(c.lastUsefulChunkReceived, len(msg.Piece), maxRequests(initial))
+	}
 	c.snubbed = false
 
 	// Record that the chunk hasn't been written yet before we do anything with it.

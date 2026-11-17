@@ -162,6 +162,18 @@ type ClientConfig struct {
 	// peak, so one fast peer can hold most of a large piece while other unchoked peers have
 	// nothing to fetch. Zero or negative disables the cap.
 	RequestQueueTime time.Duration
+	// Requests given to a new or newly unchoked peer at once. When set, the peer's queue then grows
+	// by one request per useful block (doubling every round trip, libtorrent's slow start) until its
+	// rate stops rising, and from then on covers RequestQueueTime of its rate over the last few
+	// seconds (at least 4 requests while it is delivering). Zero keeps the queue at twice the
+	// requests added by its previous update, refilled from 2 when empty: at 300 ms RTT that took
+	// ~15 s to reach ~200 requests, and the rate cap used the connection's lifetime average.
+	InitialRequestQueue int
+	// When set (0 < x < 1), a peer is given more requests once its outstanding requests fall to
+	// this fraction of its queue limit, at most once per 100 ms per peer while it still has some.
+	// Zero refills only an empty queue, which leaves the sender idle for a round trip per batch
+	// (~25 % below the achievable rate at 300 ms RTT) and makes it burst when the refill arrives.
+	RequestLowWater float64
 	// A peer that has had a request outstanding without delivering a useful chunk for this long
 	// is snubbed: its requests are cancelled so other peers can take them, and it gets one
 	// request at a time until it delivers again (libtorrent's piece_timeout). Zero or negative

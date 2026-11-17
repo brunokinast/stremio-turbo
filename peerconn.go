@@ -1149,6 +1149,9 @@ func (c *PeerConn) mainReadLoop() (err error) {
 				break
 			}
 			c.peerChoking = false
+			if initial := c.t.cl.config.InitialRequestQueue; initial > 0 {
+				c.reqQueue.reset(maxRequests(initial))
+			}
 			preservedCount := 0
 			c.requestState.Requests.Iterate(func(x RequestIndex) bool {
 				if !c.peerAllowedFast.Contains(c.t.pieceIndexOfRequestIndex(x)) {
@@ -1816,6 +1819,12 @@ func (cn *PeerConn) nominalMaxRequests() maxRequests {
 	if cn.snubbed {
 		return 1
 	}
+	if cn.t != nil {
+		if initial := cn.t.cl.config.InitialRequestQueue; initial > 0 {
+			n := cn.reqQueue.nominal(time.Now(), maxRequests(initial), cn.t.cl.config.RequestQueueTime, int(cn.t.chunkSize))
+			return max(1, min(n, cn.PeerMaxRequests, maxLocalToRemoteRequests))
+		}
+	}
 	n := max(1, min(cn.PeerMaxRequests, cn.peakRequests*2, maxLocalToRemoteRequests))
 	if cn.t != nil {
 		if byRate, ok := rateRequestQueue(cn.downloadRate(), cn.t.cl.config.RequestQueueTime, int(cn.t.chunkSize)); ok {
@@ -2140,8 +2149,35 @@ func (p *PeerConn) uncancelledRequests() uint64 {
 	return p.requestState.Requests.GetCardinality()
 }
 
+// Whether the peer should be given more requests. By default only once its queue is empty, which
+// leaves the sender idle for a round trip per batch; with ClientConfig.RequestLowWater, once the
+// queue is down to that fraction of its limit.
 func (p *PeerConn) isLowOnRequests() bool {
-	return p.requestState.Requests.IsEmpty() && p.requestState.Cancelled.IsEmpty()
+	outstanding := p.requestState.Requests.GetCardinality() + p.requestState.Cancelled.GetCardinality()
+	if outstanding == 0 {
+		return true
+	}
+	if p.t == nil {
+		return false
+	}
+	lowWater := p.t.cl.config.RequestLowWater
+	if lowWater <= 0 {
+		return false
+	}
+	return float64(outstanding) <= lowWater*float64(p.nominalMaxRequests())
+}
+
+// Whether a received chunk should trigger a request update: the queue is low, and with
+// RequestLowWater, no update ran in the last lowWaterUpdateInterval unless the queue is empty (so
+// a burst of blocks doesn't re-plan once per block).
+func (p *PeerConn) chunkShouldUpdateRequests() bool {
+	if !p.isLowOnRequests() {
+		return false
+	}
+	if p.requestState.Requests.IsEmpty() && p.requestState.Cancelled.IsEmpty() {
+		return true
+	}
+	return time.Since(p.lastRequestUpdate) >= lowWaterUpdateInterval
 }
 
 func (c *PeerConn) checkReceivedChunk(req RequestIndex, msg *pp.Message, ppReq Request) (intended bool, err error) {
@@ -2167,7 +2203,7 @@ func (c *PeerConn) checkReceivedChunk(req RequestIndex, msg *pp.Message, ppReq R
 		// Request has been satisfied.
 		if c.deleteRequest(req) || c.requestState.Cancelled.CheckedRemove(req) {
 			intended = true
-			if c.isLowOnRequests() {
+			if c.chunkShouldUpdateRequests() {
 				c.onNeedUpdateRequests("Peer.receiveChunk deleted request")
 			}
 		} else {
