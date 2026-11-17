@@ -1008,6 +1008,9 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 		if seqNr >= (seqNrMask+1)-reorderBufferMaxSize && p.h.Type != stState {
 			c.stats.duplicatePackets++
 			c.scheduleAck()
+		} else if p.h.Type != stState {
+			// Ahead of the reorder buffer: the peer will have to send it again.
+			c.stats.reorderTooFar++
 		}
 		return
 	}
@@ -1268,11 +1271,9 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 		if c.gotFin && wrappingCompareLess(uint32(c.eofPkt), uint32(pkSeqNr), seqNrMask) {
 			return
 		}
-		// Don't size the reorder buffer from untrusted input alone.
-		if seqNr > 0x3ff {
-			c.stats.reorderTooFar++
-			return
-		}
+		// seqNr < reorderBufferMaxSize here (checked above), so untrusted input can't size the
+		// reorder buffer past that.
+		//
 		// Grow before the duplicate check, so we don't look at an older packet that the smaller
 		// buffer had aliased onto this slot.
 		c.inbuf.ensureSize(uint32(pkSeqNr)+1, seqNr+1)
