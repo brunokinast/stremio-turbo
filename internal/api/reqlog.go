@@ -75,7 +75,9 @@ func (l *reqLog) dropOldestLocked() {
 	delete(l.torrents, oldest)
 }
 
-// get returns a torrent's requests, oldest first, with times relative to created.
+// get returns a torrent's requests since created, oldest first, with times
+// relative to it. Requests from before created belong to an earlier engine for
+// the same torrent (removed or evicted since) and are left out.
 func (l *reqLog) get(ih string, created time.Time) []types.TraceRequest {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -85,6 +87,11 @@ func (l *reqLog) get(ih string, created time.Time) []types.TraceRequest {
 		return out
 	}
 	for _, r := range append(append([]reqRecord(nil), tr.recs[tr.next:]...), tr.recs[:tr.next]...) {
+		// A create or stream request starts just before the engine it makes,
+		// so allow a little slack.
+		if r.start.Before(created.Add(-time.Second)) {
+			continue
+		}
 		r.AtMs = r.start.Sub(created).Milliseconds()
 		out = append(out, r.TraceRequest)
 	}
