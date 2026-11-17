@@ -19,7 +19,7 @@ import (
 // torrent was opened and drop every other (barely used) one. The result is
 // capped at the apparent size so block-rounding never reports more than the
 // file's length.
-func allocatedSize(info fs.FileInfo) int64 {
+func allocatedSize(_ string, info fs.FileInfo) int64 {
 	size := info.Size()
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
 		// Blocks is always counted in 512-byte units, regardless of the

@@ -24,11 +24,17 @@ func sparseFile(t *testing.T, path string, size int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	makeSparse(t, f)
 	if err := f.Truncate(size); err != nil {
 		_ = f.Close()
 		t.Fatal(err)
 	}
 	if _, err := f.WriteAt(make([]byte, 4096), 0); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	// NTFS reports a sparse file's allocation once the data is flushed.
+	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		t.Fatal(err)
 	}
@@ -39,7 +45,7 @@ func sparseFile(t *testing.T, path string, size int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if allocatedSize(info) >= info.Size() {
+	if allocatedSize(path, info) >= info.Size() {
 		t.Skip("filesystem does not support sparse files (or allocated size is unavailable on this platform)")
 	}
 }
@@ -52,7 +58,7 @@ func TestAllocatedSizeIgnoresHoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := allocatedSize(info); got <= 0 || got >= apparent/2 {
+	if got := allocatedSize(path, info); got <= 0 || got >= apparent/2 {
 		t.Errorf("allocatedSize = %d for a %d-byte file with 4 KiB written; want a small non-zero value", got, apparent)
 	}
 	// A dense file reports (at most) its own length.
@@ -64,7 +70,7 @@ func TestAllocatedSizeIgnoresHoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := allocatedSize(di); got > di.Size() || got < di.Size()/2 {
+	if got := allocatedSize(dense, di); got > di.Size() || got < di.Size()/2 {
 		t.Errorf("allocatedSize(dense) = %d; want ≈ %d and never more", got, di.Size())
 	}
 }

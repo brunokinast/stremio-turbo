@@ -18,6 +18,7 @@ require (
 	github.com/nwaples/rardecode/v2 v2.4.5
 	golang.org/x/net v0.62.0
 	golang.org/x/sync v0.24.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/time v0.16.0
 )
 
@@ -103,7 +104,6 @@ require (
 	go4.org v0.0.0-20261028031214-ed6929a230fe // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
 	modernc.org/libc v1.79.1 // indirect

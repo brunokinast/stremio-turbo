@@ -1188,12 +1188,12 @@ func (e *engine) downloaded() int64 {
 // under dir. A missing or unreadable dir or entry counts as zero.
 func dirAllocated(dir string) int64 {
 	var total int64
-	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		if info, ierr := d.Info(); ierr == nil {
-			total += allocatedSize(info)
+			total += allocatedSize(path, info)
 		}
 		return nil
 	})
