@@ -387,6 +387,13 @@ func New(cfg types.Config) (types.EngineManager, error) {
 
 	cc.MaxUnverifiedBytes = maxUnverifiedBytes(cfg.MemoryCacheSize)
 
+	// Request queue per peer: 32 requests (512 KiB) at once, growing per block until the peer's
+	// rate levels off, refilled at half rather than when empty. The library default doubles from
+	// 2 only when the queue drains: ~15 s to reach ~200 requests at 300 ms RTT, with the sender
+	// idle for a round trip per batch (streaming-research findings/10, findings/13).
+	cc.InitialRequestQueue = 32
+	cc.RequestLowWater = 0.5
+
 	dials := newDialLog()
 	cc.Callbacks.OutgoingConnResult = append(cc.Callbacks.OutgoingConnResult, dials.onOutgoing)
 	cc.Callbacks.PeerConnAdded = append(cc.Callbacks.PeerConnAdded, dials.onPeerConnAdded)
