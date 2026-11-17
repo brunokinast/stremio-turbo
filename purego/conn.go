@@ -1389,6 +1389,9 @@ func (c *Conn) readDrained() {
 	} else {
 		c.stats.windowUpdatesLate++
 		c.scheduleAck()
+		// Without arming the timer here, the update waited for the next packet from any
+		// connection: on an idle socket, until the peer's keepalive or timeout.
+		c.s.armDeferredAcks()
 	}
 }
 

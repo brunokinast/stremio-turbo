@@ -271,15 +271,16 @@ func (s *Socket) processReceivedMessage(b []byte, addr net.Addr) {
 		return
 	}
 	if s.processPacket(b, addr) {
-		s.afterReceivingUtpMessage()
+		s.armDeferredAcks()
 	} else {
 		s.onReadNonUtp(b, addr)
 	}
 }
 
 // Arms the deferred ack timer. Acks are held back briefly so that a burst of packets produces one
-// ack, which is what libutp achieves by flushing after draining the socket.
-func (s *Socket) afterReceivingUtpMessage() {
+// ack, which is what libutp achieves by flushing after draining the socket. Called after a received
+// packet, and after a read schedules a window update.
+func (s *Socket) armDeferredAcks() {
 	if s.acksScheduled || len(s.ackConns) == 0 {
 		return
 	}
