@@ -250,6 +250,8 @@ type Conn struct {
 	writeDeadlineTimer *time.Timer
 
 	ackScheduled bool
+
+	stats connCounters
 }
 
 var _ net.Conn = (*Conn)(nil)
@@ -412,6 +414,13 @@ func (c *Conn) unscheduleAck() {
 func (c *Conn) sendAck(synack bool) {
 	var b [headerSize + 6]byte
 	c.lastRcvWin = c.rcvWindow()
+	c.stats.acksSent++
+	if c.reorderCount != 0 {
+		c.stats.selectiveAcksSent++
+	} else if c.stats.haveLastAck && c.stats.lastAckNr == c.ackNr && !synack {
+		c.stats.duplicateAcksSent++
+	}
+	c.stats.lastAckNr, c.stats.haveLastAck = c.ackNr, true
 	h := header{
 		Type:    stState,
 		Version: protocolVersion,
@@ -983,6 +992,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 		// Ancient or absurd. If it's just behind us, the peer probably lost our ack, so send
 		// another one.
 		if seqNr >= (seqNrMask+1)-reorderBufferMaxSize && p.h.Type != stState {
+			c.stats.duplicatePackets++
 			c.scheduleAck()
 		}
 		return
@@ -1202,6 +1212,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 
 	if seqNr == 0 {
 		// The packet we were waiting for.
+		c.stats.inOrderPackets++
 		if len(p.payload) > 0 && !c.readShutdown {
 			c.readBuf.write(p.payload)
 			c.cond.Broadcast()
@@ -1245,6 +1256,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 		}
 		// Don't size the reorder buffer from untrusted input alone.
 		if seqNr > 0x3ff {
+			c.stats.reorderTooFar++
 			return
 		}
 		// Grow before the duplicate check, so we don't look at an older packet that the smaller
@@ -1252,10 +1264,13 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 		c.inbuf.ensureSize(uint32(pkSeqNr)+1, seqNr+1)
 		if c.inbuf.get(uint32(pkSeqNr)) != nil {
 			// Duplicate.
+			c.stats.duplicatePackets++
 			return
 		}
 		c.inbuf.put(uint32(pkSeqNr), &inboundPacket{data: append([]byte(nil), p.payload...)})
 		c.reorderCount++
+		c.stats.reorderInserts++
+		c.stats.reorderPeak = max(c.stats.reorderPeak, c.reorderCount)
 		c.scheduleAck()
 	}
 }
@@ -1355,8 +1370,10 @@ func (c *Conn) readDrained() {
 	}
 	if c.lastRcvWin == 0 {
 		// We had the peer completely stalled, so don't wait to tell it otherwise.
+		c.stats.windowUpdatesNow++
 		c.sendAck(false)
 	} else {
+		c.stats.windowUpdatesLate++
 		c.scheduleAck()
 	}
 }
