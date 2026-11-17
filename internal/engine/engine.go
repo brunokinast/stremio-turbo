@@ -357,6 +357,8 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	cc.DisableIPv6 = false
 	cc.DisableUTP = false
 	cc.DisableTCP = false
+	// A 4 MiB OS receive buffer on the uTP socket, which the DHT shares.
+	cc.ListenPacket = bufferedListenPacket(net.ListenPacket)
 
 	// Maximize peer sourcing + feature set.
 	cc.DisablePEX = false                        // BEP11 peer exchange
