@@ -145,6 +145,15 @@ func (m *fakeEM) Dials(ih string) ([]types.DialRecord, bool) {
 	}
 	return []types.DialRecord{{Address: "1.2.3.4:5", Outgoing: true, Result: types.DialRefused}}, true
 }
+func (m *fakeEM) Trace(ih string) (types.Trace, bool) {
+	if _, ok := m.m[ih]; !ok {
+		return types.Trace{}, false
+	}
+	return types.Trace{Created: time.Now(), Events: []types.TraceEvent{{Name: "created"}}}, true
+}
+func (m *fakeEM) LockHolds() []types.LockHold {
+	return []types.LockHold{{HeldMs: 60, LockedAt: "here"}}
+}
 func (m *fakeEM) Scrape(_ context.Context, reqs []types.ScrapeRequest, onUpdate func(types.ScrapeUpdate)) []types.ScrapeResult {
 	m.scrapeReqs = reqs
 	out := make([]types.ScrapeResult, len(reqs))

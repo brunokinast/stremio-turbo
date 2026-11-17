@@ -86,6 +86,7 @@ type server struct {
 	cfg       types.Config
 	logReq    bool
 	accessLog *slog.Logger
+	reqs      *reqLog // per-torrent request log for GET /debug/trace/:infoHash
 	sp        *streamproxy.Handler
 	// certReload hot-swaps the live HTTPS cert after /get-https writes new
 	// files (wired by cmd). atomic.Pointer because it is set once from main's
@@ -135,6 +136,7 @@ func New(em types.EngineManager, ss types.SettingsStore, prober types.MediaProbe
 		cfg:         cfg,
 		logReq:      cfg.HTTPLog,
 		accessLog:   logging.For("http"),
+		reqs:        newReqLog(),
 		sp:          streamproxy.New(buildStreamProxyConfig(cfg, pc, privateAllow)),
 		proxyClient: pc,
 		blobClient:  bc,
@@ -676,9 +678,9 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		case len(seg) == 1:
 			http.NotFound(w, r)
 		case seg[1] == "create":
-			s.handleCreate(w, r, ih)
+			s.traced(w, r, ih, "create", func(w http.ResponseWriter, r *http.Request) { s.handleCreate(w, r, ih) })
 		case seg[1] == "remove":
-			s.handleRemove(w, r, ih)
+			s.traced(w, r, ih, "remove", func(w http.ResponseWriter, r *http.Request) { s.handleRemove(w, r, ih) })
 		case seg[1] == "stats.json":
 			s.writeStats(w, ih, -1)
 		case len(seg) >= 3 && seg[2] == "stats.json":
@@ -690,9 +692,9 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		// /:infoHash/:fileIdx/subtitles.vtt — subtitle conversion for a torrent file
 		case len(seg) >= 3 && seg[2] == "subtitles.vtt":
 			idx, _ := strconv.Atoi(seg[1])
-			s.handleStreamSubtitles(w, r, ih, idx)
+			s.traced(w, r, ih, "subtitles", func(w http.ResponseWriter, r *http.Request) { s.handleStreamSubtitles(w, r, ih, idx) })
 		default:
-			s.handleStream(w, r, ih, seg[1])
+			s.traced(w, r, ih, "stream", func(w http.ResponseWriter, r *http.Request) { s.handleStream(w, r, ih, seg[1]) })
 		}
 		return
 	}
@@ -721,6 +723,14 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeJSON(w, http.StatusOK, dials)
+			return
+		}
+		if ih, ok := strings.CutPrefix(r.URL.Path, "/debug/trace/"); ok && isInfoHash(ih) {
+			s.handleDebugTrace(w, strings.ToLower(ih))
+			return
+		}
+		if r.URL.Path == "/debug/locks" {
+			writeJSON(w, http.StatusOK, s.em.LockHolds())
 			return
 		}
 		http.NotFound(w, r)
@@ -961,6 +971,9 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request, ih, idxSeg
 		return
 	}
 	defer func() { _ = rc.Close() }()
+	if t, ok := rc.(interface{ SetTraceRequest(uint64) }); ok {
+		t.SetTraceRequest(traceRequestID(r.Context()))
+	}
 
 	// If the client disconnects (tab closed, seek aborted) while a Read is
 	// blocked waiting on the swarm, nothing would otherwise wake it: io.Copy*

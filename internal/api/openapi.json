@@ -10164,6 +10164,74 @@
           }
         }
       }
+    },
+    "/debug/trace/{infoHash}": {
+      "get": {
+        "operationId": "getDebugTrace",
+        "summary": "Play trace of a torrent",
+        "tags": [
+          "Stats"
+        ],
+        "description": "What happened during a play: milestones (metadata, first unchoke, first chunk, first verified piece, first byte read), stream reads that waited 250 ms or more for data, the HTTP requests under the torrent's routes with their first-byte delay, once-a-second samples of useful peers (request queue and uTP transport state) while a stream is open, and storage write and piece-completion timings. Times are ms since the torrent was added. Each list keeps its newest entries. In memory only; dropped with the torrent.",
+        "parameters": [
+          {
+            "name": "infoHash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trace"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown torrent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/locks": {
+      "get": {
+        "operationId": "getDebugLocks",
+        "summary": "Long holds of the BitTorrent client lock",
+        "tags": [
+          "Stats"
+        ],
+        "description": "Holds of the client lock of 50 ms or more, oldest first, capped at the latest 1000, with the function that took the lock. While the lock is held, no peer connection can process messages.",
+        "responses": {
+          "200": {
+            "description": "Lock holds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LockHold"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -13069,6 +13137,419 @@
             "type": "string"
           }
         }
+      },
+      "Trace": {
+        "type": "object",
+        "description": "A torrent's play trace.",
+        "properties": {
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TraceEvent"
+            }
+          },
+          "stalls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReadStall"
+            }
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TraceRequest"
+            }
+          },
+          "peerSamples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PeerSample"
+            }
+          },
+          "storage": {
+            "$ref": "#/components/schemas/StorageTrace"
+          }
+        },
+        "required": [
+          "created",
+          "events",
+          "stalls",
+          "requests",
+          "peerSamples",
+          "storage"
+        ]
+      },
+      "TraceEvent": {
+        "type": "object",
+        "description": "A milestone, recorded once per torrent.",
+        "properties": {
+          "atMs": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "atMs",
+          "name"
+        ]
+      },
+      "ReadStall": {
+        "type": "object",
+        "description": "A stream read that waited 250 ms or more for data; first marks a reader's first read, recorded whatever its length.",
+        "properties": {
+          "atMs": {
+            "type": "integer"
+          },
+          "durationMs": {
+            "type": "integer"
+          },
+          "file": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "piece": {
+            "type": "integer"
+          },
+          "request": {
+            "type": "integer"
+          },
+          "first": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "atMs",
+          "durationMs",
+          "file",
+          "offset",
+          "piece"
+        ]
+      },
+      "TraceRequest": {
+        "type": "object",
+        "description": "An HTTP request under the torrent's routes (stream, create, remove, subtitles).",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "atMs": {
+            "type": "integer"
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "stream",
+              "create",
+              "remove",
+              "subtitles"
+            ]
+          },
+          "method": {
+            "type": "string"
+          },
+          "range": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "firstByteMs": {
+            "type": "integer",
+            "description": "Delay to the first body byte; -1 if none was sent."
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "durationMs": {
+            "type": "integer"
+          },
+          "end": {
+            "type": "string",
+            "enum": [
+              "done",
+              "client-closed",
+              "error"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "atMs",
+          "class",
+          "method",
+          "status",
+          "firstByteMs",
+          "bytes",
+          "durationMs",
+          "end"
+        ]
+      },
+      "PeerSample": {
+        "type": "object",
+        "description": "One peer connection's state at a sample.",
+        "properties": {
+          "atMs": {
+            "type": "integer"
+          },
+          "address": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "outgoing": {
+            "type": "boolean"
+          },
+          "downloaded": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pieces": {
+            "type": "integer"
+          },
+          "outstanding": {
+            "type": "integer"
+          },
+          "cancelled": {
+            "type": "integer"
+          },
+          "maxRequests": {
+            "type": "integer"
+          },
+          "interested": {
+            "type": "boolean"
+          },
+          "peerChoking": {
+            "type": "boolean"
+          },
+          "peerInterested": {
+            "type": "boolean"
+          },
+          "choking": {
+            "type": "boolean"
+          },
+          "snubbed": {
+            "type": "boolean"
+          },
+          "utp": {
+            "$ref": "#/components/schemas/UTPSample"
+          }
+        },
+        "required": [
+          "atMs",
+          "address",
+          "network",
+          "source",
+          "outgoing",
+          "downloaded",
+          "pieces",
+          "outstanding",
+          "cancelled",
+          "maxRequests",
+          "interested",
+          "peerChoking",
+          "peerInterested",
+          "choking",
+          "snubbed"
+        ]
+      },
+      "UTPSample": {
+        "type": "object",
+        "description": "A uTP connection's transport state; counters are cumulative.",
+        "properties": {
+          "rttMs": {
+            "type": "integer"
+          },
+          "rtoMs": {
+            "type": "integer"
+          },
+          "inOrder": {
+            "type": "integer"
+          },
+          "duplicates": {
+            "type": "integer"
+          },
+          "reorderInserts": {
+            "type": "integer"
+          },
+          "reorderTooFar": {
+            "type": "integer"
+          },
+          "reorderPeak": {
+            "type": "integer"
+          },
+          "reorderCount": {
+            "type": "integer"
+          },
+          "acksSent": {
+            "type": "integer"
+          },
+          "selectiveAcks": {
+            "type": "integer"
+          },
+          "duplicateAcks": {
+            "type": "integer"
+          },
+          "windowUpdatesImmediate": {
+            "type": "integer"
+          },
+          "windowUpdatesScheduled": {
+            "type": "integer"
+          },
+          "curWindow": {
+            "type": "integer"
+          },
+          "maxWindow": {
+            "type": "integer"
+          },
+          "lastRcvWindow": {
+            "type": "integer"
+          },
+          "readBuffered": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rttMs",
+          "rtoMs",
+          "inOrder",
+          "duplicates",
+          "reorderInserts",
+          "reorderTooFar",
+          "reorderPeak",
+          "reorderCount",
+          "acksSent",
+          "selectiveAcks",
+          "duplicateAcks",
+          "windowUpdatesImmediate",
+          "windowUpdatesScheduled",
+          "curWindow",
+          "maxWindow",
+          "lastRcvWindow",
+          "readBuffered"
+        ]
+      },
+      "StorageTrace": {
+        "type": "object",
+        "description": "Chunk-write and piece-completion timings.",
+        "properties": {
+          "chunkWrites": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "chunkWriteMs": {
+            "type": "number"
+          },
+          "slowWrites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlowWrite"
+            }
+          },
+          "markCompletions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PieceTiming"
+            }
+          }
+        },
+        "required": [
+          "chunkWrites",
+          "chunkWriteMs",
+          "slowWrites",
+          "markCompletions"
+        ]
+      },
+      "SlowWrite": {
+        "type": "object",
+        "description": "A chunk write that took 10 ms or more, or failed.",
+        "properties": {
+          "atMs": {
+            "type": "integer"
+          },
+          "piece": {
+            "type": "integer"
+          },
+          "begin": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "atMs",
+          "piece",
+          "begin",
+          "durationMs"
+        ]
+      },
+      "PieceTiming": {
+        "type": "object",
+        "description": "One verified piece's MarkComplete.",
+        "properties": {
+          "atMs": {
+            "type": "integer"
+          },
+          "piece": {
+            "type": "integer"
+          },
+          "durationMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "atMs",
+          "piece",
+          "durationMs"
+        ]
+      },
+      "LockHold": {
+        "type": "object",
+        "description": "A hold of the client lock.",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "heldMs": {
+            "type": "number"
+          },
+          "lockedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "heldMs",
+          "lockedAt"
+        ]
       }
     }
   }

@@ -127,3 +127,37 @@ func TestHandlerDebugDials(t *testing.T) {
 		t.Errorf("bad hash = %d; want 404", rec.Code)
 	}
 }
+
+// A ranged stream request shows up in the torrent's trace with its range,
+// user agent, size and first-byte time; stats polls are not logged.
+func TestHandlerDebugTraceLogsStreamRequests(t *testing.T) {
+	h := newHandler(t, testEngine())
+	req := httptest.NewRequest(http.MethodGet, "/"+testIH+"/0", nil)
+	req.Header.Set("Range", "bytes=0-3")
+	req.Header.Set("User-Agent", "libmpv")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	serve(t, h, http.MethodGet, "/"+testIH+"/stats.json", nil)
+
+	rec := serve(t, h, http.MethodGet, "/debug/trace/"+strings.ToUpper(testIH), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body)
+	}
+	var tr types.Trace
+	if err := json.Unmarshal(rec.Body.Bytes(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Requests) != 1 {
+		t.Fatalf("requests = %+v; want only the stream request", tr.Requests)
+	}
+	got := tr.Requests[0]
+	if got.Class != "stream" || got.Range != "bytes=0-3" || got.UserAgent != "libmpv" ||
+		got.Status != http.StatusPartialContent || got.Bytes != 4 || got.FirstByteMs < 0 || got.End != "done" || got.ID == 0 {
+		t.Errorf("request = %+v", got)
+	}
+	if rec := serve(t, h, http.MethodGet, "/debug/trace/00112233445566778899aabbccddeeff00112233", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown torrent = %d; want 404", rec.Code)
+	}
+	if rec := serve(t, h, http.MethodGet, "/debug/locks", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"lockedAt":"here"`) {
+		t.Errorf("locks: status %d body %s", rec.Code, rec.Body)
+	}
+}

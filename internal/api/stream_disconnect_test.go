@@ -119,6 +119,8 @@ func (m *disconnectFakeEM) Scrape(context.Context, []types.ScrapeRequest, func(t
 }
 func (m *disconnectFakeEM) WriteStatus(io.Writer)                   {}
 func (m *disconnectFakeEM) Dials(string) ([]types.DialRecord, bool) { return nil, false }
+func (m *disconnectFakeEM) Trace(string) (types.Trace, bool)        { return types.Trace{}, false }
+func (m *disconnectFakeEM) LockHolds() []types.LockHold             { return nil }
 func (m *disconnectFakeEM) Close() error                            { return nil }
 
 var _ types.EngineManager = (*disconnectFakeEM)(nil)

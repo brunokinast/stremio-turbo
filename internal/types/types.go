@@ -337,6 +337,136 @@ type DialRecord struct {
 	Error      string `json:"error,omitempty"`
 }
 
+// Trace is a torrent's diagnostic record (GET /debug/trace/:infoHash): what
+// happened during a play, second by second, so a slow start or a stall can be
+// explained from one capture. Times are ms since the torrent was added
+// (Created); each list is bounded and keeps the newest entries.
+type Trace struct {
+	Created     time.Time      `json:"created"`
+	Events      []TraceEvent   `json:"events"`
+	Stalls      []ReadStall    `json:"stalls"`
+	Requests    []TraceRequest `json:"requests"`
+	PeerSamples []PeerSample   `json:"peerSamples"`
+	Storage     StorageTrace   `json:"storage"`
+}
+
+// TraceEvent is a milestone such as "metadata", "first-unchoke" or
+// "first-byte-read"; each is recorded once per torrent.
+type TraceEvent struct {
+	AtMs   int64  `json:"atMs"`
+	Name   string `json:"name"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// ReadStall is a stream read that waited at least 250 ms for data: the
+// server-side definition of buffering. First marks the reader's first read
+// (time to first byte), which is recorded whatever its length.
+type ReadStall struct {
+	AtMs       int64  `json:"atMs"`
+	DurationMs int64  `json:"durationMs"`
+	File       int    `json:"file"`
+	Offset     int64  `json:"offset"`
+	Piece      int    `json:"piece"`
+	Request    uint64 `json:"request,omitempty"`
+	First      bool   `json:"first,omitempty"`
+}
+
+// TraceRequest is one HTTP request under the torrent's routes (stream,
+// create, remove, subtitles), for seeing exactly what a player and the
+// server's own helpers read and how long each waited for its first byte.
+type TraceRequest struct {
+	ID        uint64 `json:"id"`
+	AtMs      int64  `json:"atMs"`
+	Class     string `json:"class"`
+	Method    string `json:"method"`
+	Range     string `json:"range,omitempty"`
+	UserAgent string `json:"userAgent,omitempty"`
+	Status    int    `json:"status"`
+	// FirstByteMs is the delay to the first body byte; -1 if none was sent.
+	FirstByteMs int64 `json:"firstByteMs"`
+	Bytes       int64 `json:"bytes"`
+	DurationMs  int64 `json:"durationMs"`
+	// End is "done", "client-closed" or "error".
+	End string `json:"end"`
+}
+
+// PeerSample is one peer connection's state, sampled once a second while a
+// stream reader is open.
+type PeerSample struct {
+	AtMs           int64      `json:"atMs"`
+	Address        string     `json:"address"`
+	Client         string     `json:"client,omitempty"`
+	Network        string     `json:"network"`
+	Source         string     `json:"source"`
+	Outgoing       bool       `json:"outgoing"`
+	Downloaded     int64      `json:"downloaded"`
+	Pieces         int        `json:"pieces"`
+	Outstanding    int        `json:"outstanding"`
+	Cancelled      int        `json:"cancelled"`
+	MaxRequests    int        `json:"maxRequests"`
+	Interested     bool       `json:"interested"`
+	PeerChoking    bool       `json:"peerChoking"`
+	PeerInterested bool       `json:"peerInterested"`
+	Choking        bool       `json:"choking"`
+	Snubbed        bool       `json:"snubbed"`
+	UTP            *UTPSample `json:"utp,omitempty"`
+}
+
+// UTPSample is a uTP connection's transport state (cumulative counters).
+type UTPSample struct {
+	RTTMs                  int64  `json:"rttMs"`
+	RTOMs                  int64  `json:"rtoMs"`
+	InOrder                uint64 `json:"inOrder"`
+	Duplicates             uint64 `json:"duplicates"`
+	ReorderInserts         uint64 `json:"reorderInserts"`
+	ReorderTooFar          uint64 `json:"reorderTooFar"`
+	ReorderPeak            int    `json:"reorderPeak"`
+	ReorderCount           int    `json:"reorderCount"`
+	AcksSent               uint64 `json:"acksSent"`
+	SelectiveAcks          uint64 `json:"selectiveAcks"`
+	DuplicateAcks          uint64 `json:"duplicateAcks"`
+	WindowUpdatesImmediate uint64 `json:"windowUpdatesImmediate"`
+	WindowUpdatesScheduled uint64 `json:"windowUpdatesScheduled"`
+	CurWindow              int    `json:"curWindow"`
+	MaxWindow              int    `json:"maxWindow"`
+	LastRcvWindow          int    `json:"lastRcvWindow"`
+	ReadBuffered           int    `json:"readBuffered"`
+}
+
+// StorageTrace times piece-data writes and piece completion. A chunk write
+// stalls its connection's read loop; MarkComplete runs between a piece
+// passing its hash check and readers being woken.
+type StorageTrace struct {
+	ChunkWrites     int64         `json:"chunkWrites"`
+	ChunkWriteMs    float64       `json:"chunkWriteMs"`
+	SlowWrites      []SlowWrite   `json:"slowWrites"`
+	MarkCompletions []PieceTiming `json:"markCompletions"`
+}
+
+// SlowWrite is a chunk write that took at least 10 ms.
+type SlowWrite struct {
+	AtMs       int64   `json:"atMs"`
+	Piece      int     `json:"piece"`
+	Begin      int64   `json:"begin"`
+	DurationMs float64 `json:"durationMs"`
+	Error      string  `json:"error,omitempty"`
+}
+
+// PieceTiming is one verified piece's MarkComplete.
+type PieceTiming struct {
+	AtMs       int64   `json:"atMs"`
+	Piece      int     `json:"piece"`
+	DurationMs float64 `json:"durationMs"`
+}
+
+// LockHold is a hold of the BitTorrent client's lock of at least 50 ms (GET
+// /debug/locks). While held, peer connections cannot process messages.
+type LockHold struct {
+	At       time.Time `json:"at"`
+	HeldMs   float64   `json:"heldMs"`
+	LockedAt string    `json:"lockedAt"`
+}
+
 // DialRecord results.
 const (
 	DialConnected = "connected"
@@ -392,6 +522,12 @@ type EngineManager interface {
 	// outcome, accepted incoming connections), oldest first; false when the
 	// torrent is unknown.
 	Dials(infoHash string) ([]DialRecord, bool)
+	// Trace returns a torrent's diagnostic record (milestones, read stalls,
+	// peer samples, storage timings); false when the torrent is unknown. The
+	// API layer adds the request log.
+	Trace(infoHash string) (Trace, bool)
+	// LockHolds returns the recent long holds of the client lock, oldest first.
+	LockHolds() []LockHold
 	Close() error
 }
 

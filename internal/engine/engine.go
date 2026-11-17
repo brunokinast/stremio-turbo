@@ -70,6 +70,10 @@ type engine struct {
 	infoHash string      // lower-cased
 	path     string      // cache path (reported in Stats.opts.path)
 	mem      *memStorage // in-RAM backend, nil on disk storage; streams report reads to it
+	trace    *tracer     // diagnostics (GET /debug/trace/:infoHash)
+	// sampling is true while a goroutine samples this torrent's peers for the
+	// trace; it runs only while a stream reader is open.
+	sampling atomic.Bool
 
 	// connectionTries is a best-effort count of outbound dial churn: it sums
 	// increases in HalfOpenPeers between successive Stats() samples. anacrolix
@@ -211,6 +215,7 @@ func (e *engine) ensureDownloading(idx int) {
 // manager owns the anacrolix Client and the live engine map, satisfying types.EngineManager.
 type manager struct {
 	dials       *dialLog // per-torrent connection log (GET /debug/dials/:infoHash)
+	trace       *tracer  // per-torrent play trace and lock holds (GET /debug/trace, /debug/locks)
 	maxEngines  int      // active-engine cap; <=0 unlimited
 	client      *torrent.Client
 	cfg         types.Config
@@ -383,6 +388,8 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	dials := newDialLog()
 	cc.Callbacks.OutgoingConnResult = append(cc.Callbacks.OutgoingConnResult, dials.onOutgoing)
 	cc.Callbacks.PeerConnAdded = append(cc.Callbacks.PeerConnAdded, dials.onPeerConnAdded)
+	trace := newTracer()
+	installTracer(cc, trace)
 
 	// Honor the documented contract: 0 = OS-assigned (random) port. anacrolix's
 	// NewDefaultClientConfig hardcodes 42069, so we must set it unconditionally
@@ -454,6 +461,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 
 	m := &manager{
 		dials:                      dials,
+		trace:                      trace,
 		client:                     client,
 		cfg:                        cfg,
 		downLimiter:                downLimiter,
@@ -621,11 +629,20 @@ func (m *manager) EnsureEngine(infoHash string, opts types.AddOptions) (types.En
 			lastAccess: time.Now(),
 			optsSource: m.statsOptsSource,
 			mem:        m.mem,
+			trace:      m.trace,
 			chosenFile: -1,
 		}
 		m.engines[ih] = e
 		m.mu.Unlock()
 		m.dials.begin(ih, e.lastAccess)
+		m.trace.begin(ih, e.lastAccess)
+		go func() {
+			select {
+			case <-t.GotInfo():
+				m.trace.once(ih, "metadata", "", time.Now())
+			case <-t.Closed():
+			}
+		}()
 
 		// Start from the peers a recent scrape found rather than a cold lookup.
 		m.seedPeerHints(ih, t)
@@ -665,6 +682,7 @@ func (m *manager) beginPurge(ih string, e *engine) func() {
 	e.t.Drop()
 	delete(m.engines, ih)
 	m.dials.forget(ih)
+	m.trace.forget(ih)
 	done := make(chan struct{})
 	m.purging[ih] = done
 	return func() {
@@ -1445,6 +1463,9 @@ func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
 	}
 	e.reading[idx]++
 	e.mu.Unlock()
+	if e.trace != nil && e.sampling.CompareAndSwap(false, true) {
+		go e.samplePeers()
+	}
 	e.ensureDownloading(idx) // fetch the file being played; demote abandoned ones
 	e.primeBoundary(idx)     // top-priority the header/moov so playback starts fast
 	if os.Getenv("RIVULET_EXPERIMENT_TAIL") != "high" {
@@ -1756,6 +1777,22 @@ type pinnedReader struct {
 	pieceLen int64
 
 	closeErr error // result of the single real tr.Close() call; cached by Close's sync.Once
+
+	// traceReq is the HTTP request this reader serves, for the trace's stall log.
+	traceReq atomic.Uint64
+}
+
+// SetTraceRequest tags the reader's stalls with the id of the HTTP request it
+// serves (see the API request log).
+func (p *pinnedReader) SetTraceRequest(id uint64) { p.traceReq.Store(id) }
+
+// noteStall records a read that waited d for data at the current position.
+func (p *pinnedReader) noteStall(d time.Duration, first bool) {
+	if p.e.trace == nil || (!first && d < stallThreshold) {
+		return
+	}
+	start := p.base + p.pos
+	p.e.trace.stall(p.e.infoHash, types.ReadStall{File: p.idx, Offset: p.pos, Piece: int(start / p.pieceLen), Request: p.traceReq.Load(), First: first}, time.Now(), d)
 }
 
 func (p *pinnedReader) Read(b []byte) (int, error) {
@@ -1764,7 +1801,9 @@ func (p *pinnedReader) Read(b []byte) (int, error) {
 	// below on the first successful read), so reads block for the swarm
 	// instead of racing a deadline. Lock-free.
 	if p.started.Load() {
+		t0 := time.Now()
 		n, err := p.tr.Read(b)
+		p.noteStall(time.Since(t0), false)
 		p.noteRead(n)
 		return n, err
 	}
@@ -1774,8 +1813,13 @@ func (p *pinnedReader) Read(b []byte) (int, error) {
 	// cancels p.ctx) unblocks this first read immediately too.
 	deadlineCtx, cancelDeadline := context.WithDeadline(p.ctx, p.deadline)
 	p.tr.SetContext(deadlineCtx)
+	t0 := time.Now()
 	n, err := p.tr.Read(b)
 	if n > 0 {
+		p.noteStall(time.Since(t0), true)
+		if p.e.trace != nil {
+			p.e.trace.once(p.e.infoHash, "first-byte-read", "", time.Now())
+		}
 		p.started.Store(true)
 		// Promote to the long-lived context BEFORE releasing the deadline
 		// one below, so tr is never left holding an already-cancelled
