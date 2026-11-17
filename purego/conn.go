@@ -410,9 +410,37 @@ func (c *Conn) unscheduleAck() {
 	}
 }
 
+// The longest selective ack mask: one bit per reorder buffer slot.
+const maxSelectiveAckBytes = reorderBufferMaxSize / 8
+
+// Fills mask with the selective ack bitmap and returns its length in bytes. Bit i (bit i%8 of byte
+// i/8) is set when packet ackNr+2+i is in the reorder buffer; ackNr+1 is by definition the packet
+// we're missing. The mask covers the whole reorder buffer, as libtorrent's receiver does, so that the
+// sender learns of every hole in one round trip. Covering only the first 30 packets made the sender
+// repair one hole per round trip, which froze a stream for seconds after a burst of losses. The
+// length is a multiple of 4 bytes, at least 4, as BEP 29 requires; libtorrent and libutp read any
+// such length.
+func (c *Conn) selectiveAckMask(mask *[maxSelectiveAckBytes]byte) int {
+	window := uint32(reorderBufferMaxSize)
+	if s := c.inbuf.size(); s < window {
+		window = s
+	}
+	last := -1
+	for i := uint32(0); i < window; i++ {
+		if c.inbuf.get(uint32(c.ackNr)+i+2) != nil {
+			mask[i/8] |= 1 << (i % 8)
+			last = int(i)
+		}
+	}
+	if last < 0 {
+		return 4
+	}
+	return (last/32 + 1) * 4
+}
+
 // Sends a state packet, carrying a selective ack if anything is sitting in the reorder buffer.
 func (c *Conn) sendAck(synack bool) {
-	var b [headerSize + 6]byte
+	var b [headerSize + 2 + maxSelectiveAckBytes]byte
 	c.lastRcvWin = c.rcvWindow()
 	c.stats.acksSent++
 	if c.reorderCount != 0 {
@@ -433,24 +461,10 @@ func (c *Conn) sendAck(synack bool) {
 	// There's never a reason to send a selective ack on a connection that's shutting down.
 	if c.reorderCount != 0 && !c.gotFinReached {
 		h.Extension = extSelectiveAck
-		var m uint32
-		// The mask starts at ackNr+2, because ackNr+1 is by definition the packet we're missing.
-		window := uint32(14 + 16)
-		if s := c.inbuf.size(); s < window {
-			window = s
-		}
-		for i := uint32(0); i < window; i++ {
-			if c.inbuf.get(uint32(c.ackNr)+i+2) != nil {
-				m |= 1 << i
-			}
-		}
+		ln := c.selectiveAckMask((*[maxSelectiveAckBytes]byte)(b[headerSize+2:]))
 		b[headerSize] = extNone
-		b[headerSize+1] = 4
-		b[headerSize+2] = byte(m)
-		b[headerSize+3] = byte(m >> 8)
-		b[headerSize+4] = byte(m >> 16)
-		b[headerSize+5] = byte(m >> 24)
-		n += 6
+		b[headerSize+1] = byte(ln)
+		n += 2 + ln
 	}
 	h.marshalTo(b[:])
 	c.sendData(b[:n], false)
