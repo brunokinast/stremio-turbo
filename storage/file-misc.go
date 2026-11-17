@@ -93,6 +93,9 @@ type fileExtra struct {
 	race byte
 	// A piece of the file that was incomplete when last checked. See allFilePiecesComplete.
 	incompleteHint atomic.Int64
+	// Set when the file was found complete with no part file to promote; cleared when it becomes
+	// incomplete again. See MarkComplete.
+	noPartFile atomic.Bool
 }
 
 func (f *fileExtra) partFilePath() string {

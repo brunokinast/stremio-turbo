@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	"io/fs"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -31,6 +32,15 @@ type torrentCheckpointBuffer struct {
 	pendingBytes  int64
 
 	lastCheckpoint time.Time
+
+	// Checkpoints run on a background goroutine, so MarkComplete (which readers of the piece wait
+	// for) never waits for a file sync. wake asks it for one; stop ends it.
+	wake    chan struct{}
+	stop    chan struct{}
+	stopped chan struct{}
+	// Guards against starting the goroutine twice or after close.
+	runOnce   sync.Once
+	closeOnce sync.Once
 }
 
 func newTorrentCheckpointBuffer(
@@ -43,9 +53,15 @@ func newTorrentCheckpointBuffer(
 		pendingPieces:  make(map[metainfo.PieceKey]struct{}),
 		pendingFiles:   make(map[string]fileCheckpointTarget),
 		lastCheckpoint: time.Now(),
+		wake:           make(chan struct{}, 1),
+		stop:           make(chan struct{}),
+		stopped:        make(chan struct{}),
 	}
 }
 
+// Queues a completed piece for the next checkpoint and, when one is due, asks the background
+// goroutine for it. Syncing the files took up to hundreds of milliseconds on a multi-GB file, and
+// was done here, inline in MarkComplete, once a second.
 func (me *torrentCheckpointBuffer) queuePiece(
 	key metainfo.PieceKey,
 	length int64,
@@ -62,9 +78,40 @@ func (me *torrentCheckpointBuffer) queuePiece(
 	shouldCheckpoint := me.shouldCheckpointLocked()
 	me.mu.Unlock()
 	if shouldCheckpoint {
-		return me.checkpoint()
+		me.runOnce.Do(func() { go me.run() })
+		select {
+		case me.wake <- struct{}{}:
+		default:
+		}
 	}
 	return nil
+}
+
+func (me *torrentCheckpointBuffer) run() {
+	defer close(me.stopped)
+	for {
+		select {
+		case <-me.stop:
+			return
+		case <-me.wake:
+		}
+		me.mu.Lock()
+		due := me.shouldCheckpointLocked()
+		me.mu.Unlock()
+		if !due {
+			continue
+		}
+		if err := me.checkpoint(); err != nil {
+			me.logger().Warn("error checkpointing completed pieces", "err", err)
+		}
+	}
+}
+
+func (me *torrentCheckpointBuffer) logger() *slog.Logger {
+	if me.t.client != nil && me.t.client.opts.Logger != nil {
+		return me.t.client.opts.Logger
+	}
+	return slog.Default()
 }
 
 func (me *torrentCheckpointBuffer) shouldCheckpointLocked() bool {
@@ -99,7 +146,17 @@ func (me *torrentCheckpointBuffer) checkpoint() error {
 	return nil
 }
 
+// Stops the background goroutine, waiting for a checkpoint in progress, then checkpoints whatever is
+// still pending.
 func (me *torrentCheckpointBuffer) close() error {
+	me.closeOnce.Do(func() {
+		close(me.stop)
+		started := true
+		me.runOnce.Do(func() { started = false })
+		if started {
+			<-me.stopped
+		}
+	})
 	return me.checkpoint()
 }
 

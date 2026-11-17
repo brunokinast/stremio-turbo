@@ -184,17 +184,25 @@ func (me *filePieceImpl) MarkComplete() (err error) {
 		}
 	}
 	for f := range me.pieceFiles() {
-		// Checking the file is complete costs a completion lookup per piece in it. Skip that when
-		// there's no part file to promote, such as when rechecking data that's already complete.
-		if !me.mightPromotePartFile(f) {
+		if !me.partFiles() || f.noPartFile.Load() {
 			continue
 		}
+		// While the file is incomplete this is one completion lookup (see the hint). It comes before
+		// looking for the part file because that stat waits for any sync of the same file in
+		// progress on Windows: up to 230 ms measured, once a second while downloading, and readers
+		// of the piece wait for MarkComplete.
 		res := me.allFilePiecesComplete(f)
 		if res.Err != nil {
 			err = res.Err
 			return
 		}
 		if !res.Ok {
+			continue
+		}
+		// Remember a missing part file, so rechecking data that's already complete scans the
+		// file's completion once rather than once per piece.
+		if !me.mightPromotePartFile(f) {
+			f.noPartFile.Store(true)
 			continue
 		}
 		err = me.promotePartFile(f)
@@ -314,6 +322,7 @@ func (me *filePieceImpl) onFileNotComplete(f file) (err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.race++
+	f.noPartFile.Store(false)
 	_, err = me.exclRenameIfExists(f.safeOsPath, f.partFilePath())
 	if err != nil {
 		err = fmt.Errorf("restoring part file: %w", err)
