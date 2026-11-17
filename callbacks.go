@@ -46,6 +46,32 @@ type Callbacks struct {
 	// fail, how, and how long that takes). The Client lock is held: handlers must be quick and
 	// must not call back into the Client.
 	OutgoingConnResult []func(OutgoingConnResultEvent)
+
+	// Called after each received chunk is written to storage, with how long the write took.
+	// Useful for finding storage stalls, which stop the connection's read loop for as long as
+	// they last. The Client lock is not held.
+	ChunkWritten []func(ChunkWrittenEvent)
+	// Called after a piece that passed its hash check was marked complete in storage, with how
+	// long that took. Readers waiting on the piece are woken only after this returns. The
+	// Client lock is not held.
+	PieceMarkedComplete []func(PieceMarkedCompleteEvent)
+}
+
+type ChunkWrittenEvent struct {
+	Torrent *Torrent
+	Piece   int
+	// Offset of the chunk within the piece, and its length.
+	Begin    int64
+	Length   int
+	Duration time.Duration
+	Err      error
+}
+
+type PieceMarkedCompleteEvent struct {
+	Torrent  *Torrent
+	Piece    int
+	Duration time.Duration
+	Err      error
 }
 
 type OutgoingConnResultEvent struct {

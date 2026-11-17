@@ -13,7 +13,8 @@ import (
 )
 
 // After a transfer, the leecher's connection to the seeder reports its request state and transport,
-// and the client lock hook has seen holds with the place they were taken.
+// the storage timing callbacks fired, and the client lock hook has seen holds with the place they
+// were taken.
 func TestPeerConnDiagnostics(t *testing.T) {
 	greetingTempDir, mi := testutil.GreetingTestTorrent()
 	defer os.RemoveAll(greetingTempDir)
@@ -29,6 +30,7 @@ func TestPeerConnDiagnostics(t *testing.T) {
 
 	var mu sync.Mutex
 	var holds []string
+	var chunksWritten, piecesMarked int
 	cfg = TestingConfig(t)
 	cfg.DropMutuallyCompletePeers = false
 	cfg.DataDir = t.TempDir()
@@ -38,6 +40,18 @@ func TestPeerConnDiagnostics(t *testing.T) {
 		holds = append(holds, lockedAt)
 		mu.Unlock()
 	}
+	cfg.Callbacks.ChunkWritten = append(cfg.Callbacks.ChunkWritten, func(ev ChunkWrittenEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		if ev.Err == nil && ev.Length > 0 {
+			chunksWritten++
+		}
+	})
+	cfg.Callbacks.PieceMarkedComplete = append(cfg.Callbacks.PieceMarkedComplete, func(ev PieceMarkedCompleteEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		piecesMarked++
+	})
 	leecher, err := NewClient(cfg)
 	qt.Assert(t, qt.IsNil(err))
 	defer leecher.Close()
@@ -69,6 +83,8 @@ func TestPeerConnDiagnostics(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
+	qt.Check(t, qt.IsTrue(chunksWritten > 0))
+	qt.Check(t, qt.Equals(piecesMarked, leecherTorrent.Info().NumPieces()))
 	qt.Assert(t, qt.Not(qt.HasLen(holds, 0)))
 	qt.Check(t, qt.IsTrue(strings.Contains(holds[0], "torrent")), qt.Commentf("lock site: %q", holds[0]))
 }

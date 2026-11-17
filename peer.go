@@ -385,7 +385,17 @@ func (w *pendingChunkWrite) write() error {
 	w.recordBlockForSmartBan()
 	concurrentChunkWrites.Add(1)
 	defer concurrentChunkWrites.Add(-1)
-	return w.t.writeChunk(w.index, w.begin, w.data)
+	cbs := w.t.cl.config.Callbacks.ChunkWritten
+	if len(cbs) == 0 {
+		return w.t.writeChunk(w.index, w.begin, w.data)
+	}
+	started := time.Now()
+	err := w.t.writeChunk(w.index, w.begin, w.data)
+	ev := ChunkWrittenEvent{w.t, w.index, w.begin, len(w.data), time.Since(started), err}
+	for _, f := range cbs {
+		f(ev)
+	}
+	return err
 }
 
 // Validates a received chunk and updates state as though it's already written, so it isn't

@@ -2809,9 +2809,16 @@ func (t *Torrent) pieceHashed(piece pieceIndex, passed bool, hashIoErr error) {
 		storagePiece := p.Storage()
 		t.cl.unlock()
 		s.race++
+		started := time.Now()
 		err := storagePiece.MarkComplete()
 		if err != nil {
 			t.slogger().Error("error marking piece complete", "piece", piece, "err", err)
+		}
+		if cbs := t.cl.config.Callbacks.PieceMarkedComplete; len(cbs) != 0 {
+			ev := PieceMarkedCompleteEvent{t, piece, time.Since(started), err}
+			for _, f := range cbs {
+				f(ev)
+			}
 		}
 		t.cl.lock()
 
