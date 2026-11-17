@@ -9,8 +9,14 @@ import (
 	"github.com/anacrolix/missinggo/v2/panicif"
 )
 
-// Opens file for write, creating dirs and fixing permissions as necessary.
+// Opens file for write, creating dirs and fixing permissions as necessary. The file is sparse where
+// the platform needs asking (see setSparse).
 func openFileExtra(p string, osRdwr int) (f *os.File, err error) {
+	defer func() {
+		if err == nil {
+			setSparse(f)
+		}
+	}()
 	panicif.NotZero(osRdwr & ^(os.O_RDONLY | os.O_RDWR | os.O_WRONLY))
 	flag := osRdwr | os.O_CREATE
 	f, err = os.OpenFile(p, flag, filePerm)
