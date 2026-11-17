@@ -260,6 +260,7 @@ func utpSample(c purego.ConnStats) *types.UTPSample {
 		ReorderTooFar:          c.ReorderTooFar,
 		ReorderPeak:            c.ReorderPeak,
 		ReorderCount:           c.ReorderCount,
+		ReorderBytes:           c.ReorderBytes,
 		AcksSent:               c.AcksSent,
 		SelectiveAcks:          c.SelectiveAcksSent,
 		DuplicateAcks:          c.DuplicateAcksSent,

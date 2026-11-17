@@ -13403,6 +13403,9 @@
           "reorderCount": {
             "type": "integer"
           },
+          "reorderBytes": {
+            "type": "integer"
+          },
           "acksSent": {
             "type": "integer"
           },
@@ -13440,6 +13443,7 @@
           "reorderTooFar",
           "reorderPeak",
           "reorderCount",
+          "reorderBytes",
           "acksSent",
           "selectiveAcks",
           "duplicateAcks",
