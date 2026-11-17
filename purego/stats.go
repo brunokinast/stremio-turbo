@@ -34,8 +34,10 @@ type ConnStats struct {
 	ReorderTooFar uint64
 	// The most packets that sat in the reorder buffer at once.
 	ReorderPeak int
-	// Packets currently in the reorder buffer.
+	// Packets currently in the reorder buffer, and their payload bytes (which the advertised
+	// window leaves out).
 	ReorderCount int
+	ReorderBytes int
 
 	// State packets sent, those carrying a selective ack, and those that repeated the previous
 	// ack number without a selective ack (a sender may count these as duplicate acks).
@@ -67,6 +69,7 @@ func (c *Conn) Stats() ConnStats {
 		ReorderTooFar:          k.reorderTooFar,
 		ReorderPeak:            int(k.reorderPeak),
 		ReorderCount:           int(c.reorderCount),
+		ReorderBytes:           c.reorderBytes,
 		AcksSent:               k.acksSent,
 		SelectiveAcksSent:      k.selectiveAcksSent,
 		DuplicateAcksSent:      k.duplicateAcksSent,

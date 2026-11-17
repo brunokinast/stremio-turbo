@@ -150,6 +150,8 @@ type Conn struct {
 	retransmitCount uint16
 	reorderCount    uint16
 	duplicateAck    uint8
+	// Payload bytes held in the reorder buffer; they count against the advertised window.
+	reorderBytes int
 	// Packets in the send queue, sent or not. The oldest unacked packet is seqNr-curWindowPackets.
 	curWindowPackets uint16
 	// Bytes in flight. Packets not yet sent, and packets a timeout has written off, don't count.
@@ -324,8 +326,13 @@ func (c *Conn) packetSize() int {
 
 // The receive window to advertise: what's left of the receive buffer once buffered data is
 // accounted for.
+// The receive window to advertise: the buffer less what is waiting to be read and what is held in
+// the reorder buffer behind a hole, as libtorrent computes it. Counting only the read buffer kept
+// the window fully open while a hole was outstanding (the application drains the read buffer
+// meanwhile), so a fast sender ran past the 1024-packet reorder buffer: one live peer had 793
+// packets dropped that way in two minutes, each to be resent.
 func (c *Conn) rcvWindow() int {
-	n := c.readBuf.len()
+	n := c.readBuf.len() + c.reorderBytes
 	if c.optRcvBuf > n {
 		return c.optRcvBuf - n
 	}
@@ -1246,6 +1253,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 				c.sendAck(false)
 				// Anything left in the reorder buffer is past the FIN, so drop it.
 				c.reorderCount = 0
+				c.reorderBytes = 0
 				break
 			}
 			if c.reorderCount == 0 {
@@ -1262,6 +1270,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 			}
 			c.ackNr++
 			c.reorderCount--
+			c.reorderBytes -= len(ip.data)
 		}
 		c.scheduleAck()
 	} else {
@@ -1284,6 +1293,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 		}
 		c.inbuf.put(uint32(pkSeqNr), &inboundPacket{data: append([]byte(nil), p.payload...)})
 		c.reorderCount++
+		c.reorderBytes += len(p.payload)
 		c.stats.reorderInserts++
 		c.stats.reorderPeak = max(c.stats.reorderPeak, c.reorderCount)
 		c.scheduleAck()
