@@ -58,6 +58,13 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
     const toast = useToast();
     const [racing, setRacing] = useState<Racing | null>(null);
     const raceController = useRef<AbortController | null>(null);
+    // A play started from this page: the preload no longer applies (it would
+    // re-add the sources the race just removed, as autoplay can race before
+    // the preload's debounce runs).
+    const playStarted = useRef(false);
+    useEffect(() => {
+        playStarted.current = false;
+    }, [metaId, videoId]);
 
     const remembered = metaId !== null ? getQuality(metaId) : null;
 
@@ -128,6 +135,9 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
             return;
         }
         const timer = setTimeout(() => {
+            if (playStarted.current) {
+                return;
+            }
             // Keyed by start position too: a resume point known later moves
             // the server's primed pieces there.
             preloadSources
@@ -145,6 +155,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
     const cancel = useCallback(() => {
         raceController.current?.abort();
         raceController.current = null;
+        playStarted.current = false;
         setRacing(null);
     }, []);
 
@@ -159,6 +170,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
             setQuality(metaId, tierKey);
         }
         raceController.current?.abort();
+        playStarted.current = true;
         const controller = new AbortController();
         raceController.current = controller;
         setRacing({ tierKey, label: tier.label, weak: tier.weak, racers: [] });
@@ -176,7 +188,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
                     const gb = (bytes: number | null) => bytes !== null ? (bytes / 1e9).toFixed(1) : '?';
                     toast.show({
                         type: 'info',
-                        title: t('SMART_PLAY_PASSED_SLOW', {
+                        title: t(largest.remembered ? 'SMART_PLAY_PASSED_SLOW_EARLIER' : 'SMART_PLAY_PASSED_SLOW', {
                             size: gb(winner.size),
                             passedSize: gb(largest.source.size),
                             rate: (largest.rate / 1e6).toFixed(1),

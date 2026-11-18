@@ -12,6 +12,7 @@
 // in the race's reads.
 
 import type { RankedSource } from './groupByQuality';
+import { recall } from './rateMemory';
 
 const VIABLE_RATIO = 1;
 // A swarm at this share of its bitrate may still ramp up to it (the 9.9 GB
@@ -99,10 +100,24 @@ const mayKeepUp = (rate: number | null, needed: number | null): boolean => {
     return needed !== null && keepsUp(rate, needed) !== true && (rate === null || rate >= PROMISING_RATIO * needed);
 };
 
+// A source's live rate, else the one its last measured ratio gives (a
+// remembered rate stands in only until a live one arrives).
+const knownRate = (meter: RateMeter, source: RankedSource, runtime: number | null): { rate: number, remembered: boolean } | null => {
+    const live = meter.rate(source.infoHash);
+    if (live !== null) {
+        return { rate: live, remembered: false };
+    }
+    const needed = neededRate(source, runtime);
+    const ratio = recall(source.infoHash);
+    return needed !== null && ratio !== null ? { rate: ratio * needed, remembered: true } : null;
+};
+
 type Passed = {
     source: RankedSource,
     rate: number,
     needed: number,
+    // Measured on an earlier play (rateMemory.ts), not this one.
+    remembered: boolean,
 };
 
 type Choice = {
@@ -112,9 +127,9 @@ type Choice = {
 };
 
 // "Best picture that keeps up": the highest-bitrate source among those keeping
-// up, or null when none does yet. With measuredOnly, also null while a larger
-// source has no rate yet (it might keep up). Larger sources measured and not
-// keeping up are reported.
+// up live, or null when none does yet. With measuredOnly, also null while a
+// larger source might keep up: no rate yet, or only a remembered one that kept
+// up. Larger sources known not to keep up are reported.
 const chooseKeepingUp = (sources: RankedSource[], meter: RateMeter, runtime: number | null, measuredOnly = false): Choice | null => {
     const rated = sources.map((source) => ({ source, rate: meter.rate(source.infoHash), needed: neededRate(source, runtime) }));
     const viable = rated.filter(({ rate, needed }) => keepsUp(rate, needed) === true);
@@ -122,15 +137,17 @@ const chooseKeepingUp = (sources: RankedSource[], meter: RateMeter, runtime: num
         return null;
     }
     const best = viable.reduce((top, item) => item.needed! > top.needed! ? item : top);
-    const larger = rated.filter(({ needed }) => needed !== null && needed > best.needed!);
-    if (measuredOnly && larger.some(({ rate }) => rate === null)) {
+    const larger = rated
+        .filter(({ needed }) => needed !== null && needed > best.needed!)
+        .map(({ source, needed }) => ({ source, needed: needed!, known: knownRate(meter, source, runtime) }));
+    if (measuredOnly && larger.some(({ known, needed }) => known === null || keepsUp(known.rate, needed) === true)) {
         return null;
     }
-    const passed = larger
-        .filter(({ rate }) => rate !== null)
-        .map(({ source, rate, needed }) => ({ source, rate: rate!, needed: needed! }));
+    const passed = larger.flatMap(({ source, needed, known }): Passed[] => {
+        return known !== null && keepsUp(known.rate, needed) === false ? [{ source, rate: known.rate, needed, remembered: known.remembered }] : [];
+    });
     return { chosen: best.source, passed };
 };
 
 export type { Choice, Passed };
-export { parseRuntime, neededRate, RateMeter, keepsUp, mayKeepUp, chooseKeepingUp, VIABLE_RATIO };
+export { parseRuntime, neededRate, knownRate, RateMeter, keepsUp, mayKeepUp, chooseKeepingUp, VIABLE_RATIO };

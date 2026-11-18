@@ -25,7 +25,8 @@
 
 import { readRange, remove, stats, probeUrl } from './serverApi';
 import type { RankedSource } from './groupByQuality';
-import { chooseKeepingUp, keepsUp, mayKeepUp, neededRate, RateMeter } from './supply';
+import { chooseKeepingUp, keepsUp, knownRate, mayKeepUp, neededRate, RateMeter } from './supply';
+import { remember } from './rateMemory';
 import type { Passed } from './supply';
 
 const START_RACERS = 3;
@@ -105,6 +106,17 @@ const keepOnly = (baseUrl: string, sources: RankedSource[], chosen: RankedSource
     });
 };
 
+// Stores each source's live rate ÷ bitrate for later plays (rateMemory.ts).
+const rememberRates = (sources: RankedSource[], meter: RateMeter, runtime: number | null) => {
+    sources.forEach((source) => {
+        const rate = meter.rate(source.infoHash);
+        const needed = neededRate(source, runtime);
+        if (rate !== null && needed !== null) {
+            remember(source.infoHash, rate / needed);
+        }
+    });
+};
+
 const race = async ({ baseUrl, sources, startFraction, runtime, meter, signal, onProgress }: RaceOptions): Promise<RaceResult> => {
     if (sources.length <= 1) {
         return { source: sources[0], passed: [] };
@@ -125,6 +137,7 @@ const race = async ({ baseUrl, sources, startFraction, runtime, meter, signal, o
     // larger one has no rate yet (e.g. already on disk: the race measures it).
     const dwell = chooseKeepingUp(candidates.filter((_, idx) => hasMetadata(idx)), meter, runtime, true);
     if (dwell !== null) {
+        rememberRates(candidates, meter, runtime);
         keepOnly(baseUrl, sources, dwell.chosen);
         return { source: dwell.chosen, passed: dwell.passed };
     }
@@ -147,7 +160,7 @@ const race = async ({ baseUrl, sources, startFraction, runtime, meter, signal, o
             const needed = neededRate(source, runtime) ?? Infinity;
             return Date.now() - startedAt < LARGER_GRACE && racers.some((racer) => {
                 const other = neededRate(racer.source, runtime);
-                return other !== null && other > needed && mayKeepUp(meter.rate(racer.source.infoHash), other);
+                return other !== null && other > needed && mayKeepUp(knownRate(meter, racer.source, runtime)?.rate ?? null, other);
             });
         };
 
@@ -171,25 +184,30 @@ const race = async ({ baseUrl, sources, startFraction, runtime, meter, signal, o
                 return;
             }
             stop();
+            rememberRates(racers.map((racer) => racer.source), meter, runtime);
             keepOnly(baseUrl, racers.map((racer) => racer.source), winner);
             resolve({ source: winner, passed });
         };
 
-        // The highest-bitrate racer with data that keeps up wins; every larger
-        // racer measured as too slow is reported, delivered data or not.
+        // Every racer larger than the chosen source known not to keep up
+        // (live, or remembered), delivered data or not.
+        const passedOver = (chosen: RankedSource) => {
+            const chosenNeeds = neededRate(chosen, runtime) ?? Infinity;
+            return racers.flatMap((racer): Passed[] => {
+                const needed = neededRate(racer.source, runtime);
+                const known = knownRate(meter, racer.source, runtime);
+                return needed !== null && known !== null && needed > chosenNeeds && keepsUp(known.rate, needed) === false ?
+                    [{ source: racer.source, rate: known.rate, needed, remembered: known.remembered }]
+                    :
+                    [];
+            });
+        };
+
+        // The highest-bitrate racer with data that keeps up wins.
         const decide = () => {
             const choice = chooseKeepingUp(racers.filter((racer) => racer.read > 0).map((racer) => racer.source), meter, runtime);
             if (choice !== null && !largerMayKeepUp(choice.chosen)) {
-                const chosenNeeds = neededRate(choice.chosen, runtime) ?? Infinity;
-                const passed = racers.flatMap((racer): Passed[] => {
-                    const needed = neededRate(racer.source, runtime);
-                    const rate = meter.rate(racer.source.infoHash);
-                    return needed !== null && rate !== null && needed > chosenNeeds && keepsUp(rate, needed) === false ?
-                        [{ source: racer.source, rate, needed }]
-                        :
-                        [];
-                });
-                finish(choice.chosen, passed);
+                finish(choice.chosen, passedOver(choice.chosen));
             }
         };
 
@@ -221,7 +239,7 @@ const race = async ({ baseUrl, sources, startFraction, runtime, meter, signal, o
                         meter.addRead(racer.source.infoHash, racer.read / (Math.max(now - racer.firstByteAt, READ_RATE_FLOOR) / 1000));
                     }
                     if (racer.read >= ALONE_WIN_BYTES && racers.every((other) => other === racer || other.read === 0) && aloneMayWin(racer)) {
-                        finish(racer.source, []);
+                        finish(racer.source, passedOver(racer.source));
                     }
                 })
                     .then(() => {

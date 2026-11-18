@@ -21,5 +21,6 @@
     "SMART_PLAY_PASSED_SLOW": "Playing the {{size}} GB source: the {{passedSize}} GB one can't keep up ({{rate}} of {{needed}} MB/s)",
     "SMART_PLAY_START_BUFFER": "Buffering {{seconds}} s before playing: this source is still speeding up",
     "SMART_PLAY_WARMUP": "Warm up continue watching",
-    "SMART_PLAY_WARMUP_DESCRIPTION": "While the board is open, gets the first continue-watching item ready to play: downloads up to 32 MB around where it resumes and shares it with peers. Removed after 10 minutes if you don't play it."
+    "SMART_PLAY_WARMUP_DESCRIPTION": "While the board is open, gets the first continue-watching item ready to play: downloads up to 32 MB around where it resumes and shares it with peers. Removed after 10 minutes if you don't play it.",
+    "SMART_PLAY_PASSED_SLOW_EARLIER": "Playing the {{size}} GB source: the {{passedSize}} GB one couldn't keep up earlier ({{rate}} of {{needed}} MB/s)"
 }
