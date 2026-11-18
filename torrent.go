@@ -190,6 +190,8 @@ type Torrent struct {
 
 	// Last active PeerConn request for each chunk.
 	requestState map[RequestIndex]requestState
+	// Time reads spent waiting for a piece's in-flight writes (PendingWriteWaitStats).
+	pendingWriteWaits pendingWriteWaitCounters
 	// Chunks we've written to since the corresponding piece was last checked.
 	dirtyChunks typedRoaring.Bitmap[RequestIndex]
 

@@ -416,6 +416,15 @@ func (c *Peer) receiveChunkPrologue(msg *pp.Message) (_ *pendingChunkWrite, err 
 		return
 	}
 	req := c.t.requestIndexFromRequest(ppReq)
+	// For Callbacks.ReceivedUsefulChunk; the request state is gone once the chunk is checked.
+	var requestedAt time.Time
+	if len(t.cl.config.Callbacks.ReceivedUsefulChunk) != 0 {
+		if rs, ok := t.requestState[req]; ok {
+			if pc := rs.peer.Value(); pc != nil && pc.peerPtr() == c {
+				requestedAt = rs.when
+			}
+		}
+	}
 
 	// This needs to occur for every valid chunk, but we try to do it when the client is unlocked
 	// (in pendingChunkWrite.write). It can't be done before checking if chunks are valid because
@@ -453,6 +462,18 @@ func (c *Peer) receiveChunkPrologue(msg *pp.Message) (_ *pendingChunkWrite, err 
 	}
 	for _, f := range c.t.cl.config.Callbacks.ReceivedUsefulData {
 		f(ReceivedUsefulDataEvent{c, msg})
+	}
+	if cbs := c.t.cl.config.Callbacks.ReceivedUsefulChunk; len(cbs) != 0 {
+		ev := ReceivedUsefulChunkEvent{
+			Peer:        c,
+			Piece:       piece.Index(),
+			Length:      len(msg.Piece),
+			Priority:    piece.effectivePriority(),
+			RequestedAt: requestedAt,
+		}
+		for _, f := range cbs {
+			f(ev)
+		}
 	}
 	c.lastUsefulChunkReceived = time.Now()
 	if initial := c.t.cl.config.InitialRequestQueue; initial > 0 {

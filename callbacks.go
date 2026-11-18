@@ -55,6 +55,10 @@ type Callbacks struct {
 	// long that took. Readers waiting on the piece are woken only after this returns. The
 	// Client lock is not held.
 	PieceMarkedComplete []func(PieceMarkedCompleteEvent)
+
+	// Like ReceivedUsefulData, with when the chunk was requested from this peer and its piece's
+	// priority: for measuring how long urgent chunks take. Called with the Client lock held.
+	ReceivedUsefulChunk []func(ReceivedUsefulChunkEvent)
 }
 
 type ChunkWrittenEvent struct {
@@ -86,6 +90,17 @@ type OutgoingConnResultEvent struct {
 }
 
 type ReceivedUsefulDataEvent = PeerMessageEvent
+
+type ReceivedUsefulChunkEvent struct {
+	Peer   *Peer
+	Piece  int
+	Length int
+	// The piece's priority when the chunk arrived.
+	Priority PiecePriority
+	// When the chunk was last requested from this peer; zero if this peer didn't hold the request
+	// (another peer did, or it was cancelled).
+	RequestedAt time.Time
+}
 
 type PeerMessageEvent struct {
 	Peer    *Peer

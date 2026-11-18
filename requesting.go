@@ -82,6 +82,9 @@ type desiredPeerRequests struct {
 	// Torrent's peers, so if someone else fills them while we're still sorting, our comparisons are
 	// against another peer's states.
 	pieceStatesGen uint64
+	// With ClientConfig.ReaderOffsetFirst, the chunk each reader-positioned piece should be
+	// requested from. Nil otherwise.
+	starts map[pieceIndex]chunkIndexType
 }
 
 type peerRequestPieceStates struct {
@@ -184,6 +187,18 @@ func (p *desiredPeerRequests) lessByValue(leftRequest, rightRequest RequestIndex
 		// it will be served and therefore is the best candidate to cancel.
 		ml = ml.CmpInt64(rightLast.Sub(leftLast).Nanoseconds())
 	}
+	// Two pieces readers are positioned in: whichever chunk is closer to its reader goes first, so
+	// the pieces interleave instead of one finishing first.
+	if p.starts != nil {
+		leftStart, leftOk := p.starts[leftPieceIndex]
+		rightStart, rightOk := p.starts[rightPieceIndex]
+		if leftOk && rightOk {
+			ml = ml.Uint64(
+				uint64(t.chunkDistanceFromStart(leftRequest, leftPieceIndex, leftStart)),
+				uint64(t.chunkDistanceFromStart(rightRequest, rightPieceIndex, rightStart)),
+			)
+		}
+	}
 	// Just trigger on any webseed requests present on the Torrent. That suggests that the Torrent
 	// or files are prioritized enough to compete with PeerConn requests. Later we could filter on
 	// webseeds actually requesting or supporting requests for the pieces we're comparing.
@@ -248,6 +263,7 @@ func (p *PeerConn) getDesiredRequestState() (desired desiredRequestState) {
 		peer:           p,
 		pieceStates:    &t.requestPieceStates,
 		requestIndexes: t.requestIndexes,
+		starts:         t.readerStartChunks(),
 	}
 	candidateLimit := p.requestCandidateLimit()
 	var stealCandidates []RequestIndex
@@ -266,7 +282,8 @@ func (p *PeerConn) getDesiredRequestState() (desired desiredRequestState) {
 			}
 			requestHeap.pieceStates.Set(pieceIndex, pieceExtra)
 			allowedFast := p.peerAllowedFast.Contains(pieceIndex)
-			t.iterUndirtiedRequestIndexesInPiece(&it, pieceIndex, func(r requestStrategy.RequestIndex) {
+			start, haveStart := requestHeap.starts[pieceIndex]
+			t.iterUndirtiedRequestIndexesInPieceFrom(&it, pieceIndex, start, haveStart, func(r requestStrategy.RequestIndex) {
 				if !allowedFast {
 					// We must signal interest to request this. TODO: We could set interested if the
 					// peers pieces (minus the allowed fast set) overlap with our missing pieces if

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"sync/atomic"
+	"time"
 	"unique"
 	"weak"
 
@@ -241,6 +242,7 @@ func (p Piece) waitNoPendingWrites() {
 	if pw.count.Load() == 0 {
 		return
 	}
+	defer p.t.pendingWriteWaits.add(time.Now())
 	for {
 		// Fetch the channel before checking the count so a Broadcast between the check and the
 		// receive can't be missed.

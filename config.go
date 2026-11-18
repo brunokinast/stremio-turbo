@@ -174,6 +174,13 @@ type ClientConfig struct {
 	// Zero refills only an empty queue, which leaves the sender idle for a round trip per batch
 	// (~25 % below the achievable rate at 300 ms RTT) and makes it burst when the refill arrives.
 	RequestLowWater float64
+	// Within a piece a reader is positioned in, request chunks starting at the reader's offset and
+	// wrapping, instead of from the piece's first chunk; and between two such pieces of equal
+	// priority, interleave by distance from each reader instead of finishing one piece first.
+	// With 16 MiB pieces a read near the end of a piece (a Matroska player's Cues read, a seek)
+	// otherwise waits behind the rest of the piece, and the player's head and tail reads take turns
+	// at whole pieces. Most useful with responsive readers.
+	ReaderOffsetFirst bool
 	// A peer that has had a request outstanding without delivering a useful chunk for this long
 	// is snubbed: its requests are cancelled so other peers can take them, and it gets one
 	// request at a time until it delivers again (libtorrent's piece_timeout). Zero or negative

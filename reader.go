@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"github.com/anacrolix/missinggo/v2"
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -82,6 +83,10 @@ type reader struct {
 	// after a seek or with a new reader at the starting position.
 	reading    bool
 	responsive bool
+
+	// Torrent offset of pos, readable under the Client lock without r.mu (whose lock order is
+	// before the Client lock), for ClientConfig.ReaderOffsetFirst.
+	torrentPos atomic.Int64
 }
 
 func (r *reader) SetContext(ctx context.Context) {
@@ -210,6 +215,7 @@ func (r *reader) readContext(ctx context.Context, b []byte) (n int, err error) {
 
 	r.mu.Lock()
 	r.pos += int64(n)
+	r.torrentPos.Store(r.torrentOffset(r.pos))
 	r.posChanged()
 	r.mu.Unlock()
 	if r.pos >= r.length {
@@ -469,6 +475,7 @@ func (r *reader) Seek(off int64, whence int) (newPos int64, err error) {
 	if newPos != r.pos {
 		r.reading = false
 		r.pos = newPos
+		r.torrentPos.Store(r.torrentOffset(newPos))
 		r.contiguousReadStartPos = newPos
 		r.posChanged()
 	}
