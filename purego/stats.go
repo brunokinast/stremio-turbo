@@ -38,6 +38,11 @@ type ConnStats struct {
 	// window leaves out).
 	ReorderCount int
 	ReorderBytes int
+	// How far the reorder buffer reaches past the next expected packet, in packets.
+	ReorderSpan int
+	// Moving average of the peer's data payload size, in bytes: 528 is libtorrent's MTU floor,
+	// which it keeps until one of its MTU probes is acked.
+	PayloadEstimate int
 
 	// State packets sent, those carrying a selective ack, and those that repeated the previous
 	// ack number without a selective ack (a sender may count these as duplicate acks).
@@ -70,6 +75,8 @@ func (c *Conn) Stats() ConnStats {
 		ReorderPeak:            int(k.reorderPeak),
 		ReorderCount:           int(c.reorderCount),
 		ReorderBytes:           c.reorderBytes,
+		ReorderSpan:            int(c.reorderSpan()),
+		PayloadEstimate:        c.payloadEst,
 		AcksSent:               k.acksSent,
 		SelectiveAcksSent:      k.selectiveAcksSent,
 		DuplicateAcksSent:      k.duplicateAcksSent,

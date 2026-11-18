@@ -14,6 +14,9 @@ func connWithReordered(ackNr uint16, offsets ...uint32) *Conn {
 		seq := uint32(ackNr) + 1 + o
 		c.inbuf.ensureSize(seq+1, o+1)
 		c.inbuf.put(seq, &inboundPacket{})
+		if c.reorderCount == 0 || wrappingCompareLess(uint32(c.reorderLast), seq&seqNrMask, seqNrMask) {
+			c.reorderLast = uint16(seq)
+		}
 		c.reorderCount++
 	}
 	return c
@@ -54,4 +57,15 @@ func TestSelectiveAckMaskFarthestSlot(t *testing.T) {
 	ln := c.selectiveAckMask(&mask)
 	qt.Check(t, qt.Equals(ln, maxSelectiveAckBytes))
 	qt.Check(t, qt.DeepEquals(maskBits(mask[:ln]), []int{reorderBufferMaxSize - 2}))
+}
+
+// The mask can describe the whole 2016-packet reorder buffer in 252 bytes, the most the one-byte
+// extension length allows in multiples of 4.
+func TestSelectiveAckMaskMaxLength(t *testing.T) {
+	qt.Assert(t, qt.Equals(maxSelectiveAckBytes, 252))
+	c := connWithReordered(65000, 1500) // wraps past 0xffff
+	var mask [maxSelectiveAckBytes]byte
+	ln := c.selectiveAckMask(&mask)
+	qt.Check(t, qt.Equals(ln, 188)) // bit 1499 is in byte 187: 47 words
+	qt.Check(t, qt.DeepEquals(maskBits(mask[:ln]), []int{1499}))
 }

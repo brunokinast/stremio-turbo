@@ -31,8 +31,19 @@ const (
 	// How long the window must have been left alone before it may be decayed again.
 	maxWindowDecay = 100 * time.Millisecond
 	// The largest reorder distance we'll buffer, and the largest send queue we'll build.
-	reorderBufferMaxSize  = 1024
+	//
+	// 2016 is the most a selective ack can describe (a 252-byte mask: the extension length is one
+	// byte and BEP 29 wants a multiple of 4). It has to cover the receive window in packets:
+	// libtorrent sends everything but MTU probes at its MTU floor, 576-20-8 = 548 bytes or 528 of
+	// payload, until a probe is acked, so a 1 MiB window is ~1990 packets. With 1024 slots, a
+	// sender at the floor ran past the buffer after any loss, and the probes dropped with it made
+	// libtorrent lower its MTU ceiling and stay at the floor (a live peer: 2163 packets dropped in
+	// two minutes; the lab with a 576-byte path: 1935 in 45 s, at 40 % of the full-size rate).
+	reorderBufferMaxSize  = 2016
 	outgoingBufferMaxSize = 1024
+	// Payloads seen before the estimate bounds the window. The first ones are BitTorrent handshake
+	// messages, 68-200 bytes, which would otherwise shrink a new connection's window to ~140 KB.
+	payloadEstMinSamples = 16
 	// The furthest a single delay sample may sit from the average delay baseline. Samples are
 	// wrapping distances over a peer supplied field, so without a bound a peer can pick one that
 	// no average over it can represent.
@@ -152,6 +163,12 @@ type Conn struct {
 	duplicateAck    uint8
 	// Payload bytes held in the reorder buffer; they count against the advertised window.
 	reorderBytes int
+	// The highest sequence number in the reorder buffer, while it holds anything.
+	reorderLast uint16
+	// Moving average of the peer's data payload sizes, to bound the window by reorder slots, and
+	// how many payloads it has seen (up to payloadEstMinSamples).
+	payloadEst     int
+	payloadSamples int
 	// Packets in the send queue, sent or not. The oldest unacked packet is seqNr-curWindowPackets.
 	curWindowPackets uint16
 	// Bytes in flight. Packets not yet sent, and packets a timeout has written off, don't count.
@@ -324,19 +341,48 @@ func (c *Conn) packetSize() int {
 	return mtu - headerSize
 }
 
-// The receive window to advertise: what's left of the receive buffer once buffered data is
-// accounted for.
 // The receive window to advertise: the buffer less what is waiting to be read and what is held in
 // the reorder buffer behind a hole, as libtorrent computes it. Counting only the read buffer kept
 // the window fully open while a hole was outstanding (the application drains the read buffer
 // meanwhile), so a fast sender ran past the 1024-packet reorder buffer: one live peer had 793
 // packets dropped that way in two minutes, each to be resent.
+//
+// It is also bounded by the reorder slots left, at the sender's recent payload size, so a sender
+// with packets too small for the byte window to fit the reorder buffer is slowed down instead of
+// having packets dropped.
 func (c *Conn) rcvWindow() int {
 	n := c.readBuf.len() + c.reorderBytes
-	if c.optRcvBuf > n {
-		return c.optRcvBuf - n
+	if c.optRcvBuf <= n {
+		return 0
 	}
-	return 0
+	w := c.optRcvBuf - n
+	if c.payloadSamples >= payloadEstMinSamples {
+		w = min(w, (reorderBufferMaxSize-int(c.reorderSpan()))*c.payloadEst)
+	}
+	return max(w, 0)
+}
+
+// How far the reorder buffer reaches past the next packet we expect: 0 when it's empty.
+func (c *Conn) reorderSpan() uint16 {
+	if c.reorderCount == 0 {
+		return 0
+	}
+	return (c.reorderLast - c.ackNr) & seqNrMask
+}
+
+// Folds a data packet's payload size into the estimate of the sender's packet size.
+func (c *Conn) notePayload(n int) {
+	if n == 0 {
+		return
+	}
+	if c.payloadSamples < payloadEstMinSamples {
+		c.payloadSamples++
+	}
+	if c.payloadEst == 0 {
+		c.payloadEst = n
+		return
+	}
+	c.payloadEst += (n - c.payloadEst) / 8
 }
 
 func (c *Conn) udpMTU() int {
@@ -428,10 +474,8 @@ const maxSelectiveAckBytes = reorderBufferMaxSize / 8
 // length is a multiple of 4 bytes, at least 4, as BEP 29 requires; libtorrent and libutp read any
 // such length.
 func (c *Conn) selectiveAckMask(mask *[maxSelectiveAckBytes]byte) int {
-	window := uint32(reorderBufferMaxSize)
-	if s := c.inbuf.size(); s < window {
-		window = s
-	}
+	// Nothing is buffered past the span, so there's no need to look further.
+	window := min(uint32(c.reorderSpan()), uint32(reorderBufferMaxSize), c.inbuf.size())
 	last := -1
 	for i := uint32(0); i < window; i++ {
 		if c.inbuf.get(uint32(c.ackNr)+i+2) != nil {
@@ -1234,6 +1278,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 		// reach it.
 	}
 
+	c.notePayload(len(p.payload))
 	if seqNr == 0 {
 		// The packet we were waiting for.
 		c.stats.inOrderPackets++
@@ -1292,6 +1337,9 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 			return
 		}
 		c.inbuf.put(uint32(pkSeqNr), &inboundPacket{data: append([]byte(nil), p.payload...)})
+		if c.reorderCount == 0 || wrappingCompareLess(uint32(c.reorderLast), uint32(pkSeqNr), seqNrMask) {
+			c.reorderLast = pkSeqNr
+		}
 		c.reorderCount++
 		c.reorderBytes += len(p.payload)
 		c.stats.reorderInserts++

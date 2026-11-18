@@ -99,3 +99,44 @@ func TestReorderBytesShrinkTheWindow(t *testing.T) {
 	qt.Assert(t, qt.IsNil(err))
 	waitAdvertised(t, c, buf)
 }
+
+// A packet 1500 ahead, past the old 1024-packet limit, is buffered now.
+func TestReorderBufferHoldsFloorSizedWindow(t *testing.T) {
+	_, c2, stop := connPair(t, "inproc", "")
+	defer stop()
+	c := c2.(*Conn)
+	injectPayloadAhead(c, 1500, 528)
+	s := c.Stats()
+	qt.Check(t, qt.Equals(s.ReorderCount, 1))
+	qt.Check(t, qt.Equals(s.ReorderTooFar, uint64(0)))
+	qt.Check(t, qt.Equals(s.ReorderSpan, 1501))
+}
+
+// With small packets the reorder slots, not the bytes, bound the window, so the sender is slowed
+// rather than run past the buffer.
+func TestSmallPacketsBoundWindowBySlots(t *testing.T) {
+	_, c2, stop := connPair(t, "inproc", "")
+	defer stop()
+	c := c2.(*Conn)
+	const buf = 1 << 20
+	const n = 300
+	c.SetReadBufferLen(buf)
+	// Until 16 payloads are seen (handshake messages first), the estimate doesn't bound it.
+	injectPayloadAhead(c, 99, n)
+	waitAdvertised(t, c, buf-n)
+	for i := uint16(100); i < 115; i++ {
+		injectPayloadAhead(c, i, n)
+	}
+	// 16 packets 99..114 ahead: span 115.
+	s := c.Stats()
+	qt.Assert(t, qt.Equals(s.PayloadEstimate, n))
+	qt.Assert(t, qt.Equals(s.ReorderSpan, 115))
+	waitAdvertised(t, c, (reorderBufferMaxSize-115)*n) // 570300 < 1 MiB - 16*300
+
+	// Large packets: the byte window binds again.
+	c.s.mu.Lock()
+	c.payloadEst = 1400
+	c.s.mu.Unlock()
+	injectPayloadAhead(c, 98, 1400) // keeps the estimate at 1400
+	waitAdvertised(t, c, buf-16*n-1400)
+}
