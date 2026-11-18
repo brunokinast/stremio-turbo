@@ -17,6 +17,7 @@ const SETTING_KEY = 'smartPlay.warmUp';
 const WARM_FOR = 10 * 60 * 1000;
 
 type ContinueWatchingItem = {
+    // Percent watched (0-100), as the board's progress bar draws it.
     progress?: number | null,
     deepLinks?: { player?: string | null } | null,
 };
@@ -87,7 +88,7 @@ const useBoardWarmUp = (items: ContinueWatchingItem[], enabled: boolean) => {
             }
             const trackers = Array.isArray(stream.announce) && stream.announce.length > 0 ? stream.announce : [`dht:${infoHash}`];
             const fileIdx = typeof stream.fileIdx === 'number' ? stream.fileIdx : null;
-            const startFraction = progress > 0 && progress < 1 ? progress : 0;
+            const startFraction = progress > 0 && progress < 100 ? progress / 100 : 0;
             preload(baseUrl, infoHash, fileIdx, trackers, startFraction);
             warmed.set(infoHash, setTimeout(() => {
                 if (warmed.get(infoHash)) {
