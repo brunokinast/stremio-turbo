@@ -14,5 +14,6 @@
     "SMART_PLAY_RACER_METADATA": "Finding peers and file info…",
     "SMART_PLAY_RACER_CONNECTING_one": "Connected to {{count}} peer, waiting for data…",
     "SMART_PLAY_RACER_CONNECTING_other": "Connected to {{count}} peers, waiting for data…",
-    "SMART_PLAY_RACER_DOWNLOADING": "Downloading at {{speed}} MB/s"
+    "SMART_PLAY_RACER_DOWNLOADING": "Downloading at {{speed}} MB/s",
+    "SMART_PLAY_QUALITY_CHANGED": "{{quality}} isn't offered for this episode, so {{fallback}} is used instead"
 }

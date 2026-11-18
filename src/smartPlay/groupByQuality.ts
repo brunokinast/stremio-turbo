@@ -132,6 +132,40 @@ const rankTiers = (tiers: Tier[], live: Map<string, ScrapeResult>): RankedTier[]
     });
 };
 
+// The vertical resolution a tier key starts with ("4k dv | hdr" -> 2160,
+// "1080p" -> 1080), or null when it names none ("web-dl").
+const resolutionOf = (key: string): number | null => {
+    const token = key.split(/[\s|]/)[0];
+    if (token === '8k') {
+        return 4320;
+    }
+    if (token === '4k') {
+        return 2160;
+    }
+    const match = /^(\d{3,4})p$/.exec(token);
+    return match ? Number(match[1]) : null;
+};
+
+// The tier to preload when the remembered quality isn't offered: the
+// most-seeded tier at the resolution of lastKey (the last quality played, e.g.
+// "4k hdr" -> a "4k ..." tier), else the first tier at 4K or below (tiers keep
+// the addon's order, best quality first; an 8K tier is rarely what's wanted).
+const fallbackTier = (tiers: RankedTier[], lastKey: string | null): RankedTier | undefined => {
+    const offered = tiers.filter((tier) => tier.sources.length > 0);
+    const lastResolution = lastKey !== null ? resolutionOf(lastKey) : null;
+    if (lastResolution !== null) {
+        const same = offered.filter((tier) => resolutionOf(tier.key) === lastResolution);
+        const best = same.reduce<RankedTier | undefined>((top, tier) => top === undefined || (tier.best ?? -1) > (top.best ?? -1) ? tier : top, undefined);
+        if (best !== undefined) {
+            return best;
+        }
+    }
+    return offered.find((tier) => {
+        const resolution = resolutionOf(tier.key);
+        return resolution !== null && resolution <= 2160;
+    }) ?? offered[0];
+};
+
 // Whether any loaded stream carries the given quality.
 const offersQuality = (streams: MetaDetails['streams'], videoId: string, key: string): boolean => {
     return streams.some((resource) => resource.content.type === 'Ready' &&
@@ -139,4 +173,4 @@ const offersQuality = (streams: MetaDetails['streams'], videoId: string, key: st
 };
 
 export type { Source, Tier, RankedSource, RankedTier };
-export { groupByQuality, rankTiers, tierKey, offersQuality, LISTED_SEEDERS, WEAK_SEEDERS };
+export { groupByQuality, rankTiers, tierKey, offersQuality, fallbackTier, resolutionOf, LISTED_SEEDERS, WEAK_SEEDERS };

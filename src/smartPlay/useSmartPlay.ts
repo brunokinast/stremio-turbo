@@ -3,11 +3,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { useTranslation } from 'react-i18next';
 import { toPath } from 'stremio-router';
 import { useCore } from 'stremio/core';
 import useStreamingServer from 'stremio/common/useStreamingServer';
+import useToast from 'stremio/common/Toast/useToast';
 import type { StreamGroup } from 'stremio/routes/Details/Streams/useStreamsByAddon';
-import { groupByQuality, offersQuality } from './groupByQuality';
+import { fallbackTier, groupByQuality, offersQuality } from './groupByQuality';
 import useLiveSeeders from './useLiveSeeders';
 import race from './race';
 import type { RacerProgress } from './race';
@@ -45,34 +47,12 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, en
     const grouped = useMemo(() => enabled && videoId !== null ? groupByQuality(groups, videoId) : [], [enabled, groups, videoId]);
     const { tiers, settled } = useLiveSeeders(grouped, baseUrl);
     const { autoplay } = useSmartPlayState();
+    const { t } = useTranslation();
+    const toast = useToast();
     const [racing, setRacing] = useState<Racing | null>(null);
     const raceController = useRef<AbortController | null>(null);
 
     const remembered = metaId !== null ? getQuality(metaId) : null;
-
-    // Preload: open the likely quality's best sources before any click, so
-    // their peers and metadata are ready when the race starts. The likely
-    // quality is the show's remembered one, or the last played anywhere.
-    const preloaded = useRef(new Set<string>());
-    const likelyTier = tiers.find((tier) => tier.key === (remembered ?? getLastQuality()));
-    const preloadSources = useMemo(() => likelyTier !== undefined && (likelyTier.best !== null || settled) ? likelyTier.sources.slice(0, PRELOAD_SOURCES) : [], [likelyTier, settled]);
-    const preloadKey = preloadSources.map(({ infoHash }) => infoHash).join(',');
-    useEffect(() => {
-        if (baseUrl === null || preloadSources.length === 0) {
-            return;
-        }
-        const timer = setTimeout(() => {
-            preloadSources
-                .filter(({ infoHash }) => !preloaded.current.has(infoHash))
-                .forEach(({ infoHash, fileIdx, trackers }) => {
-                    preloaded.current.add(infoHash);
-                    preload(baseUrl, infoHash, fileIdx, trackers);
-                });
-        }, PRELOAD_DEBOUNCE);
-        return () => clearTimeout(timer);
-        // preloadKey captures the source set; preloadSources changes identity on every count update.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [baseUrl, preloadKey]);
 
     // Where the player will start, as a fraction of the file (resume point).
     const startFraction = libraryItem !== null && libraryItem.state.video_id === videoId && libraryItem.state.duration > 0 ?
@@ -80,18 +60,71 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, en
         :
         0;
 
+    // Preload: open the likely quality's best sources before any click, so
+    // their peers, metadata and the pieces at the start position are ready
+    // when the race starts. The likely quality is the show's remembered one,
+    // or the last played anywhere, or else the closest offered (fallbackTier):
+    // without a match nothing was preloaded and a first play took 12.5 s
+    // instead of under 1 s (streaming-research findings/17).
+    const preloaded = useRef(new Set<string>());
+    const likelyKey = remembered ?? getLastQuality();
+    const likelyTier = tiers.find((tier) => tier.key === likelyKey) ?? fallbackTier(tiers, likelyKey);
+
+    // A quality chosen for the user is said out loud: once every addon has
+    // answered, if the remembered (or last) quality isn't offered for this
+    // episode, a toast names the quality used instead. Once per episode.
+    const fallbackKey = !streamsLoading && likelyKey !== null && likelyTier !== undefined && likelyTier.key !== likelyKey ? likelyTier.key : null;
+    const warned = useRef<string | null>(null);
+    useEffect(() => {
+        if (fallbackKey === null || likelyTier === undefined || likelyKey === null || warned.current === videoId) {
+            return;
+        }
+        warned.current = videoId;
+        toast.show({
+            type: 'info',
+            title: t('SMART_PLAY_QUALITY_CHANGED', { quality: likelyKey, fallback: likelyTier.label }),
+            timeout: 8000,
+        });
+        // likelyTier changes identity on every count update; fallbackKey captures it.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fallbackKey, videoId]);
+    const preloadSources = useMemo(() => likelyTier !== undefined && (likelyTier.best !== null || settled) ? likelyTier.sources.slice(0, PRELOAD_SOURCES) : [], [likelyTier, settled]);
+    const preloadKey = preloadSources.map(({ infoHash }) => infoHash).join(',');
+    useEffect(() => {
+        if (baseUrl === null || preloadSources.length === 0) {
+            return;
+        }
+        const timer = setTimeout(() => {
+            // Keyed by start position too: a resume point known later moves
+            // the server's primed pieces there.
+            preloadSources
+                .filter(({ infoHash }) => !preloaded.current.has(`${infoHash}@${startFraction}`))
+                .forEach(({ infoHash, fileIdx, trackers }) => {
+                    preloaded.current.add(`${infoHash}@${startFraction}`);
+                    preload(baseUrl, infoHash, fileIdx, trackers, startFraction);
+                });
+        }, PRELOAD_DEBOUNCE);
+        return () => clearTimeout(timer);
+        // preloadKey captures the source set; preloadSources changes identity on every count update.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [baseUrl, preloadKey, startFraction]);
+
     const cancel = useCallback(() => {
         raceController.current?.abort();
         raceController.current = null;
         setRacing(null);
     }, []);
 
-    const play = useCallback((tierKey: string) => {
+    // remember: an explicit choice becomes the show's quality; a fallback
+    // chosen for the user (autoplay) doesn't replace it.
+    const play = useCallback((tierKey: string, remember = true) => {
         const tier = tiers.find((tier) => tier.key === tierKey);
         if (baseUrl === null || metaId === null || videoId === null || tier === undefined || tier.sources.length === 0) {
             return;
         }
-        setQuality(metaId, tierKey);
+        if (remember) {
+            setQuality(metaId, tierKey);
+        }
         raceController.current?.abort();
         const controller = new AbortController();
         raceController.current = controller;
@@ -113,7 +146,9 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, en
     }, [tiers, baseUrl, metaId, videoId, startFraction, core.transport, navigate]);
 
     // Resume / next episode asked to autoplay this video: once the remembered
-    // quality has a live count (or nothing more is coming), play it.
+    // quality has a live count (or nothing more is coming), play it. If the
+    // episode doesn't offer it, the closest quality plays (fallbackTier); the
+    // quality-change toast above says so, and the remembered one stays.
     useEffect(() => {
         if (autoplay === null || autoplay.metaId !== metaId || autoplay.videoId !== videoId) {
             return;
@@ -123,7 +158,13 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, en
             setState({ autoplay: null });
             play(tier.key);
         } else if (tier === undefined && !streamsLoading) {
-            setState({ autoplay: null });
+            const fallback = remembered !== null ? fallbackTier(tiers, remembered) : undefined;
+            if (fallback !== undefined && (fallback.best !== null || settled)) {
+                setState({ autoplay: null });
+                play(fallback.key, false);
+            } else if (fallback === undefined || settled) {
+                setState({ autoplay: null });
+            }
         }
     }, [autoplay, metaId, videoId, remembered, tiers, settled, streamsLoading, play]);
 

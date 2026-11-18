@@ -124,13 +124,17 @@ const stats = (baseUrl: string, infoHash: string): Promise<TorrentStats | null> 
 // Starts a torrent ahead of playback. fileIdx names the episode in a season
 // pack, so the server primes that file's first and last pieces instead of
 // guessing the largest file.
-const preload = (baseUrl: string, infoHash: string, fileIdx: number | null, trackers: string[]): void => {
+// startFraction is where playback will start (a resume point, 0 from the
+// start): the server primes the pieces there too, where the race and the
+// player will read first.
+const preload = (baseUrl: string, infoHash: string, fileIdx: number | null, trackers: string[], startFraction: number): void => {
     fetch(new URL(`${infoHash}/create`, baseUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             torrent: { infoHash },
             ...(fileIdx !== null ? { fileIdx } : {}),
+            ...(startFraction > 0 && startFraction < 1 ? { startFraction } : {}),
             // The addon's sources as given ("tracker:<url>", "dht:<hash>"): the
             // server's peer-search syntax already.
             peerSearch: { sources: trackers },
