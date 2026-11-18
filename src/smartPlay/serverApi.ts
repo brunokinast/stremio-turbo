@@ -61,10 +61,14 @@ const scrapeStream = async (baseUrl: string, torrents: ScrapeTorrent[], signal: 
     }
 };
 
-// Same URL stremio-core builds for torrent streams: /{infoHash}/{fileIdx}?tr=…
-const streamUrl = (baseUrl: string, infoHash: string, fileIdx: number | null, trackers: string[]): URL => {
+// The URL stremio-core builds for torrent streams (/{infoHash}/{fileIdx}?tr=…),
+// marked as a probe: the server serves it like the player's stream but leaves
+// the file prepared for the player (head and tail pieces kept, nothing
+// demoted when it closes).
+const probeUrl = (baseUrl: string, infoHash: string, fileIdx: number | null, trackers: string[]): URL => {
     const url = new URL(`${infoHash}/${fileIdx ?? -1}`, baseUrl);
     trackers.forEach((tracker) => url.searchParams.append('tr', tracker));
+    url.searchParams.set('probe', '1');
     return url;
 };
 
@@ -97,6 +101,8 @@ const readRange = async (url: URL, offset: number, bytes: number, signal: AbortS
 
 type TorrentStats = {
     peers: number,
+    // Peers currently sending to us.
+    unchoked: number,
     // Bytes per second.
     downloadSpeed: number,
     // Empty until the torrent's metadata is known.
@@ -125,7 +131,9 @@ const preload = (baseUrl: string, infoHash: string, fileIdx: number | null, trac
         body: JSON.stringify({
             torrent: { infoHash },
             ...(fileIdx !== null ? { fileIdx } : {}),
-            peerSearch: { sources: trackers.map((tracker) => `tracker:${tracker}`) },
+            // The addon's sources as given ("tracker:<url>", "dht:<hash>"): the
+            // server's peer-search syntax already.
+            peerSearch: { sources: trackers },
         }),
     }).catch(() => undefined);
 };
@@ -135,4 +143,4 @@ const remove = (baseUrl: string, infoHash: string): Promise<void> => {
 };
 
 export type { ScrapeResult, ScrapeTorrent, TorrentStats };
-export { isKnown, scrapeStream, streamUrl, readRange, stats, preload, remove };
+export { isKnown, scrapeStream, probeUrl, readRange, stats, preload, remove };
