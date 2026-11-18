@@ -91,6 +91,8 @@ type OutgoingConnResultEvent struct {
 	Network  string
 	Started  time.Time
 	Duration time.Duration
+	// The part of Duration spent waiting for ClientConfig.DialRateLimiter before dialing.
+	DialWait time.Duration
 	// Nil when the connection was established and handshaken.
 	Err error
 }

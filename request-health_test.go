@@ -2,10 +2,12 @@ package torrent
 
 import (
 	"net"
+	"slices"
 	"testing"
 	"time"
 
 	qt "github.com/go-quicktest/qt"
+	"golang.org/x/time/rate"
 )
 
 func TestRateRequestQueue(t *testing.T) {
@@ -134,6 +136,38 @@ func TestNewDefaultClientConfigRequestHealth(t *testing.T) {
 	cfg := NewDefaultClientConfig()
 	qt.Check(t, qt.Equals(cfg.RequestQueueTime, defaultRequestQueueTime))
 	qt.Check(t, qt.Equals(cfg.PieceTimeout, defaultPieceTimeout))
+}
+
+// DialWait reports the time a dial spent waiting for ClientConfig.DialRateLimiter.
+func TestOutgoingConnResultDialWait(t *testing.T) {
+	cfg := TestingConfig(t)
+	cfg.DialRateLimiter = rate.NewLimiter(2, 1) // the second dial waits ~0.5 s
+	results := make(chan OutgoingConnResultEvent, 4)
+	cfg.Callbacks.OutgoingConnResult = append(cfg.Callbacks.OutgoingConnResult, func(ev OutgoingConnResultEvent) {
+		results <- ev
+	})
+	cl, err := NewClient(cfg)
+	qt.Assert(t, qt.IsNil(err))
+	defer cl.Close()
+	tor, _ := cl.AddTorrentInfoHash(testingTorrentInfoHash)
+	// Nothing listens on ports 1 and 2, so the dials fail quickly.
+	tor.AddPeers([]PeerInfo{
+		{Addr: ipPortAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, Source: PeerSourceDirect},
+		{Addr: ipPortAddr{IP: net.IPv4(127, 0, 0, 1), Port: 2}, Source: PeerSourceDirect},
+	})
+	var waits []time.Duration
+	for len(waits) < 2 {
+		select {
+		case ev := <-results:
+			qt.Check(t, qt.IsTrue(ev.DialWait <= ev.Duration))
+			waits = append(waits, ev.DialWait)
+		case <-time.After(30 * time.Second):
+			t.Fatal("missing OutgoingConnResult events")
+		}
+	}
+	slices.Sort(waits)
+	qt.Check(t, qt.Equals(waits[0], 0))
+	qt.Check(t, qt.IsTrue(waits[1] >= 300*time.Millisecond), qt.Commentf("second dial waited %v", waits[1]))
 }
 
 func TestOutgoingConnResultCallback(t *testing.T) {

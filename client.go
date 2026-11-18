@@ -902,7 +902,8 @@ func doProtocolHandshakeOnDialResult(
 }
 
 // Returns nil connection and nil error if no connection could be established for valid reasons.
-func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, err error) {
+// dialWait is the time spent waiting for the dial rate limiter.
+func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, dialWait time.Duration, err error) {
 	// It would be better if dial rate limiting could be tested when considering to open connections
 	// instead. Doing it here means if the limit is low, and the half-open limit is high, we could
 	// end up with lots of outgoing connection attempts pending that were initiated on stale data.
@@ -913,7 +914,8 @@ func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, 
 				err = errors.New("can't make dial limit reservation")
 				return
 			}
-			time.Sleep(dialReservation.Delay())
+			dialWait = dialReservation.Delay()
+			time.Sleep(dialWait)
 		}
 	}
 	torrent.Add("establish outgoing connection", 1)
@@ -1029,7 +1031,7 @@ func (cl *Client) outgoingConnection(
 	attemptKey outgoingConnAttemptKey,
 ) {
 	started := time.Now()
-	c, err := cl.dialAndCompleteHandshake(opts)
+	c, dialWait, err := cl.dialAndCompleteHandshake(opts)
 	if err == nil {
 		c.conn.SetWriteDeadline(time.Time{})
 	}
@@ -1043,6 +1045,7 @@ func (cl *Client) outgoingConnection(
 			Peer:     opts.peerInfo,
 			Started:  started,
 			Duration: time.Since(started),
+			DialWait: dialWait,
 			Err:      err,
 		}
 		if err == nil {
