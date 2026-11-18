@@ -215,7 +215,10 @@ func (tr *tracer) samplePeers(ih string, t *torrent.Torrent, now time.Time) {
 		st := pc.Stats()
 		rs := pc.RequestStats()
 		downloaded := st.BytesReadUsefulData.Int64()
-		if downloaded == 0 && rs.PeerChoking && rs.Outstanding == 0 {
+		uc, isUTP := pc.NetConn().(*purego.Conn)
+		// Idle peers are left out, except uTP ones: their transport counters show whether a peer
+		// that never unchoked us is choking or its messages aren't getting through.
+		if downloaded == 0 && rs.PeerChoking && rs.Outstanding == 0 && !isUTP {
 			continue
 		}
 		client, _ := pc.PeerClientName.Load().(string)
@@ -236,7 +239,7 @@ func (tr *tracer) samplePeers(ih string, t *torrent.Torrent, now time.Time) {
 			Choking:        rs.Choking,
 			Snubbed:        rs.Snubbed,
 		}
-		if uc, ok := pc.NetConn().(*purego.Conn); ok {
+		if isUTP {
 			s.UTP = utpSample(uc.Stats())
 		}
 		samples = append(samples, s)
@@ -261,6 +264,8 @@ func utpSample(c purego.ConnStats) *types.UTPSample {
 		ReorderPeak:            c.ReorderPeak,
 		ReorderCount:           c.ReorderCount,
 		ReorderBytes:           c.ReorderBytes,
+		ReorderSpan:            c.ReorderSpan,
+		PayloadEstimate:        c.PayloadEstimate,
 		AcksSent:               c.AcksSent,
 		SelectiveAcks:          c.SelectiveAcksSent,
 		DuplicateAcks:          c.DuplicateAcksSent,

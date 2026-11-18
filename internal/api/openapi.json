@@ -13406,6 +13406,12 @@
           "reorderBytes": {
             "type": "integer"
           },
+          "reorderSpan": {
+            "type": "integer"
+          },
+          "payloadEstimate": {
+            "type": "integer"
+          },
           "acksSent": {
             "type": "integer"
           },
@@ -13444,6 +13450,8 @@
           "reorderPeak",
           "reorderCount",
           "reorderBytes",
+          "reorderSpan",
+          "payloadEstimate",
           "acksSent",
           "selectiveAcks",
           "duplicateAcks",

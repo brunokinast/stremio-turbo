@@ -423,6 +423,8 @@ type UTPSample struct {
 	ReorderPeak            int    `json:"reorderPeak"`
 	ReorderCount           int    `json:"reorderCount"`
 	ReorderBytes           int    `json:"reorderBytes"`
+	ReorderSpan            int    `json:"reorderSpan"`
+	PayloadEstimate        int    `json:"payloadEstimate"`
 	AcksSent               uint64 `json:"acksSent"`
 	SelectiveAcks          uint64 `json:"selectiveAcks"`
 	DuplicateAcks          uint64 `json:"duplicateAcks"`
