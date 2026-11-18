@@ -59,6 +59,12 @@ type Callbacks struct {
 	// Like ReceivedUsefulData, with when the chunk was requested from this peer and its piece's
 	// priority: for measuring how long urgent chunks take. Called with the Client lock held.
 	ReceivedUsefulChunk []func(ReceivedUsefulChunkEvent)
+	// A reader's blocked read waited at least 20 ms, with what held up the chunk it waited for when
+	// the wait began. Called without the Client lock.
+	ReaderWaited []func(ReaderWaitedEvent)
+	// ClientConfig.ReaderCriticalBytes moved a critical request to a peer expected to deliver it
+	// sooner. Called with the Client lock held.
+	CriticalRequestStolen []func(CriticalRequestStolenEvent)
 }
 
 type ChunkWrittenEvent struct {
@@ -100,6 +106,40 @@ type ReceivedUsefulChunkEvent struct {
 	// When the chunk was last requested from this peer; zero if this peer didn't hold the request
 	// (another peer did, or it was cancelled).
 	RequestedAt time.Time
+}
+
+type ReaderWaitedEvent struct {
+	Torrent *Torrent
+	// Torrent offset of the byte the read waited for, and how long it waited.
+	Offset int64
+	Waited time.Duration
+	// The rest describes the chunk holding Offset when the wait began.
+	Wait ChunkWaitState
+}
+
+// What a chunk was waiting on: who has it requested, and the expected delivery there and on the
+// best other peer. Estimates are -1 when unknown (no recent rate).
+type ChunkWaitState struct {
+	Requested bool
+	// The requesting peer's address and network, when Requested.
+	Holder, HolderNetwork string
+	RequestedAgo          time.Duration
+	// Requests the holder was given before this one and hasn't delivered yet.
+	Ahead int
+	// The holder's recent useful rate, bytes per second.
+	HolderRate     float64
+	HolderEstimate time.Duration
+	// The unchoked peer with the piece, other than the holder, expected to deliver a new request
+	// soonest.
+	BestOther, BestOtherNetwork string
+	BestOtherEstimate           time.Duration
+}
+
+type CriticalRequestStolenEvent struct {
+	From, To *Peer
+	Request  RequestIndex
+	// Expected delivery on the holder that lost the request, and on the peer that took it.
+	FromEstimate, ToEstimate time.Duration
 }
 
 type PeerMessageEvent struct {

@@ -85,6 +85,8 @@ type desiredPeerRequests struct {
 	// With ClientConfig.ReaderOffsetFirst, the chunk each reader-positioned piece should be
 	// requested from. Nil otherwise.
 	starts map[pieceIndex]chunkIndexType
+	// With ClientConfig.ReaderCriticalBytes, what blocked readers need next. Nil otherwise.
+	critical []requestRange
 }
 
 type peerRequestPieceStates struct {
@@ -158,6 +160,13 @@ func (p *desiredPeerRequests) lessByValue(leftRequest, rightRequest RequestIndex
 	}()
 	if ml.Ok() {
 		return ml.MustLess()
+	}
+	// What a blocked reader needs next goes first, including over chunks this peer already has.
+	if p.critical != nil {
+		ml = ml.Bool(!isCriticalRequest(p.critical, leftRequest), !isCriticalRequest(p.critical, rightRequest))
+		if ml.Ok() {
+			return ml.MustLess()
+		}
 	}
 	leftRequestState := t.requestState[leftRequest]
 	rightRequestState := t.requestState[rightRequest]
@@ -264,9 +273,11 @@ func (p *PeerConn) getDesiredRequestState() (desired desiredRequestState) {
 		pieceStates:    &t.requestPieceStates,
 		requestIndexes: t.requestIndexes,
 		starts:         t.readerStartChunks(),
+		critical:       t.readerCriticalRanges(),
 	}
 	candidateLimit := p.requestCandidateLimit()
-	var stealCandidates []RequestIndex
+	// Critical requests held by other peers, kept whatever the candidate limit.
+	var stealCandidates, criticalSteals []RequestIndex
 	requestHeap.pieceStates.Clear()
 	requestHeap.pieceStatesGen = t.requestPieceStates.gen
 	t.logPieceRequestOrder()
@@ -308,6 +319,8 @@ func (p *PeerConn) getDesiredRequestState() (desired desiredRequestState) {
 					if len(requestHeap.requestIndexes) < candidateLimit {
 						requestHeap.requestIndexes = append(requestHeap.requestIndexes, r)
 					}
+				} else if requestHeap.critical != nil && isCriticalRequest(requestHeap.critical, r) {
+					criticalSteals = append(criticalSteals, r)
 				} else if len(stealCandidates) < candidateLimit {
 					if stealCandidates == nil {
 						stealCandidates = make([]RequestIndex, 0, candidateLimit)
@@ -319,7 +332,7 @@ func (p *PeerConn) getDesiredRequestState() (desired desiredRequestState) {
 		},
 	)
 	requestHeap.requestIndexes = mergeRequestCandidates(
-		requestHeap.requestIndexes,
+		append(requestHeap.requestIndexes, criticalSteals...),
 		stealCandidates,
 		candidateLimit,
 	)
@@ -440,11 +453,17 @@ func (p *PeerConn) applyRequestState(next desiredRequestState) {
 	heap.Init(requestHeap)
 
 	t := p.t
+	critical := next.Requests.critical
+	now := time.Now()
 	originalRequestCount := current.Requests.GetCardinality()
 	for requestHeap.Len() > 0 {
 		numPending := maxRequests(current.Requests.GetCardinality() + current.Cancelled.GetCardinality())
-		if numPending >= p.nominalMaxRequests() {
-			break
+		if limit := p.nominalMaxRequests(); numPending >= limit {
+			// Only critical requests, which sort first, may go over, and only by a few.
+			if critical == nil || numPending >= limit+criticalRequestsOverLimit ||
+				!isCriticalRequest(critical, next.Requests.requestIndexes[0]) {
+				break
+			}
 		}
 		req := heap.Pop(requestHeap)
 		if cap(next.Requests.requestIndexes) != cap(orig) {
@@ -465,6 +484,22 @@ func (p *PeerConn) applyRequestState(next desiredRequestState) {
 			// which means that the cancelled can immediately try to steal back a request
 			// it has lost which can lead to circular cancel/add processing
 			if p.needRequestUpdate == peerUpdateRequestsPeerCancelReason {
+				continue
+			}
+			if critical != nil && isCriticalRequest(critical, req) {
+				// By expected delivery, not by queue lengths or the grace.
+				ok, from, to := p.shouldStealCritical(existing, req, now)
+				if !ok {
+					continue
+				}
+				for _, f := range t.cl.config.Callbacks.CriticalRequestStolen {
+					f(CriticalRequestStolenEvent{&existing.Peer, &p.Peer, req, from, to})
+				}
+				t.cancelRequest(req)
+				more = p.mustRequest(req)
+				if !more {
+					break
+				}
 				continue
 			}
 

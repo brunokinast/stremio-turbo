@@ -81,6 +81,8 @@ type (
 
 		// Queue sizing when ClientConfig.InitialRequestQueue is set.
 		reqQueue peerRequestQueue
+		// The transport round trip for ClientConfig.RequestQueueRTTs.
+		reqRTT peerRTT
 
 		choking bool
 
@@ -130,6 +132,8 @@ const (
 	peerUpdateRequestsSnubbedReason updateRequestReason = "Peer.snubbed"
 	// A periodic retry of an unchoked, interesting peer that has no requests.
 	peerUpdateRequestsIdleReason updateRequestReason = "Peer.idle"
+	// A reader started waiting for a chunk; see ClientConfig.ReaderCriticalBytes.
+	peerUpdateRequestsReaderWaitingReason updateRequestReason = "reader waiting"
 )
 
 // Returns the Torrent a Peer belongs to. Shouldn't change for the lifetime of the Peer. May be nil

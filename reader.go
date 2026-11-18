@@ -87,6 +87,8 @@ type reader struct {
 	// Torrent offset of pos, readable under the Client lock without r.mu (whose lock order is
 	// before the Client lock), for ClientConfig.ReaderOffsetFirst.
 	torrentPos atomic.Int64
+	// Torrent offset a read is blocked on, or -1, for ClientConfig.ReaderCriticalBytes.
+	waitingAt atomic.Int64
 }
 
 func (r *reader) SetContext(ctx context.Context) {
@@ -241,6 +243,12 @@ func (r *reader) waitAvailable(
 	block bool,
 ) (avail int64, err error) {
 	t := r.t
+	var wait *readerWait
+	defer func() {
+		if wait != nil {
+			r.endWait(wait)
+		}
+	}()
 	for {
 		t.cl.rLock()
 		avail = r.available(pos, wanted)
@@ -252,6 +260,11 @@ func (r *reader) waitAvailable(
 		var dontWait <-chan struct{}
 		if !block || wanted == 0 {
 			dontWait = closedChan
+		} else if wait == nil {
+			// About to block: note it, then look again, since the chunk may have arrived while
+			// unlocked.
+			wait = r.beginWait(r.offset + pos)
+			continue
 		}
 		select {
 		case <-readerCond:

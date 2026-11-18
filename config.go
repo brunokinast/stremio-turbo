@@ -181,6 +181,24 @@ type ClientConfig struct {
 	// otherwise waits behind the rest of the piece, and the player's head and tail reads take turns
 	// at whole pieces. Most useful with responsive readers.
 	ReaderOffsetFirst bool
+	// With InitialRequestQueue, size each peer's queue to RequestQueueRTTs of its transport round
+	// trip (PeerConnRTT) instead of RequestQueueTime, at least RequestQueueMinTime and at most
+	// RequestQueueTime; RequestQueueTime still applies while the round trip is unknown. With refill
+	// at half the queue (RequestLowWater 0.5), the sender idles only when the queue is shorter than
+	// two round trips, and every request queued beyond that is time a newly urgent chunk waits
+	// behind: a 3 s queue at a few MiB/s is 10+ MB ahead of a seek. Zero keeps RequestQueueTime.
+	RequestQueueRTTs    float64
+	RequestQueueMinTime time.Duration
+	// Reports a peer connection's transport round trip, for RequestQueueRTTs: for example a uTP
+	// connection's RTT, or the kernel's smoothed RTT of a TCP socket. Called at most once a second
+	// per connection, with the Client lock held, so it must be cheap.
+	PeerConnRTT func(net.Conn) (time.Duration, bool)
+	// When a reader blocks, the missing chunks in this many bytes from its position are critical:
+	// they sort first, a peer may exceed its request limit by a few of them, and one held by a peer
+	// expected to deliver it at least twice as late (and 200 ms later) than another peer is moved
+	// to that peer, regardless of StealRequestGrace. Delivery is estimated from the requests ahead
+	// and the recent rate, so it needs InitialRequestQueue. Zero disables.
+	ReaderCriticalBytes int64
 	// A peer that has had a request outstanding without delivering a useful chunk for this long
 	// is snubbed: its requests are cancelled so other peers can take them, and it gets one
 	// request at a time until it delivers again (libtorrent's piece_timeout). Zero or negative

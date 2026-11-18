@@ -49,6 +49,7 @@ func (t *Torrent) newReader(offset, length int64) Reader {
 	}
 	r.readaheadFunc = defaultReadaheadFunc
 	r.torrentPos.Store(offset)
+	r.waitingAt.Store(-1)
 	t.addReader(&r)
 	return &r
 }

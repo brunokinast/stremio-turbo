@@ -279,6 +279,9 @@ type PeerRequestStats struct {
 	Outgoing, UTP                                    bool
 	// When the last chunk we wanted arrived. Zero if none yet.
 	LastUsefulChunk time.Time
+	// The transport round trip (ClientConfig.PeerConnRTT; zero when unknown) and the queue time the
+	// request limit is sized to.
+	RTTEstimate, QueueTime time.Duration
 }
 
 // RequestStats returns a snapshot of the connection's request and choke state.
@@ -297,6 +300,8 @@ func (cn *PeerConn) RequestStats() PeerRequestStats {
 		Outgoing:        cn.outgoing,
 		UTP:             cn.utp(),
 		LastUsefulChunk: cn.lastUsefulChunkReceived,
+		RTTEstimate:     cn.transportRTT(time.Now()),
+		QueueTime:       cn.requestQueueTime(),
 	}
 }
 
@@ -1821,7 +1826,7 @@ func (cn *PeerConn) nominalMaxRequests() maxRequests {
 	}
 	if cn.t != nil {
 		if initial := cn.t.cl.config.InitialRequestQueue; initial > 0 {
-			n := cn.reqQueue.nominal(time.Now(), maxRequests(initial), cn.t.cl.config.RequestQueueTime, int(cn.t.chunkSize))
+			n := cn.reqQueue.nominal(time.Now(), maxRequests(initial), cn.requestQueueTime(), int(cn.t.chunkSize))
 			return max(1, min(n, cn.PeerMaxRequests, maxLocalToRemoteRequests))
 		}
 	}
@@ -2023,7 +2028,7 @@ func (cn *PeerConn) request(r RequestIndex) (more bool, err error) {
 	if cn.requestState.Requests.Contains(r) {
 		return true, nil
 	}
-	if maxRequests(cn.requestState.Requests.GetCardinality()) >= cn.nominalMaxRequests() {
+	if maxRequests(cn.requestState.Requests.GetCardinality()) >= cn.nominalMaxRequests()+cn.t.criticalExtraRequests() {
 		return true, errors.New("too many outstanding requests")
 	}
 	cn.requestState.Requests.Add(r)
