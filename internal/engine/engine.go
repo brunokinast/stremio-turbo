@@ -397,6 +397,15 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	// their few chunks first instead of waiting for whole 16 MiB pieces
 	// (streaming-research findings/14).
 	cc.ReaderOffsetFirst = true
+	// Size each peer's queue to 4 round trips (at least 0.5 s, at most RequestQueueTime) instead
+	// of 3 s of its rate: a µTorrent peer delivered 6 MiB/s with a 0.33 s queue while libtorrent
+	// peers held 1.2-2.9 s, which every newly urgent chunk (a seek, mpv's Cues) waited behind.
+	// The chunks a blocked reader needs next (1 MiB) go first and move to a peer expected to
+	// deliver them at least twice as soon (streaming-research findings/15).
+	cc.RequestQueueRTTs = 4
+	cc.RequestQueueMinTime = 500 * time.Millisecond
+	cc.PeerConnRTT = connRTT
+	cc.ReaderCriticalBytes = 1 << 20
 
 	dials := newDialLog()
 	cc.Callbacks.OutgoingConnResult = append(cc.Callbacks.OutgoingConnResult, dials.onOutgoing)

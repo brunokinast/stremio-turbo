@@ -348,25 +348,46 @@ type Trace struct {
 	Requests    []TraceRequest `json:"requests"`
 	PeerSamples []PeerSample   `json:"peerSamples"`
 	Storage     StorageTrace   `json:"storage"`
-	// Start-up instruments: how long urgent chunks took per peer, the progress of pieces stream
-	// reads were blocked on, useful bytes per file per second, and reads' waits for in-flight
-	// piece writes.
-	UrgentChunks      []UrgentChunkPeer    `json:"urgentChunks"`
+	// Start-up instruments: every read wait with what held up its chunk, critical requests moved
+	// between peers, the progress of pieces stream reads were blocked on, useful bytes per file
+	// per second, and reads' waits for in-flight piece writes.
+	ReaderWaits       []ReaderWait         `json:"readerWaits"`
+	CriticalSteals    []CriticalSteal      `json:"criticalSteals"`
 	BlockedPieces     []BlockedPieceSample `json:"blockedPieces"`
 	FileBytes         []FileBytes          `json:"fileBytes"`
 	PendingWriteWaits PendingWriteWaits    `json:"pendingWriteWaits"`
 }
 
-// UrgentChunkPeer summarises, for one peer, the time from request to receipt of
-// the chunks it delivered for pieces at priority Now.
-type UrgentChunkPeer struct {
-	Address   string  `json:"address"`
-	Network   string  `json:"network"`
-	Count     int     `json:"count"`
-	FirstAtMs int64   `json:"firstAtMs"`
-	MedianMs  float64 `json:"medianMs"`
-	P90Ms     float64 `json:"p90Ms"`
-	MaxMs     float64 `json:"maxMs"`
+// ReaderWait is a read that waited at least 20 ms for data, with the state of
+// the chunk it waited for when the wait began. Estimates are -1 when unknown.
+type ReaderWait struct {
+	AtMs      int64   `json:"atMs"`
+	File      int     `json:"file"`
+	Offset    int64   `json:"offset"`
+	WaitedMs  float64 `json:"waitedMs"`
+	Requested bool    `json:"requested"`
+	// The peer the chunk was requested from, how long before, how many of its
+	// requests were ahead, its rate (KiB/s) and its expected delivery.
+	Holder           string  `json:"holder,omitempty"`
+	HolderNetwork    string  `json:"holderNetwork,omitempty"`
+	RequestedAgoMs   float64 `json:"requestedAgoMs"`
+	Ahead            int     `json:"ahead"`
+	HolderRateKiBs   float64 `json:"holderRateKiBs"`
+	HolderEstimateMs float64 `json:"holderEstimateMs"`
+	// The other peer expected to deliver a new request soonest.
+	BestOther           string  `json:"bestOther,omitempty"`
+	BestOtherNetwork    string  `json:"bestOtherNetwork,omitempty"`
+	BestOtherEstimateMs float64 `json:"bestOtherEstimateMs"`
+}
+
+// CriticalSteal is a request a blocked reader needed, moved to a peer expected
+// to deliver it sooner.
+type CriticalSteal struct {
+	AtMs           int64   `json:"atMs"`
+	From           string  `json:"from"`
+	To             string  `json:"to"`
+	FromEstimateMs float64 `json:"fromEstimateMs"`
+	ToEstimateMs   float64 `json:"toEstimateMs"`
 }
 
 // BlockedPieceSample is a once-a-second snapshot of a piece a stream read has
@@ -457,6 +478,8 @@ type PeerSample struct {
 	PeerInterested bool       `json:"peerInterested"`
 	Choking        bool       `json:"choking"`
 	Snubbed        bool       `json:"snubbed"`
+	QueueMs        int64      `json:"queueMs"` // the queue time the request limit is sized to
+	RTTMs          int64      `json:"rttMs"`   // round-trip estimate, 0 until known
 	UTP            *UTPSample `json:"utp,omitempty"`
 }
 

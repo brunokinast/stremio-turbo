@@ -13173,10 +13173,16 @@
           "storage": {
             "$ref": "#/components/schemas/StorageTrace"
           },
-          "urgentChunks": {
+          "readerWaits": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UrgentChunkPeer"
+              "$ref": "#/components/schemas/ReaderWait"
+            }
+          },
+          "criticalSteals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CriticalSteal"
             }
           },
           "blockedPieces": {
@@ -13202,7 +13208,8 @@
           "requests",
           "peerSamples",
           "storage",
-          "urgentChunks",
+          "readerWaits",
+          "criticalSteals",
           "blockedPieces",
           "fileBytes",
           "pendingWriteWaits"
@@ -13378,6 +13385,14 @@
           "snubbed": {
             "type": "boolean"
           },
+          "queueMs": {
+            "type": "integer",
+            "description": "The queue time the request limit is sized to."
+          },
+          "rttMs": {
+            "type": "integer",
+            "description": "Round-trip estimate; 0 until known."
+          },
           "utp": {
             "$ref": "#/components/schemas/UTPSample"
           }
@@ -13397,7 +13412,9 @@
           "peerChoking",
           "peerInterested",
           "choking",
-          "snubbed"
+          "snubbed",
+          "queueMs",
+          "rttMs"
         ]
       },
       "UTPSample": {
@@ -13588,40 +13605,92 @@
           "lockedAt"
         ]
       },
-      "UrgentChunkPeer": {
+      "ReaderWait": {
         "type": "object",
-        "description": "Request-to-receipt time of one peer's chunks for pieces at priority Now.",
+        "description": "A read that waited at least 20 ms for data, with the state of the chunk it waited for when the wait began. Estimates are -1 when unknown.",
         "properties": {
-          "address": {
-            "type": "string"
-          },
-          "network": {
-            "type": "string"
-          },
-          "count": {
+          "atMs": {
             "type": "integer"
           },
-          "firstAtMs": {
+          "file": {
             "type": "integer"
           },
-          "medianMs": {
+          "offset": {
+            "type": "integer"
+          },
+          "waitedMs": {
             "type": "number"
           },
-          "p90Ms": {
+          "requested": {
+            "type": "boolean"
+          },
+          "holder": {
+            "type": "string"
+          },
+          "holderNetwork": {
+            "type": "string"
+          },
+          "requestedAgoMs": {
             "type": "number"
           },
-          "maxMs": {
+          "ahead": {
+            "type": "integer"
+          },
+          "holderRateKiBs": {
+            "type": "number"
+          },
+          "holderEstimateMs": {
+            "type": "number"
+          },
+          "bestOther": {
+            "type": "string"
+          },
+          "bestOtherNetwork": {
+            "type": "string"
+          },
+          "bestOtherEstimateMs": {
             "type": "number"
           }
         },
         "required": [
-          "address",
-          "network",
-          "count",
-          "firstAtMs",
-          "medianMs",
-          "p90Ms",
-          "maxMs"
+          "atMs",
+          "file",
+          "offset",
+          "waitedMs",
+          "requested",
+          "requestedAgoMs",
+          "ahead",
+          "holderRateKiBs",
+          "holderEstimateMs",
+          "bestOtherEstimateMs"
+        ]
+      },
+      "CriticalSteal": {
+        "type": "object",
+        "description": "A request a blocked reader needed, moved to a peer expected to deliver it sooner.",
+        "properties": {
+          "atMs": {
+            "type": "integer"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "fromEstimateMs": {
+            "type": "number"
+          },
+          "toEstimateMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "atMs",
+          "from",
+          "to",
+          "fromEstimateMs",
+          "toEstimateMs"
         ]
       },
       "BlockedPieceSample": {

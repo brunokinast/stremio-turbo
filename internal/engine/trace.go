@@ -29,8 +29,9 @@ const (
 	traceCompleteCap  = 2000
 	lockHoldCap       = 1000
 	traceBlockedCap   = 2000
-	// Latencies kept per peer for the urgent-chunk summary, and seconds of per-file bytes.
-	urgentLatencyCap = 4096
+	traceWaitCap      = 5000
+	traceStealCap     = 2000
+	// Seconds of per-file bytes.
 	fileBytesSeconds = 600
 
 	// A read that waits this long for data counts as a stall.
@@ -87,19 +88,12 @@ type torrentTrace struct {
 	writes     int64
 	writeTime  time.Duration
 
-	urgent      map[string]*urgentPeer
+	waits       ring[types.ReaderWait]
+	steals      ring[types.CriticalSteal]
 	blocked     ring[types.BlockedPieceSample]
 	fileBegins  []int // first piece of each file, ascending, once known
 	fileBytes   map[int][]int64
 	pendingWait types.PendingWriteWaits
-}
-
-// urgentPeer collects one peer's request-to-receipt times for Now chunks.
-type urgentPeer struct {
-	network string
-	first   time.Time
-	count   int
-	lat     []float64 // ms, the first urgentLatencyCap
 }
 
 func newTracer() *tracer {
@@ -118,7 +112,8 @@ func (tr *tracer) begin(ih string, now time.Time) {
 		samples:    newRing[types.PeerSample](traceSampleCap),
 		slowWrites: newRing[types.SlowWrite](traceSlowWriteCap),
 		completes:  newRing[types.PieceTiming](traceCompleteCap),
-		urgent:     map[string]*urgentPeer{},
+		waits:      newRing[types.ReaderWait](traceWaitCap),
+		steals:     newRing[types.CriticalSteal](traceStealCap),
 		blocked:    newRing[types.BlockedPieceSample](traceBlockedCap),
 		fileBytes:  map[int][]int64{},
 	}
@@ -222,9 +217,8 @@ func (tr *tracer) onPieceMarkedComplete(ev torrent.PieceMarkedCompleteEvent) {
 	})
 }
 
-// onReceivedUsefulChunk records useful bytes per file per second and, for
-// chunks of Now pieces requested from the delivering peer, the request-to-receipt
-// time. It runs with the client lock held.
+// onReceivedUsefulChunk records useful bytes per file per second. It runs with
+// the client lock held.
 func (tr *tracer) onReceivedUsefulChunk(ev torrent.ReceivedUsefulChunkEvent) {
 	now := time.Now()
 	t := ev.Peer.Torrent()
@@ -243,20 +237,59 @@ func (tr *tracer) onReceivedUsefulChunk(ev torrent.ReceivedUsefulChunkEvent) {
 				tt.fileBytes[file] = b
 			}
 		}
-		if ev.Priority < torrent.PiecePriorityNow || ev.RequestedAt.IsZero() {
-			return
-		}
-		addr := ev.Peer.RemoteAddr.String()
-		u := tt.urgent[addr]
-		if u == nil {
-			u = &urgentPeer{network: ev.Peer.Network, first: now}
-			tt.urgent[addr] = u
-		}
-		u.count++
-		if len(u.lat) < urgentLatencyCap {
-			u.lat = append(u.lat, msf(now.Sub(ev.RequestedAt)))
-		}
 	})
+}
+
+// onReaderWaited records a read's wait and what held up its chunk. It runs
+// without the client lock.
+func (tr *tracer) onReaderWaited(ev torrent.ReaderWaitedEvent) {
+	now := time.Now()
+	info := ev.Torrent.Info()
+	if info == nil || info.PieceLength <= 0 {
+		return
+	}
+	piece := int(ev.Offset / info.PieceLength)
+	w := ev.Wait
+	tr.with(ev.Torrent.InfoHash().HexString(), func(tt *torrentTrace) {
+		tt.waits.add(types.ReaderWait{
+			AtMs: tt.ms(now.Add(-ev.Waited)), File: tt.fileOfPiece(piece), Offset: ev.Offset,
+			WaitedMs: msf(ev.Waited), Requested: w.Requested,
+			Holder: w.Holder, HolderNetwork: w.HolderNetwork, RequestedAgoMs: msf(w.RequestedAgo),
+			Ahead: w.Ahead, HolderRateKiBs: w.HolderRate / 1024, HolderEstimateMs: estimateMs(w.HolderEstimate),
+			BestOther: w.BestOther, BestOtherNetwork: w.BestOtherNetwork, BestOtherEstimateMs: estimateMs(w.BestOtherEstimate),
+		})
+	})
+}
+
+// onCriticalRequestStolen records a critical request moved between peers. It
+// runs with the client lock held.
+func (tr *tracer) onCriticalRequestStolen(ev torrent.CriticalRequestStolenEvent) {
+	now := time.Now()
+	t := ev.To.Torrent()
+	if t == nil {
+		return
+	}
+	tr.with(t.InfoHash().HexString(), func(tt *torrentTrace) {
+		tt.steals.add(types.CriticalSteal{
+			AtMs: tt.ms(now), From: peerAddr(ev.From), To: peerAddr(ev.To),
+			FromEstimateMs: estimateMs(ev.FromEstimate), ToEstimateMs: estimateMs(ev.ToEstimate),
+		})
+	})
+}
+
+func peerAddr(p *torrent.Peer) string {
+	if p.RemoteAddr == nil {
+		return ""
+	}
+	return p.RemoteAddr.String()
+}
+
+// estimateMs is a delivery estimate in ms, keeping -1 for unknown.
+func estimateMs(d time.Duration) float64 {
+	if d < 0 {
+		return -1
+	}
+	return msf(d)
 }
 
 // fileOfPiece returns the file a piece starts in, or -1 before the file layout
@@ -291,27 +324,6 @@ func (tr *tracer) pendingWrites(ih string, w torrent.PendingWriteWaits) {
 	tr.with(ih, func(tt *torrentTrace) {
 		tt.pendingWait = types.PendingWriteWaits{Count: w.Count, TotalMs: msf(w.Total), MaxMs: msf(w.Max)}
 	})
-}
-
-// urgentSummary summarises each peer's urgent-chunk latencies, most chunks first.
-func (tt *torrentTrace) urgentSummary() []types.UrgentChunkPeer {
-	out := make([]types.UrgentChunkPeer, 0, len(tt.urgent))
-	for addr, u := range tt.urgent {
-		lat := slices.Clone(u.lat)
-		slices.Sort(lat)
-		q := func(f float64) float64 {
-			if len(lat) == 0 {
-				return 0
-			}
-			return lat[min(len(lat)-1, int(f*float64(len(lat))))]
-		}
-		out = append(out, types.UrgentChunkPeer{
-			Address: addr, Network: u.network, Count: u.count, FirstAtMs: tt.ms(u.first),
-			MedianMs: q(0.5), P90Ms: q(0.9), MaxMs: q(1),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
-	return out
 }
 
 // onLockHold is the anacrolix LockHoldCallback.
@@ -353,6 +365,8 @@ func (tr *tracer) samplePeers(ih string, t *torrent.Torrent, now time.Time) {
 			PeerInterested: rs.PeerInterested,
 			Choking:        rs.Choking,
 			Snubbed:        rs.Snubbed,
+			QueueMs:        rs.QueueTime.Milliseconds(),
+			RTTMs:          rs.RTTEstimate.Milliseconds(),
 		}
 		if isUTP {
 			s.UTP = utpSample(uc.Stats())
@@ -413,7 +427,8 @@ func (tr *tracer) get(ih string) (types.Trace, bool) {
 			SlowWrites:      tt.slowWrites.items(),
 			MarkCompletions: tt.completes.items(),
 		},
-		UrgentChunks:      tt.urgentSummary(),
+		ReaderWaits:       tt.waits.items(),
+		CriticalSteals:    tt.steals.items(),
 		BlockedPieces:     tt.blocked.items(),
 		FileBytes:         tt.fileBytesList(),
 		PendingWriteWaits: tt.pendingWait,
@@ -454,6 +469,8 @@ func installTracer(cc *torrent.ClientConfig, tr *tracer) {
 	cc.Callbacks.ChunkWritten = append(cc.Callbacks.ChunkWritten, tr.onChunkWritten)
 	cc.Callbacks.PieceMarkedComplete = append(cc.Callbacks.PieceMarkedComplete, tr.onPieceMarkedComplete)
 	cc.Callbacks.ReceivedUsefulChunk = append(cc.Callbacks.ReceivedUsefulChunk, tr.onReceivedUsefulChunk)
+	cc.Callbacks.ReaderWaited = append(cc.Callbacks.ReaderWaited, tr.onReaderWaited)
+	cc.Callbacks.CriticalRequestStolen = append(cc.Callbacks.CriticalRequestStolen, tr.onCriticalRequestStolen)
 	cc.LockHoldCallback = tr.onLockHold
 	cc.LockHoldThreshold = lockHoldThreshold
 }

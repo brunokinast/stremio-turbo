@@ -131,4 +131,22 @@ func TestTraceFromLoopbackStream(t *testing.T) {
 	if len(tr.PeerSamples) == 0 || tr.PeerSamples[0].Downloaded == 0 {
 		t.Errorf("peer samples = %+v", tr.PeerSamples)
 	}
+	// The rate-limited seeder makes the stream wait; each wait names what held up its chunk.
+	if len(tr.ReaderWaits) == 0 {
+		t.Fatal("no reader waits")
+	}
+	for _, w := range tr.ReaderWaits {
+		if w.File != 0 || w.WaitedMs < 20 || (w.Requested && w.HolderNetwork == "") {
+			t.Errorf("reader wait = %+v", w)
+		}
+	}
+}
+
+func TestEstimateMsKeepsUnknown(t *testing.T) {
+	if got := estimateMs(-1); got != -1 {
+		t.Errorf("estimateMs(-1) = %v", got)
+	}
+	if got := estimateMs(1500 * time.Microsecond); got != 1.5 {
+		t.Errorf("estimateMs(1.5 ms) = %v", got)
+	}
 }
