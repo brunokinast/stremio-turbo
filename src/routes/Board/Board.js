@@ -14,6 +14,7 @@ const { default: useScrolledPast } = require('./Spotlight/useScrolledPast');
 const styles = require('./styles');
 const { default: StreamingServerWarning } = require('./StreamingServerWarning');
 const { default: RemoteNotification } = require('stremio/components/RemoteNotification');
+const { useBoardWarmUp } = require('stremio/smartPlay');
 
 const THRESHOLD = 5;
 
@@ -25,6 +26,7 @@ const Board = () => {
     const [board, loadBoardRows] = useBoard();
     const notifications = useNotifications();
     const profile = useProfile();
+    useBoardWarmUp(continueWatchingPreview.items, profile.settings.playerType === null);
     const liveTvCatalog = React.useMemo(() => ({
         items: (Array.isArray(liveTvContinueWatching.items) ? liveTvContinueWatching.items : [])
             .map((item) => ({ ...item, posterShape: 'landscape' })),

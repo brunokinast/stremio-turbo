@@ -1,7 +1,8 @@
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import Icon from '@stremio/stremio-icons/react';
-import { MultiselectMenu } from 'stremio/components';
+import { MultiselectMenu, Toggle } from 'stremio/components';
+import { useWarmUpToggle } from 'stremio/smartPlay';
 import { useToast } from 'stremio/common';
 import { Group, Row, RowButton } from '../components';
 import URLsManager from './URLsManager';
@@ -27,6 +28,7 @@ const Streaming = ({ profile, streamingServer }: Props) => {
         torrentProfileSelect,
         transcodingProfileSelect,
     } = useStreamingOptions(streamingServer);
+    const warmUpToggle = useWarmUpToggle();
 
     const onCopyRemoteUrl = useCallback(() => {
         if (streamingServer.remoteUrl) {
@@ -106,6 +108,11 @@ const Streaming = ({ profile, streamingServer }: Props) => {
                         </div>
                     </Group>
             }
+            <Group>
+                <Row rowId={'warmUp'} label={t('SMART_PLAY_WARMUP')} description={t('SMART_PLAY_WARMUP_DESCRIPTION')}>
+                    <Toggle aria-label={t('SMART_PLAY_WARMUP')} {...warmUpToggle} />
+                </Row>
+            </Group>
         </React.Fragment>
     );
 };

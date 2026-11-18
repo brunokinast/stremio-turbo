@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSmartPlayState, setState } from './session';
+import { claimUrl } from './warmup';
 
 // Buffer ahead of the position (ms) a held start waits for.
 const START_BUFFER_MS = 4000;
@@ -49,6 +50,10 @@ const useStartBuffer = (video: Video) => {
 
     const url = video.state.stream?.url;
     useEffect(() => {
+        if (typeof url === 'string') {
+            // A board warm-up being played isn't removed.
+            claimUrl(url);
+        }
         const { handoff } = getSmartPlayState();
         if (typeof url !== 'string' || handoff === null || !url.includes(handoff.infoHash)) {
             return;

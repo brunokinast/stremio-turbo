@@ -17,6 +17,7 @@ import { preload, stats } from './serverApi';
 import { neededRate, parseRuntime, RateMeter } from './supply';
 import { getLastQuality, getQuality, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
+import { claim } from './warmup';
 
 type Options = {
     groups: StreamGroup[],
@@ -189,6 +190,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
                 raceController.current = null;
                 const rate = meter.current.rate(winner.infoHash);
                 const needed = neededRate(winner, runtimeSeconds);
+                claim(winner.infoHash);
                 setState({ handoff: rate !== null && needed !== null ? { infoHash: winner.infoHash, rate, needed } : null });
                 navigate(toPath(winner.stream.deepLinks.player));
             })
