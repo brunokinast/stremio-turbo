@@ -29,7 +29,7 @@ func TestProbeReaderKeepsFilePreparedForThePlayer(t *testing.T) {
 			t.Fatal("pieces still checking after 30 s")
 		}
 	}
-	e.PrimeFile(0)
+	e.PrimeFile(0, 0)
 	if prio() != torrent.PiecePriorityNow {
 		t.Fatalf("tail piece after PrimeFile = %v, want Now", prio())
 	}

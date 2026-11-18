@@ -75,7 +75,7 @@ func TestPrimeFileReplacesGuess(t *testing.T) {
 		t.Fatalf("guess should prime the largest file %d; primed %v", e2, primedFiles(e))
 	}
 
-	e.PrimeFile(e1)
+	e.PrimeFile(e1, 0)
 	primed := primedFiles(e)
 	if _, ok := primed[e1]; !ok || len(primed) != 1 {
 		t.Fatalf("primed = %v; want only %d", primed, e1)
@@ -106,7 +106,7 @@ func TestGuessSkippedWhenFileChosen(t *testing.T) {
 	_, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
 	applyBoundaryPriorities(e)
 	e1 := fileIndex(t, e, "Show.S01E01.mkv")
-	e.PrimeFile(e1) // releases the guess
+	e.PrimeFile(e1, 0) // releases the guess
 
 	// Re-run the guess as if it had lost the race with the stream.
 	e.onceMetaPriority = sync.Once{}

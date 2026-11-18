@@ -10713,6 +10713,12 @@
             "type": "integer",
             "minimum": 0,
             "description": "Index of the file that will be played (e.g. one episode of a season pack). Its first and last pieces are prioritized instead of the largest file's. A fileMustInclude match does the same when fileIdx is absent."
+          },
+          "startFraction": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Where playback of that file will start, as a fraction of it (a resume point). The pieces covering 32 MiB around it are prioritized with the first and last. Ignored outside (0,1)."
           }
         }
       },

@@ -319,8 +319,10 @@ type Engine interface {
 	GuessFileIdx() int
 	// PrimeFile names the file that will be played, so its boundary (head and
 	// tail) pieces are prioritized instead of the largest file's (POST
-	// /:infoHash/create with fileIdx, or a fileMustInclude match).
-	PrimeFile(idx int)
+	// /:infoHash/create with fileIdx, or a fileMustInclude match). A
+	// startFraction in (0,1) is where playback will start (a resume): the
+	// pieces around it are prioritized too.
+	PrimeFile(idx int, startFraction float64)
 	// Peers lists the torrent's live peer connections (GET /:infoHash/peers).
 	Peers() []PeerConn
 }

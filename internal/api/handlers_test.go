@@ -1129,14 +1129,16 @@ func min(a, b int) int {
 
 func TestHandlerCreate_PrimesNamedFile(t *testing.T) {
 	cases := []struct {
-		name string
-		body string
-		want int // -1: PrimeFile not called
+		name     string
+		body     string
+		want     int // -1: PrimeFile not called
+		wantFrac float64
 	}{
-		{"no hint", `{}`, -1},
-		{"explicit fileIdx", `{"fileIdx":1}`, 1},
-		{"fileMustInclude match", `{"fileMustInclude":["S06E02"]}`, 1},
-		{"explicit fileIdx wins over a match", `{"fileIdx":0,"fileMustInclude":["S06E02"]}`, 0},
+		{"no hint", `{}`, -1, 0},
+		{"explicit fileIdx", `{"fileIdx":1}`, 1, 0},
+		{"fileMustInclude match", `{"fileMustInclude":["S06E02"]}`, 1, 0},
+		{"explicit fileIdx wins over a match", `{"fileIdx":0,"fileMustInclude":["S06E02"]}`, 0, 0},
+		{"resume point", `{"fileIdx":1,"startFraction":0.05}`, 1, 0.05},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1154,8 +1156,8 @@ func TestHandlerCreate_PrimesNamedFile(t *testing.T) {
 			if eng.primedFile != nil {
 				got = *eng.primedFile
 			}
-			if got != c.want {
-				t.Errorf("primed file = %d; want %d", got, c.want)
+			if got != c.want || eng.primedFraction != c.wantFrac {
+				t.Errorf("primed file %d at %v; want %d at %v", got, eng.primedFraction, c.want, c.wantFrac)
 			}
 		})
 	}

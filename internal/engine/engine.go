@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -96,6 +97,7 @@ type engine struct {
 	lastDLSpeed      float64          // cached bytes/sec from last Stats(); used for readahead scaling
 	selected         map[int]struct{} // file indices marked for background download
 	primed           map[int]struct{} // file indices whose moov/header pieces are primed (once each)
+	resumeFrac       map[int]float64  // file idx -> where PrimeFile said playback starts (fraction); its window is primed too
 	lastAccess       time.Time        // last real use (EnsureEngine reuse, NewReader, reader Close, per-torrent Stats); global AllStats does not bump it; drives janitor LRU/idle
 	openReaders      int              // active NewReader handles; >0 pins the torrent against eviction
 	reading          map[int]int      // file idx -> open reader count; a file with readers is never demoted
@@ -2263,14 +2265,27 @@ func applyBoundaryPriorities(e *engine) {
 // (e.g. a preload that knows it), so its boundary pieces are primed instead of
 // the largest file's. Before metadata it is remembered for
 // applyBoundaryPriorities; after, any guessed file's boundary is released and
-// idx is primed now.
-func (e *engine) PrimeFile(idx int) {
+// idx is primed now. A startFraction in (0,1) is where playback will start (a
+// resume): the window around it is primed with the head and tail.
+func (e *engine) PrimeFile(idx int, startFraction float64) {
 	if idx < 0 {
 		return
 	}
 	e.fileMu.Lock()
 	defer e.fileMu.Unlock()
 	e.fileChosen = true
+	e.mu.Lock()
+	if e.resumeFrac == nil {
+		e.resumeFrac = map[int]float64{}
+	}
+	oldFrac := e.resumeFrac[idx]
+	if startFraction > 0 && startFraction < 1 {
+		e.resumeFrac[idx] = startFraction
+	} else {
+		delete(e.resumeFrac, idx)
+		startFraction = 0
+	}
+	e.mu.Unlock()
 	if !e.hasInfo() {
 		e.chosenFile = idx
 		return
@@ -2290,6 +2305,90 @@ func (e *engine) PrimeFile(idx int) {
 	e.mu.Unlock()
 	e.releaseBoundary(demote)
 	e.primeBoundary(idx)
+	if oldFrac != startFraction {
+		e.releaseStaleResume(idx, oldFrac)
+	}
+}
+
+// resumeWindowBytes is how much of a file around a resume point is primed:
+// mpv's first reads at a resume landed 13 MB either side of the client's
+// linear estimate, fraction x length (streaming-research findings/17).
+const resumeWindowBytes int64 = 32 << 20
+
+// resumeSpan returns the pieces covering resumeWindowBytes centred on frac of
+// a file at [fileOff, fileOff+fileLen) in torrent bytes, or false when frac is
+// not a resume point (outside (0,1)).
+func resumeSpan(fileOff, fileLen, pieceLen int64, frac float64) (pieceSpan, bool) {
+	if frac <= 0 || frac >= 1 || fileLen <= 0 || pieceLen <= 0 {
+		return pieceSpan{}, false
+	}
+	pos := fileOff + int64(frac*float64(fileLen))
+	lo := max(fileOff, pos-resumeWindowBytes/2)
+	hi := min(fileOff+fileLen, pos+resumeWindowBytes/2)
+	return pieceSpan{int(lo / pieceLen), int((hi-1)/pieceLen) + 1}, true
+}
+
+// boundarySpansFunc returns a function giving file i's pinned spans (head,
+// tail and resume window). It snapshots the resume points first, so the
+// function is safe to call while holding mu or boundaryMu; boundarySpansFunc
+// itself must be called without mu.
+func (e *engine) boundarySpansFunc(files []*torrent.File, pieceLen int64) func(int) []pieceSpan {
+	e.mu.Lock()
+	fracs := maps.Clone(e.resumeFrac)
+	e.mu.Unlock()
+	return func(i int) []pieceSpan {
+		if i < 0 || i >= len(files) {
+			return nil
+		}
+		f := files[i]
+		out := boundarySpans(f.BeginPieceIndex(), f.EndPieceIndex(), pieceLen)
+		if s, ok := resumeSpan(f.Offset(), f.Length(), pieceLen, fracs[i]); ok {
+			out = append(out, s)
+		}
+		return out
+	}
+}
+
+// releaseStaleResume resets the pins of file idx's previous resume window
+// (oldFrac) after PrimeFile moved or dropped it, except pieces that the file's
+// current spans or another kept file's spans cover. A file being read is left
+// to its readers.
+func (e *engine) releaseStaleResume(idx int, oldFrac float64) {
+	info := e.t.Info()
+	files := e.t.Files()
+	if info == nil || idx >= len(files) {
+		return
+	}
+	f := files[idx]
+	old, ok := resumeSpan(f.Offset(), f.Length(), info.PieceLength, oldFrac)
+	if !ok {
+		return
+	}
+	spansOf := e.boundarySpansFunc(files, info.PieceLength)
+	e.boundaryMu.Lock()
+	defer e.boundaryMu.Unlock()
+	e.mu.Lock()
+	if e.reading[idx] > 0 {
+		e.mu.Unlock()
+		return
+	}
+	keep := map[int]struct{}{idx: {}}
+	for _, set := range []map[int]struct{}{e.selected, e.primed} {
+		for i := range set {
+			keep[i] = struct{}{}
+		}
+	}
+	for i, n := range e.reading {
+		if n > 0 {
+			keep[i] = struct{}{}
+		}
+	}
+	e.mu.Unlock()
+	var protected []pieceSpan
+	for i := range keep {
+		protected = append(protected, spansOf(i)...)
+	}
+	e.releasePieces(piecesToRelease([]pieceSpan{old}, protected), e.setPiecePriority)
 }
 
 // Boundary priming windows: byte ranges (not fixed piece counts) at the head
@@ -2377,13 +2476,16 @@ func (e *engine) primeBoundary(idx int) {
 	if e.primed == nil {
 		e.primed = map[int]struct{}{}
 	}
-	if _, ok := e.primed[idx]; ok || e.reading[idx] > 0 {
-		// Primed already, or a stream is reading the file and its readers
-		// drive priority (releaseOwnBoundary).
+	if e.reading[idx] > 0 {
+		// A stream is reading the file and its readers drive priority
+		// (releaseOwnBoundary).
 		e.mu.Unlock()
 		return
 	}
+	// Primed already: only a (new) resume window is raised.
+	_, already := e.primed[idx]
 	e.primed[idx] = struct{}{}
+	frac := e.resumeFrac[idx]
 	e.mu.Unlock()
 
 	files := e.t.Files()
@@ -2398,11 +2500,23 @@ func (e *engine) primeBoundary(idx int) {
 		return
 	}
 	headEnd, tailBegin := primeBoundaryRange(begin, end, info.PieceLength, headWindowBytes, tailWindowBytes)
-	e.raiseBoundary([]pieceSpan{{begin, headEnd}, {tailBegin, end}}, torrent.PiecePriorityNow, e.setPiecePriority)
+	var spans []pieceSpan
+	if !already {
+		spans = append(spans, pieceSpan{begin, headEnd}, pieceSpan{tailBegin, end})
+	}
+	resume, hasResume := resumeSpan(f.Offset(), f.Length(), info.PieceLength, frac)
+	if hasResume {
+		spans = append(spans, resume)
+	}
+	if len(spans) == 0 {
+		return
+	}
+	e.raiseBoundary(spans, torrent.PiecePriorityNow, e.setPiecePriority)
 	logging.For("engine").Debug("boundary-prioritized pieces", "info_hash", e.infoHash, "file_idx", idx,
 		"begin", begin, "end", end,
 		"head_bytes", headWindowBytes, "head_pieces", headEnd-begin,
-		"tail_bytes", tailWindowBytes, "tail_pieces", end-tailBegin)
+		"tail_bytes", tailWindowBytes, "tail_pieces", end-tailBegin,
+		"resume_fraction", frac, "resume_begin", resume.begin, "resume_end", resume.end, "already_primed", already)
 }
 
 // pieceSpan is a half-open piece index range [begin,end).
@@ -2481,11 +2595,12 @@ func (e *engine) releaseBoundary(demoted []int) {
 		return
 	}
 	files := e.t.Files()
+	pinned := e.boundarySpansFunc(files, info.PieceLength)
 	spansOf := func(i int) []pieceSpan {
 		if i < 0 || i >= len(files) {
 			return nil
 		}
-		out := boundarySpans(files[i].BeginPieceIndex(), files[i].EndPieceIndex(), info.PieceLength)
+		out := pinned(i)
 		// Next-file prefetch pieces raised on behalf of file i.
 		if n := e.nextVideoIdx(i); n >= 0 {
 			out = append(out, prefetchSpans(files[n].BeginPieceIndex(), files[n].EndPieceIndex())...)
@@ -2538,9 +2653,7 @@ func (e *engine) releaseOwnBoundary(idx int) {
 	if idx >= len(files) {
 		return
 	}
-	spansOf := func(i int) []pieceSpan {
-		return boundarySpans(files[i].BeginPieceIndex(), files[i].EndPieceIndex(), info.PieceLength)
-	}
+	spansOf := e.boundarySpansFunc(files, info.PieceLength)
 	e.boundaryMu.Lock()
 	defer e.boundaryMu.Unlock()
 	e.releasePieces(e.ownBoundaryToRelease(idx, len(files), spansOf), e.setPiecePriority)

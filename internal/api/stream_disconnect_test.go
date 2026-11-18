@@ -90,7 +90,7 @@ func (e *disconnectFakeEngine) Files() []types.FileInfo {
 }
 func (e *disconnectFakeEngine) GuessFileIdx() int       { return 0 }
 func (e *disconnectFakeEngine) Peers() []types.PeerConn { return nil }
-func (e *disconnectFakeEngine) PrimeFile(int)           {}
+func (e *disconnectFakeEngine) PrimeFile(int, float64)  {}
 func (e *disconnectFakeEngine) NewReader(_ int) (io.ReadSeekCloser, int64, error) {
 	atomic.AddInt32(&e.openReaders, 1)
 	return e.rc, 1 << 20, nil

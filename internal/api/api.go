@@ -1177,8 +1177,12 @@ type createBody struct {
 	// FileIdx names the file that will be played (e.g. a client preloading a
 	// season pack's episode), so its boundary pieces are primed rather than
 	// the largest file's. Optional; a fork extension.
-	FileIdx    *int `json:"fileIdx"`
-	PeerSearch *struct {
+	FileIdx *int `json:"fileIdx"`
+	// StartFraction is where playback of that file will start, as a fraction
+	// of it (a resume point), so the pieces there are primed too. Optional;
+	// a fork extension.
+	StartFraction float64 `json:"startFraction"`
+	PeerSearch    *struct {
 		Sources []string `json:"sources"`
 	} `json:"peerSearch"`
 }
@@ -1201,7 +1205,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request, ih string)
 		return
 	}
 	if body.FileIdx != nil {
-		eng.PrimeFile(*body.FileIdx)
+		eng.PrimeFile(*body.FileIdx, body.StartFraction)
 	}
 	ctx, cancel := withTimeout(r, s.cfg.CreateMetadataWait)
 	defer cancel()
@@ -1225,7 +1229,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request, ih string)
 					gi := i
 					stats.GuessedFileIdx = &gi
 					if body.FileIdx == nil {
-						eng.PrimeFile(gi) // the matched file, not the largest
+						eng.PrimeFile(gi, body.StartFraction) // the matched file, not the largest
 					}
 					break match
 				}

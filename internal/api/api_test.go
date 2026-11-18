@@ -42,6 +42,8 @@ type fakeEngine struct {
 	files []types.FileInfo
 	// primedFile records the last PrimeFile call.
 	primedFile *int
+	// primedFraction records the last PrimeFile call's start fraction.
+	primedFraction float64
 	// probes counts NewProbeReader calls.
 	probes int
 }
@@ -50,7 +52,10 @@ func (e *fakeEngine) InfoHash() string              { return e.ih }
 func (e *fakeEngine) Ready(_ context.Context) error { return nil }
 func (e *fakeEngine) Files() []types.FileInfo       { return e.files }
 func (e *fakeEngine) Peers() []types.PeerConn       { return nil }
-func (e *fakeEngine) PrimeFile(idx int)             { e.primedFile = &idx }
+func (e *fakeEngine) PrimeFile(idx int, frac float64) {
+	e.primedFile = &idx
+	e.primedFraction = frac
+}
 func (e *fakeEngine) GuessFileIdx() int {
 	if len(e.files) > 0 {
 		return 0
