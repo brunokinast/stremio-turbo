@@ -30,12 +30,7 @@ type liveSwarmFunc func(ih string) (seeders, leechers int, ok bool)
 // dhtScrapeFunc returns a BEP 33 scraper over the client's DHT servers (IPv4
 // and IPv6), or nil when the DHT is off.
 func (m *manager) dhtScrapeFunc() dhtScrapeFunc {
-	var servers []*dht.Server
-	for _, s := range m.client.DhtServers() {
-		if w, ok := s.(torrent.AnacrolixDhtServerWrapper); ok {
-			servers = append(servers, w.Server)
-		}
-	}
+	servers := m.dhtServers()
 	if len(servers) == 0 {
 		return nil
 	}

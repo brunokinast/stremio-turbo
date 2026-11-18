@@ -168,6 +168,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		BTEncryption:        getenv(lookup, "RIVULET_BT_ENCRYPTION", "prefer"),
 		BTProxy:             getenv(lookup, "RIVULET_BT_PROXY", ""),
 		DHTBootstrap:        getenv(lookup, "RIVULET_DHT_BOOTSTRAP", ""),
+		DHTNodesFile:        dhtNodesFile(lookup, appPath),
 		BTAnonymous:         envBool(lookup, "RIVULET_BT_ANONYMOUS", false),
 		IdleTimeout:         time.Duration(envInt(lookup, "RIVULET_TORRENT_IDLE_TIMEOUT", 300)) * time.Second, // 0 = disabled
 		MaxSeedRatio:        envFloat(lookup, "RIVULET_MAX_SEED_RATIO", 0),                                    // 0 = unlimited seeding

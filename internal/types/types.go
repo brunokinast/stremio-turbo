@@ -110,6 +110,9 @@ type Config struct {
 	BTProxy string
 	// extra DHT bootstrap nodes appended to defaults (RIVULET_DHT_BOOTSTRAP; comma-separated host:port). "" = defaults only.
 	DHTBootstrap string
+	// file the DHT routing table is saved to and loaded from across restarts
+	// (RIVULET_DHT_NODES_FILE; default <APP_PATH>/dht-nodes.dat, "off" disables).
+	DHTNodesFile string
 	// hide client version/fingerprint from peers (RIVULET_BT_ANONYMOUS; cc.AnonymousMode). default false.
 	BTAnonymous bool
 	// IdleTimeout removes a torrent that has had no open stream readers and no

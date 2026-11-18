@@ -16,6 +16,7 @@ package app
 import (
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -325,4 +326,15 @@ func optionalURL(lookup Lookup, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(v)
+}
+
+// dhtNodesFile is where the DHT routing table is kept across restarts
+// (RIVULET_DHT_NODES_FILE): <appPath>/dht-nodes.dat by default, "" when set to
+// off.
+func dhtNodesFile(lookup Lookup, appPath string) string {
+	v, ok := lookup("RIVULET_DHT_NODES_FILE")
+	if !ok || strings.TrimSpace(v) == "" {
+		return filepath.Join(appPath, "dht-nodes.dat")
+	}
+	return optionalURL(lookup, "RIVULET_DHT_NODES_FILE")
 }

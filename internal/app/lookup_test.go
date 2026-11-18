@@ -10,6 +10,7 @@ package app
 
 import (
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -395,5 +396,21 @@ func TestIPTVURLList(t *testing.T) {
 	}
 	if got := iptvURLList(MapLookup(nil), "K", "iptv guide"); got != nil {
 		t.Errorf("unset = %v; want nil", got)
+	}
+}
+
+func TestDHTNodesFile(t *testing.T) {
+	env := func(m map[string]string) Lookup {
+		return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+	}
+	app := filepath.Join("x", "app")
+	if got := dhtNodesFile(env(nil), app); got != filepath.Join(app, "dht-nodes.dat") {
+		t.Errorf("default = %q", got)
+	}
+	if got := dhtNodesFile(env(map[string]string{"RIVULET_DHT_NODES_FILE": "off"}), app); got != "" {
+		t.Errorf("off = %q", got)
+	}
+	if got := dhtNodesFile(env(map[string]string{"RIVULET_DHT_NODES_FILE": "/tmp/n.dat"}), app); got != "/tmp/n.dat" {
+		t.Errorf("explicit = %q", got)
 	}
 }

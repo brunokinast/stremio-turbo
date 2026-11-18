@@ -504,6 +504,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	if memStore != nil {
 		memStore.refetch = m.refetchPiece
 	}
+	m.keepDHTNodes(cfg.DHTNodesFile)
 	return m, nil
 }
 
