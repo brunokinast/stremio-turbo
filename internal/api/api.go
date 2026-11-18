@@ -965,7 +965,13 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request, ih, idxSeg
 		return
 	}
 
-	rc, length, err := eng.NewReader(idx)
+	// ?probe=1: the web client's start-up race measuring this source before the
+	// player opens it; its reads leave the file prepared for the player.
+	newReader := eng.NewReader
+	if q.Get("probe") != "" {
+		newReader = eng.NewProbeReader
+	}
+	rc, length, err := newReader(idx)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

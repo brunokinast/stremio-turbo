@@ -311,6 +311,9 @@ type Engine interface {
 	// The reader MUST support Seek (for HTTP Range) and prioritise pieces near
 	// the current read offset.
 	NewReader(idx int) (io.ReadSeekCloser, int64, error)
+	// NewProbeReader is NewReader for a client measuring the source before its
+	// player opens it (GET ?probe=1): the file stays prepared for the player.
+	NewProbeReader(idx int) (io.ReadSeekCloser, int64, error)
 	// GuessFileIdx returns the index of the most likely playable file
 	// (largest video file), or -1 when none.
 	GuessFileIdx() int

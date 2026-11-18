@@ -95,6 +95,9 @@ func (e *disconnectFakeEngine) NewReader(_ int) (io.ReadSeekCloser, int64, error
 	atomic.AddInt32(&e.openReaders, 1)
 	return e.rc, 1 << 20, nil
 }
+func (e *disconnectFakeEngine) NewProbeReader(idx int) (io.ReadSeekCloser, int64, error) {
+	return e.NewReader(idx)
+}
 func (e *disconnectFakeEngine) Stats(_ int) *types.Stats { return &types.Stats{} }
 
 type disconnectFakeEM struct {

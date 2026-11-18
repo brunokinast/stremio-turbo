@@ -42,6 +42,8 @@ type fakeEngine struct {
 	files []types.FileInfo
 	// primedFile records the last PrimeFile call.
 	primedFile *int
+	// probes counts NewProbeReader calls.
+	probes int
 }
 
 func (e *fakeEngine) InfoHash() string              { return e.ih }
@@ -57,6 +59,10 @@ func (e *fakeEngine) GuessFileIdx() int {
 }
 func (e *fakeEngine) NewReader(_ int) (io.ReadSeekCloser, int64, error) {
 	return seekCloser{bytes.NewReader(e.data)}, int64(len(e.data)), nil
+}
+func (e *fakeEngine) NewProbeReader(idx int) (io.ReadSeekCloser, int64, error) {
+	e.probes++
+	return e.NewReader(idx)
 }
 func (e *fakeEngine) Stats(idx int) *types.Stats {
 	st := &types.Stats{
@@ -1529,6 +1535,21 @@ func TestHandlerStream_RangeRequest206(t *testing.T) {
 	// testEngine data = "hello world stream test data xyz"
 	if string(body) != "hell" {
 		t.Errorf("body = %q; want \"hell\"", body)
+	}
+}
+
+// ?probe=1 (the web client's start-up race) opens a probe reader; a plain
+// stream request doesn't.
+func TestHandlerStream_ProbeUsesProbeReader(t *testing.T) {
+	eng := testEngine()
+	h := newHandler(t, eng)
+	rec := serve(t, h, http.MethodGet, "/"+testIH+"/0?probe=1", nil)
+	if rec.Code != http.StatusOK || eng.probes != 1 {
+		t.Fatalf("probe: status %d, probes %d; want 200, 1", rec.Code, eng.probes)
+	}
+	_ = serve(t, h, http.MethodGet, "/"+testIH+"/0", nil)
+	if eng.probes != 1 {
+		t.Fatalf("plain stream opened a probe reader (probes %d)", eng.probes)
 	}
 }
 

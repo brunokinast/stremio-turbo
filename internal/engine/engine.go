@@ -1466,6 +1466,21 @@ func (e *engine) Files() []types.FileInfo {
 // readahead window starts small (8 MiB) so playback begins quickly, then grows
 // with measured throughput up to 64 MiB for a deep buffer (see pinnedReader).
 func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
+	return e.newReader(idx, false)
+}
+
+// NewProbeReader implements types.Engine: a stream reader for a client that is
+// measuring this source before the player opens it (the web client's start-up
+// race). It leaves the file ready for the player: the head and tail pins stay
+// (the player's own reader releases them), no next-episode prefetch starts, and
+// closing it doesn't demote the file. Without this the race's winner reached
+// the player with its tail unpinned and the file demoted, and mpv's Cues read
+// waited 0.7-1.4 s (streaming-research findings/16).
+func (e *engine) NewProbeReader(idx int) (io.ReadSeekCloser, int64, error) {
+	return e.newReader(idx, true)
+}
+
+func (e *engine) newReader(idx int, probe bool) (io.ReadSeekCloser, int64, error) {
 	// Mark this engine as recently active before any blocking work.
 	e.mu.Lock()
 	e.lastAccess = time.Now()
@@ -1490,10 +1505,12 @@ func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
 		go e.samplePeers()
 	}
 	e.ensureDownloading(idx) // fetch the file being played; demote abandoned ones
-	// The player's readers drive priority from here: a pinned head or tail at
-	// Now would compete with the piece the player is blocked on.
-	e.releaseOwnBoundary(idx)
-	e.prefetchNext(idx) // opportunistically warm the next episode's header (binge UX)
+	if !probe {
+		// The player's readers drive priority from here: a pinned head or tail at
+		// Now would compete with the piece the player is blocked on.
+		e.releaseOwnBoundary(idx)
+		e.prefetchNext(idx) // opportunistically warm the next episode's header (binge UX)
+	}
 	if e.trace != nil {
 		e.trace.setFiles(e.infoHash, fileBeginPieces(files))
 	}
@@ -1515,6 +1532,7 @@ func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
 		tr:       r,
 		e:        e,
 		idx:      idx,
+		probe:    probe,
 		deadline: now.Add(startupReadTimeout),
 		ctx:      ctx,
 		cancel:   cancel,
@@ -1615,6 +1633,8 @@ type pinnedReader struct {
 	e    *engine
 	idx  int
 	once sync.Once
+	// A probe reader (NewProbeReader) doesn't demote its file on close.
+	probe bool
 
 	// ctx/cancel: see the type doc above. ctx is only ever installed on tr
 	// by Read (single-goroutine caller, per torrent.Reader's "not safe for
@@ -1759,7 +1779,9 @@ func (p *pinnedReader) Close() error {
 		// torrent itself stays connected (only the janitor's idle/LRU passes drop
 		// it), so scrub/resume/next-episode are still instant — reopening the file
 		// re-marks it via ensureDownloading + primeBoundary.
-		if p.e.reading[p.idx] == 0 {
+		// A probe's close leaves the file as it is: the player is about to open
+		// it. If none does, the idle timeout drops the torrent.
+		if p.e.reading[p.idx] == 0 && !p.probe {
 			delete(p.e.selected, p.idx)
 			delete(p.e.primed, p.idx)
 			demote = true
