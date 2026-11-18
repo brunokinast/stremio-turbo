@@ -18,5 +18,6 @@
     "SMART_PLAY_QUALITY_CHANGED": "{{quality}} isn't offered for this episode, so {{fallback}} is used instead",
     "SMART_PLAY_RACER_KEEPS_UP": "Downloading at {{speed}} MB/s, keeps up",
     "SMART_PLAY_RACER_TOO_SLOW": "Downloading at {{speed}} MB/s, too slow for this file",
-    "SMART_PLAY_PASSED_SLOW": "Playing the {{size}} GB source: the {{passedSize}} GB one can't keep up ({{rate}} of {{needed}} MB/s)"
+    "SMART_PLAY_PASSED_SLOW": "Playing the {{size}} GB source: the {{passedSize}} GB one can't keep up ({{rate}} of {{needed}} MB/s)",
+    "SMART_PLAY_START_BUFFER": "Buffering {{seconds}} s before playing: this source is still speeding up"
 }

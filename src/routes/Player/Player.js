@@ -34,7 +34,7 @@ const { default: useCastDevice } = require('./useCastDevice');
 const { default: useKeyboardSeek } = require('./useKeyboardSeek');
 const { default: usePlaybackSpeedHold } = require('./usePlaybackSpeedHold');
 const { default: useStatistics } = require('./useStatistics');
-const { requestAutoplay } = require('stremio/smartPlay');
+const { requestAutoplay, useStartBuffer, START_BUFFER_SECONDS } = require('stremio/smartPlay');
 const useVideo = require('./useVideo');
 const { default: useAudio } = require('./useAudio');
 const { default: useSubtitles } = require('./useSubtitles');
@@ -73,6 +73,7 @@ const Player = () => {
     const streamingServer = useStreamingServer();
     const statistics = useStatistics(player, streamingServer);
     const video = useVideo();
+    const startBuffer = useStartBuffer(video);
     const routeFocused = useRouteFocused();
     const platform = usePlatform();
     const toast = useToast();
@@ -277,6 +278,7 @@ const Player = () => {
     }, []);
 
     const onPlayRequested = React.useCallback(() => {
+        startBuffer.cancel();
         setSeeking(false);
         if (stopBeforeLocalPlay()) return;
         playingOnExternalDevice.current = false;
@@ -286,6 +288,7 @@ const Player = () => {
     const onPlayRequestedDebounced = React.useCallback(debounce(onPlayRequested, 200), []);
 
     const onPauseRequested = React.useCallback(() => {
+        startBuffer.cancel();
         video.setPaused(true);
     }, []);
 
@@ -967,12 +970,13 @@ const Player = () => {
                     null
             }
             {
-                (video.state.buffering || !video.state.loaded) && !error ?
+                (video.state.buffering || !video.state.loaded || startBuffer.holding) && !error ?
                     <Buffering
                         ref={bufferingRef}
                         className={classnames(styles['layer'], styles['buffering-layer'])}
                         logo={metaItemContent?.logo}
                         progress={statistics.progress}
+                        message={startBuffer.holding ? t('SMART_PLAY_START_BUFFER', { seconds: START_BUFFER_SECONDS }) : null}
                     />
                     :
                     null

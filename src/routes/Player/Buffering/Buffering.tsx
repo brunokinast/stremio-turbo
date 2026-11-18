@@ -7,9 +7,11 @@ type Props = {
     className: string,
     logo: string,
     progress: number,
+    // Why playback waits, shown under the logo (fork: smart play's start buffer).
+    message?: string | null,
 };
 
-const Buffering = forwardRef<HTMLDivElement, Props>(({ className, logo, progress }, ref) => {
+const Buffering = forwardRef<HTMLDivElement, Props>(({ className, logo, progress, message }, ref) => {
     const style = useMemo(() => {
         return {
             clipPath: `inset(0 ${100 - progress}% 0 0)`,
@@ -31,6 +33,12 @@ const Buffering = forwardRef<HTMLDivElement, Props>(({ className, logo, progress
                 alt={' '}
                 fallbackSrc={require('/assets/images/stremio_symbol.png')}
             />
+            {
+                message ?
+                    <div className={styles['message']}>{message}</div>
+                    :
+                    null
+            }
         </div>
     );
 });

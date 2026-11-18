@@ -14,7 +14,7 @@ import useLiveSeeders from './useLiveSeeders';
 import race from './race';
 import type { RacerProgress } from './race';
 import { preload, stats } from './serverApi';
-import { parseRuntime, RateMeter } from './supply';
+import { neededRate, parseRuntime, RateMeter } from './supply';
 import { getLastQuality, getQuality, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
 
@@ -187,6 +187,9 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
                 core.transport.analytics({ event: 'StreamClicked', args: { stream: winner.stream } });
                 setRacing(null);
                 raceController.current = null;
+                const rate = meter.current.rate(winner.infoHash);
+                const needed = neededRate(winner, runtimeSeconds);
+                setState({ handoff: rate !== null && needed !== null ? { infoHash: winner.infoHash, rate, needed } : null });
                 navigate(toPath(winner.stream.deepLinks.player));
             })
             .catch(() => undefined);

@@ -2,5 +2,8 @@
 
 import QualityRows from './QualityRows';
 import useSmartPlay, { requestAutoplay, hasRememberedQuality, offersRememberedQuality } from './useSmartPlay';
+import useStartBuffer, { START_BUFFER_MS } from './startBuffer';
 
-export { QualityRows, useSmartPlay, requestAutoplay, hasRememberedQuality, offersRememberedQuality };
+const START_BUFFER_SECONDS = START_BUFFER_MS / 1000;
+
+export { QualityRows, useSmartPlay, useStartBuffer, START_BUFFER_SECONDS, requestAutoplay, hasRememberedQuality, offersRememberedQuality };
