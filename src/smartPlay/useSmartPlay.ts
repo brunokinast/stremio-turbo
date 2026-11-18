@@ -13,7 +13,8 @@ import { fallbackTier, groupByQuality, offersQuality } from './groupByQuality';
 import useLiveSeeders from './useLiveSeeders';
 import race from './race';
 import type { RacerProgress } from './race';
-import { preload } from './serverApi';
+import { preload, stats } from './serverApi';
+import { parseRuntime, RateMeter } from './supply';
 import { getLastQuality, getQuality, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
 
@@ -24,6 +25,8 @@ type Options = {
     metaId: string | null,
     videoId: string | null,
     libraryItem: LibraryItem | null,
+    // The show's runtime text from its metadata (e.g. "60 min"), for bitrates.
+    runtime: string | null,
     enabled: boolean,
 };
 
@@ -39,7 +42,10 @@ type Racing = {
 const PRELOAD_SOURCES = 3;
 const PRELOAD_DEBOUNCE = 2000;
 
-const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, enabled }: Options) => {
+// How often the preloaded sources' download is sampled while on the page.
+const DWELL_POLL = 2000;
+
+const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, runtime, enabled }: Options) => {
     const core = useCore();
     const navigate = useNavigate();
     // The URL the player streams from locally (baseUrl is the LAN address used for casting).
@@ -90,6 +96,32 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, en
     }, [fallbackKey, videoId]);
     const preloadSources = useMemo(() => likelyTier !== undefined && (likelyTier.best !== null || settled) ? likelyTier.sources.slice(0, PRELOAD_SOURCES) : [], [likelyTier, settled]);
     const preloadKey = preloadSources.map(({ infoHash }) => infoHash).join(',');
+
+    // The episode's runtime in seconds: the show's last played video's
+    // duration, else its metadata's runtime. With file sizes it gives each
+    // source's bitrate, which a source's rate must cover (supply.ts).
+    const runtimeSeconds = libraryItem !== null && libraryItem.state.duration > 0 ? libraryItem.state.duration / 1000 : parseRuntime(runtime);
+
+    // Download rates of the preloaded sources, sampled while on the page: the
+    // race decides from them when the user presses Play.
+    const meter = useRef(new RateMeter());
+    useEffect(() => {
+        if (baseUrl === null || preloadSources.length === 0) {
+            return;
+        }
+        const timer = setInterval(() => {
+            preloadSources.forEach(({ infoHash }) => {
+                stats(baseUrl, infoHash).then((s) => {
+                    if (s !== null) {
+                        meter.current.add(infoHash, Date.now(), s.downloaded);
+                    }
+                });
+            });
+        }, DWELL_POLL);
+        return () => clearInterval(timer);
+        // preloadKey captures the source set.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [baseUrl, preloadKey]);
     useEffect(() => {
         if (baseUrl === null || preloadSources.length === 0) {
             return;
@@ -132,10 +164,25 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, en
         const onProgress = (racers: RacerProgress[]) => {
             setRacing((current) => current !== null && current.tierKey === tierKey ? { ...current, racers } : current);
         };
-        race({ baseUrl, sources: tier.sources, startFraction, signal: controller.signal, onProgress })
-            .then((winner) => {
+        race({ baseUrl, sources: tier.sources, startFraction, runtime: runtimeSeconds, meter: meter.current, signal: controller.signal, onProgress })
+            .then(({ source: winner, passed }) => {
                 if (controller.signal.aborted || typeof winner.stream.deepLinks?.player !== 'string') {
                     return;
+                }
+                // A larger file passed over is a choice made for the user: say so.
+                const largest = passed.reduce<typeof passed[number] | null>((top, item) => top === null || item.needed > top.needed ? item : top, null);
+                if (largest !== null) {
+                    const gb = (bytes: number | null) => bytes !== null ? (bytes / 1e9).toFixed(1) : '?';
+                    toast.show({
+                        type: 'info',
+                        title: t('SMART_PLAY_PASSED_SLOW', {
+                            size: gb(winner.size),
+                            passedSize: gb(largest.source.size),
+                            rate: (largest.rate / 1e6).toFixed(1),
+                            needed: (largest.needed / 1e6).toFixed(1),
+                        }),
+                        timeout: 8000,
+                    });
                 }
                 core.transport.analytics({ event: 'StreamClicked', args: { stream: winner.stream } });
                 setRacing(null);
@@ -143,7 +190,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, en
                 navigate(toPath(winner.stream.deepLinks.player));
             })
             .catch(() => undefined);
-    }, [tiers, baseUrl, metaId, videoId, startFraction, core.transport, navigate]);
+    }, [tiers, baseUrl, metaId, videoId, startFraction, runtimeSeconds, core.transport, navigate, toast, t]);
 
     // Resume / next episode asked to autoplay this video: once the remembered
     // quality has a live count (or nothing more is coming), play it. If the

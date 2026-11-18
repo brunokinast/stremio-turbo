@@ -66,8 +66,12 @@ const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoRelease
                 return t('SMART_PLAY_RACER_METADATA');
             case 'connecting':
                 return t('SMART_PLAY_RACER_CONNECTING', { count: racer.peers });
-            default:
-                return t('SMART_PLAY_RACER_DOWNLOADING', { speed: (racer.speed / 1048576).toFixed(1) });
+            default: {
+                const speed = (racer.speed / 1048576).toFixed(1);
+                return racer.keepsUp === true ? t('SMART_PLAY_RACER_KEEPS_UP', { speed }) :
+                    racer.keepsUp === false ? t('SMART_PLAY_RACER_TOO_SLOW', { speed }) :
+                        t('SMART_PLAY_RACER_DOWNLOADING', { speed });
+            }
         }
     };
 

@@ -28,13 +28,15 @@ type Props = {
     metaId?: string | null,
     videoId?: string | null,
     libraryItem?: LibraryItem | null,
+    // The show's runtime text, for smart play's bitrates.
+    runtime?: string | null,
     onBack?: () => void,
     onEpisodeSearch?: (season: number, episode: number) => void,
 };
 
 const ALL_ADDONS_KEY = 'ALL';
 
-const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, videoId = null, libraryItem = null, onBack, onEpisodeSearch }: Props) => {
+const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, videoId = null, libraryItem = null, runtime = null, onBack, onEpisodeSearch }: Props) => {
     const { t } = useTranslation();
     const profile = useProfile();
     const goBack = useGoBack();
@@ -46,6 +48,7 @@ const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, v
         metaId,
         videoId,
         libraryItem,
+        runtime,
         enabled: profile.settings.playerType === null,
     });
     const hasQualities = smartPlay.tiers.length > 0;

@@ -101,10 +101,10 @@ const readRange = async (url: URL, offset: number, bytes: number, signal: AbortS
 
 type TorrentStats = {
     peers: number,
-    // Peers currently sending to us.
-    unchoked: number,
     // Bytes per second.
     downloadSpeed: number,
+    // Bytes downloaded so far.
+    downloaded: number,
     // Empty until the torrent's metadata is known.
     files: unknown[],
 };
