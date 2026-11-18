@@ -99,9 +99,11 @@ func loadDHTNodes(servers []*dht.Server, path string) (int, error) {
 	return added, nil
 }
 
-// saveDHTNodes writes the servers' non-bad nodes (at most dhtNodesMax) to path,
-// atomically, and reports how many were written. An empty table leaves the
-// previous file alone.
+// saveDHTNodes writes the servers' non-bad nodes, then the previous file's
+// nodes not among them, to path (at most dhtNodesMax, atomically), and reports
+// how many were written. Merging keeps a young process (its table still
+// filling) from replacing a fuller table saved earlier: in the lab a 60 s save
+// cut a file of ~200 nodes to 48. An empty table leaves the file alone.
 func saveDHTNodes(servers []*dht.Server, path string) (int, error) {
 	var nodes []krpc.NodeInfo
 	for _, s := range servers {
@@ -109,6 +111,18 @@ func saveDHTNodes(servers []*dht.Server, path string) (int, error) {
 	}
 	if len(nodes) == 0 {
 		return 0, nil
+	}
+	seen := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		seen[n.Addr.String()] = true
+	}
+	if old, err := dht.ReadNodesFromFile(path); err == nil {
+		for _, n := range old {
+			if !seen[n.Addr.String()] {
+				seen[n.Addr.String()] = true
+				nodes = append(nodes, n)
+			}
+		}
 	}
 	nodes = nodes[:min(len(nodes), dhtNodesMax)]
 	tmp := path + ".tmp"

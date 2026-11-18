@@ -72,6 +72,16 @@ func TestDHTNodesSaveAndLoad(t *testing.T) {
 	if nodes, err := dht.ReadNodesFromFile(path); err != nil || len(nodes) != 6 {
 		t.Fatalf("file after empty save: %d nodes, err %v", len(nodes), err)
 	}
+	// A younger table with one new node and one known node merges into the file.
+	young := newLoopbackDHT(t)
+	for _, n := range []krpc.NodeInfo{testNode(1, "10.0.0.1"), testNode(7, "10.0.0.7")} {
+		if err := young.AddNode(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := saveDHTNodes([]*dht.Server{young}, path); err != nil || n != 7 {
+		t.Fatalf("merged save = %d, %v", n, err)
+	}
 }
 
 func TestDHTNodesMissingOrCorruptFile(t *testing.T) {
