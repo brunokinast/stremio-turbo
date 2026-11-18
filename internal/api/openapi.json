@@ -13129,6 +13129,11 @@
             "type": "integer",
             "minimum": 0
           },
+          "waitMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Part of durationMs spent waiting for the client-wide dial rate limit (RIVULET_DIAL_RATE) before dialing."
+          },
           "result": {
             "type": "string",
             "enum": [

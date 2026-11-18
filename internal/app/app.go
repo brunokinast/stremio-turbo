@@ -162,6 +162,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		DisableWebtorrent:   envBool(lookup, "RIVULET_DISABLE_WEBTORRENT", true),            // default disabled; set =0/false to enable WebRTC/WebTorrent (pion) peers
 		EnableDLNA:          envBool(lookup, "RIVULET_ENABLE_DLNA", false),                  // default disabled; set =1/true to enable /casting DLNA discovery + control
 		PeersPerTorrent:     envInt(lookup, "RIVULET_PEERS_PER_TORRENT", 0),                 // 0 = default 50/25/500; lower (e.g. 30) trims peer goroutines & RAM
+		DialRate:            envInt(lookup, "RIVULET_DIAL_RATE", defaultDialRate),           // outgoing connection attempts/s, client-wide; 0 keeps anacrolix's 10
 		TrackersURL:         trackersURL(lookup),                                            // remote tracker list; "" disables remote fetch (RIVULET_TRACKERS_URL)
 		LocalIMDB:           envBool(lookup, "RIVULET_LOCAL_IMDB", true),                    // local-files addon IMDB resolution; default on
 		LocalFilesPublicURL: localFilesPublicURL,

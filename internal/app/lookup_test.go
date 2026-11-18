@@ -414,3 +414,15 @@ func TestDHTNodesFile(t *testing.T) {
 		t.Errorf("explicit = %q", got)
 	}
 }
+
+func TestDialRateEnv(t *testing.T) {
+	env := func(m map[string]string) Lookup {
+		return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+	}
+	if got := envInt(env(nil), "RIVULET_DIAL_RATE", defaultDialRate); got != 30 {
+		t.Errorf("default = %d, want 30", got)
+	}
+	if got := envInt(env(map[string]string{"RIVULET_DIAL_RATE": "0"}), "RIVULET_DIAL_RATE", defaultDialRate); got != 0 {
+		t.Errorf("0 = %d, want 0 (anacrolix's own default)", got)
+	}
+}

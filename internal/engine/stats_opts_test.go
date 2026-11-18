@@ -30,6 +30,31 @@ func newStatsOptsManager(t *testing.T) *manager {
 	return em.(*manager)
 }
 
+// The client-wide dial rate is 30/s unless RIVULET_DIAL_RATE sets it; 0 keeps
+// anacrolix's default.
+func TestDialRateConfig(t *testing.T) {
+	newManager := func(rate int) *manager {
+		em, err := New(types.Config{
+			AppPath:           t.TempDir(),
+			CacheRoot:         t.TempDir(),
+			DisableTrackers:   true,
+			DisableWebtorrent: true,
+			DialRate:          rate,
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		t.Cleanup(func() { _ = em.Close() })
+		return em.(*manager)
+	}
+	if got := newManager(30).dialRate; got != 30 {
+		t.Errorf("DialRate 30: limiter %v/s", got)
+	}
+	if got, want := newManager(0).dialRate, torrent.NewDefaultClientConfig().DialRateLimiter.Limit(); got != want {
+		t.Errorf("DialRate 0: limiter %v/s, want anacrolix's %v", got, want)
+	}
+}
+
 // TestStatsOptsTimeoutsFromClientConfig verifies opts.timeout and
 // opts.handshakeTimeout come from the anacrolix client config (dial and
 // handshake timeouts), not a hardcoded constant, and are reported in ms.

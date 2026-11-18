@@ -94,6 +94,7 @@ func (d *dialLog) onOutgoing(ev torrent.OutgoingConnResultEvent) {
 		Network:    ev.Network,
 		Outgoing:   true,
 		DurationMs: ev.Duration.Milliseconds(),
+		WaitMs:     ev.DialWait.Milliseconds(),
 		Result:     dialResult(ev.Err),
 	}
 	if ev.Err != nil {

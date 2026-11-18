@@ -47,6 +47,9 @@ type Config struct {
 	DisableWebtorrent bool
 	// established peer connections per torrent (scales half-open=n/2, high-water=n*10); RIVULET_PEERS_PER_TORRENT; 0 = default 50
 	PeersPerTorrent int
+	// outgoing connection attempts per second, client-wide (anacrolix DialRateLimiter, burst equal);
+	// RIVULET_DIAL_RATE; default 30 (libtorrent's connection_speed); 0 keeps anacrolix's 10
+	DialRate int
 	// enable DLNA/UPnP casting discovery + control on /casting; RIVULET_ENABLE_DLNA; default false (disabled)
 	EnableDLNA bool
 
@@ -339,10 +342,13 @@ type DialRecord struct {
 	Network  string `json:"network"`
 	Outgoing bool   `json:"outgoing"`
 	// StartedMs is when the attempt started, in ms since the torrent was added.
-	StartedMs  int64  `json:"startedMs"`
-	DurationMs int64  `json:"durationMs"`
-	Result     string `json:"result"` // DialConnected, DialRefused, DialTimeout, DialHandshake or DialOther
-	Error      string `json:"error,omitempty"`
+	StartedMs  int64 `json:"startedMs"`
+	DurationMs int64 `json:"durationMs"`
+	// WaitMs is the part of DurationMs spent waiting for the client-wide dial
+	// rate limit before dialing (RIVULET_DIAL_RATE).
+	WaitMs int64  `json:"waitMs"`
+	Result string `json:"result"` // DialConnected, DialRefused, DialTimeout, DialHandshake or DialOther
+	Error  string `json:"error,omitempty"`
 }
 
 // Trace is a torrent's diagnostic record (GET /debug/trace/:infoHash): what

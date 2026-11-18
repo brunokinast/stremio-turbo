@@ -53,6 +53,11 @@ func getenv(lookup Lookup, key, def string) string {
 	return def
 }
 
+// defaultDialRate is the client-wide outgoing connection attempts per second
+// (RIVULET_DIAL_RATE): libtorrent's connection_speed default. anacrolix's own
+// default of 10 queued a new play's first peers for seconds (engine.New).
+const defaultDialRate = 30
+
 func envInt(lookup Lookup, key string, def int) int {
 	if v, ok := lookup(key); ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

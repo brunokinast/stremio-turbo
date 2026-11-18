@@ -228,6 +228,8 @@ type manager struct {
 	// (milliseconds), so opts reflects the real client instead of a constant.
 	handshakeTimeout time.Duration
 	dialTimeout      time.Duration
+	// dialRate is the client-wide dial rate limit in attempts per second.
+	dialRate rate.Limit
 
 	// storage is the piece storage backend handed to anacrolix as
 	// DefaultStorage. anacrolix does not Close a user-provided DefaultStorage,
@@ -386,6 +388,19 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	cc.HalfOpenConnsPerTorrent = half
 	cc.TorrentPeersHighWater = high
 
+	// Outgoing connection attempts per second, client-wide. anacrolix's default
+	// of 10/s held back the first peers of a play: an attempt takes its
+	// half-open slot, then waits for the limiter, and three torrents starting
+	// together (the web client's preload and race) queued 64 attempts in the
+	// first 0.5 s whose results then arrived every 0.1 s until 9.5 s; the peers
+	// that later delivered most had been dialled at 0.2 s and connected at
+	// 3.6-5.2 s (streaming-research findings/18-19). 30/s with an equal burst
+	// is libtorrent's connection_speed default (qBittorrent's engine).
+	if cfg.DialRate > 0 {
+		cc.DialRateLimiter = rate.NewLimiter(rate.Limit(cfg.DialRate), cfg.DialRate)
+	}
+	logging.For("engine").Info("dial rate", "per_second", float64(cc.DialRateLimiter.Limit()), "burst", cc.DialRateLimiter.Burst())
+
 	cc.MaxUnverifiedBytes = maxUnverifiedBytes(cfg.MemoryCacheSize)
 
 	// Request queue per peer: 32 requests (512 KiB) at once, growing per block until the peer's
@@ -492,6 +507,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 		upLimiter:                  upLimiter,
 		handshakeTimeout:           cc.HandshakesTimeout,
 		dialTimeout:                cc.NominalDialTimeout,
+		dialRate:                   cc.DialRateLimiter.Limit(),
 		engines:                    make(map[string]*engine),
 		done:                       done,
 		storage:                    storageCloser,
