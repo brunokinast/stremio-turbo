@@ -619,6 +619,52 @@ type EngineManager interface {
 	Close() error
 }
 
+// Downloader is implemented by engine managers that support background
+// downloads (download ahead): whole files fetched in the background,
+// persisted, and kept on disk until removed.
+type Downloader interface {
+	AddDownload(infoHash string, fileIdx int, opts AddOptions) (Download, error)
+	Downloads() []Download
+	UpdateDownload(infoHash string, fileIdx int, patch DownloadPatch) (Download, error)
+	RemoveDownload(infoHash string, fileIdx int) error
+}
+
+// ErrNoDownload is returned for an unknown download.
+var ErrNoDownload = errors.New("no such download")
+
+// ErrDownloadsNeedDisk is returned when the engine keeps pieces in RAM only.
+var ErrDownloadsNeedDisk = errors.New("downloads need the disk piece cache")
+
+// DownloadState is a download's progress state.
+type DownloadState string
+
+// Download states.
+const (
+	DownloadQueued      DownloadState = "queued"      // waiting for the torrent's metadata
+	DownloadDownloading DownloadState = "downloading" // fetching in the background
+	DownloadPaused      DownloadState = "paused"
+	DownloadComplete    DownloadState = "complete"
+)
+
+// Download is one background download (GET /downloads).
+type Download struct {
+	InfoHash       string        `json:"infoHash"`
+	FileIdx        int           `json:"fileIdx"`
+	Name           string        `json:"name,omitempty"`
+	Size           int64         `json:"size"`
+	BytesCompleted int64         `json:"bytesCompleted"`
+	Rate           float64       `json:"rate"` // bytes per second
+	State          DownloadState `json:"state"`
+	Watched        bool          `json:"watched"`
+	AddedAt        time.Time     `json:"addedAt"`
+}
+
+// DownloadPatch changes a download (PATCH /downloads/:infoHash/:fileIdx); nil fields are kept.
+type DownloadPatch struct {
+	Paused  *bool `json:"paused,omitempty"`
+	Watched *bool `json:"watched,omitempty"`
+}
+
 // ScrapeRequest is one torrent to scrape: its info hash plus the trackers the
 // caller knows for it (merged with the engine's own tracker list).
 type ScrapeRequest struct {

@@ -57,6 +57,9 @@
     },
     {
       "name": "DVR"
+    },
+    {
+      "name": "Downloads"
     }
   ],
   "paths": {
@@ -3260,6 +3263,278 @@
           },
           "403": {
             "$ref": "#/components/responses/ForbiddenOrigin"
+          }
+        }
+      }
+    },
+    "/downloads": {
+      "get": {
+        "operationId": "listDownloads",
+        "summary": "List background downloads",
+        "tags": [
+          "Downloads"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Downloads, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Download"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenOrigin"
+          },
+          "501": {
+            "description": "The engine does not support downloads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addDownload",
+        "summary": "Download a file whole in the background",
+        "description": "Adds the torrent if needed and fetches the file at normal priority (a playing stream still comes first). The file keeps downloading after its streams close, and the idle and cache janitors keep the torrent and its data. Adding an existing download resumes it.",
+        "tags": [
+          "Downloads"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDownloadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The download",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Download"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Write not allowed (no browser origin, loopback peer or api_password)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The engine keeps pieces in RAM only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The engine does not support downloads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Too many active torrents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/downloads/{infoHash}/{fileIdx}": {
+      "patch": {
+        "operationId": "updateDownload",
+        "summary": "Pause, resume or mark a download watched",
+        "tags": [
+          "Downloads"
+        ],
+        "parameters": [
+          {
+            "name": "infoHash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$"
+            }
+          },
+          {
+            "name": "fileIdx",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The download",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Download"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Write not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such download",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The engine does not support downloads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeDownload",
+        "summary": "Remove a download",
+        "description": "Forgets the download. The torrent's data is deleted when no other download of it remains and nothing is reading it.",
+        "tags": [
+          "Downloads"
+        ],
+        "parameters": [
+          {
+            "name": "infoHash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$"
+            }
+          },
+          {
+            "name": "fileIdx",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "Write not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such download",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The engine does not support downloads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
           }
         }
       }
@@ -10737,6 +11012,102 @@
           "success",
           "deleted"
         ]
+      },
+      "AddDownloadRequest": {
+        "type": "object",
+        "required": [
+          "infoHash",
+          "fileIdx"
+        ],
+        "properties": {
+          "infoHash": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{40}$"
+          },
+          "fileIdx": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "trackers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Announce URLs"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "peerSearch sources (\"tracker:<url>\", \"dht:<infoHash>\")"
+          }
+        }
+      },
+      "Download": {
+        "type": "object",
+        "required": [
+          "infoHash",
+          "fileIdx",
+          "size",
+          "bytesCompleted",
+          "rate",
+          "state",
+          "watched",
+          "addedAt"
+        ],
+        "properties": {
+          "infoHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "fileIdx": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "File path inside the torrent, once metadata is known"
+          },
+          "size": {
+            "type": "integer",
+            "description": "File size in bytes (0 until metadata is known)"
+          },
+          "bytesCompleted": {
+            "type": "integer"
+          },
+          "rate": {
+            "type": "number",
+            "description": "Download rate in bytes per second (0 unless downloading)"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "downloading",
+              "paused",
+              "complete"
+            ]
+          },
+          "watched": {
+            "type": "boolean"
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DownloadPatch": {
+        "type": "object",
+        "properties": {
+          "paused": {
+            "type": "boolean"
+          },
+          "watched": {
+            "type": "boolean"
+          }
+        }
       },
       "DeviceInfo": {
         "type": "object",

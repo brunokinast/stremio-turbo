@@ -1,0 +1,128 @@
+// SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+//
+// SPDX-License-Identifier: MIT
+
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/rivulet-kodi/rivulet-engine/internal/types"
+)
+
+// downloadsMaxBody caps a /downloads request body.
+const downloadsMaxBody = 64 << 10
+
+// addDownloadBody is a POST /downloads body.
+type addDownloadBody struct {
+	InfoHash string   `json:"infoHash"`
+	FileIdx  *int     `json:"fileIdx"`
+	Trackers []string `json:"trackers"`
+	Sources  []string `json:"sources"`
+}
+
+// handleDownloads serves /downloads and /downloads/:infoHash/:fileIdx:
+// background whole-file downloads (download ahead) that outlive their
+// streams and are kept on disk until removed.
+func (s *server) handleDownloads(w http.ResponseWriter, r *http.Request) {
+	dl, ok := s.em.(types.Downloader)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]any{"error": "downloads are not supported by this engine"})
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(strings.Trim(r.URL.Path, "/"), "downloads"), "/")
+	if rest == "" {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead:
+			writeJSON(w, http.StatusOK, dl.Downloads())
+		case http.MethodPost:
+			s.addDownload(w, r, dl)
+		default:
+			w.Header().Set("Allow", "GET, HEAD, POST")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		}
+		return
+	}
+	seg := strings.Split(rest, "/")
+	if len(seg) != 2 || !isInfoHash(seg[0]) {
+		http.NotFound(w, r)
+		return
+	}
+	idx, err := strconv.Atoi(seg[1])
+	if err != nil || idx < 0 {
+		http.NotFound(w, r)
+		return
+	}
+	ih := strings.ToLower(seg[0])
+	switch r.Method {
+	case http.MethodPatch:
+		if !s.settingsWriteAllowed(r) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "downloads write requires a browser origin, a loopback peer, or api_password"})
+			return
+		}
+		var patch types.DownloadPatch
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, downloadsMaxBody)).Decode(&patch); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body: " + err.Error()})
+			return
+		}
+		d, err := dl.UpdateDownload(ih, idx, patch)
+		if err != nil {
+			writeDownloadErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, d)
+	case http.MethodDelete:
+		if !s.settingsWriteAllowed(r) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "downloads write requires a browser origin, a loopback peer, or api_password"})
+			return
+		}
+		if err := dl.RemoveDownload(ih, idx); err != nil {
+			writeDownloadErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "PATCH, DELETE")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+	}
+}
+
+func (s *server) addDownload(w http.ResponseWriter, r *http.Request, dl types.Downloader) {
+	if !s.settingsWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "downloads write requires a browser origin, a loopback peer, or api_password"})
+		return
+	}
+	var body addDownloadBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, downloadsMaxBody)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body: " + err.Error()})
+		return
+	}
+	if !isInfoHash(body.InfoHash) || body.FileIdx == nil || *body.FileIdx < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "infoHash (40 hex characters) and fileIdx (>= 0) are required"})
+		return
+	}
+	opts := types.AddOptions{Trackers: body.Trackers, Sources: body.Sources}
+	d, err := dl.AddDownload(strings.ToLower(body.InfoHash), *body.FileIdx, opts)
+	if err != nil {
+		writeDownloadErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+func writeDownloadErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, types.ErrNoDownload):
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+	case errors.Is(err, types.ErrDownloadsNeedDisk):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
+	case errors.Is(err, types.ErrTooManyEngines):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+}

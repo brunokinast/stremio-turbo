@@ -103,6 +103,7 @@ type engine struct {
 	reading          map[int]int      // file idx -> open reader count; a file with readers is never demoted
 	streams          sync.Map         // *pinnedReader -> struct{}: open stream readers, for the trace's blocked-piece samples
 	prefetched       map[int]struct{} // source file idx -> next-file boundary already prefetched (once each)
+	background       map[int]struct{} // file indices downloaded whole in the background (downloads.go); never demoted
 	onceMetaPriority sync.Once        // ensures boundary-piece prioritization runs exactly once
 
 	// fileMu serializes the choice of which file's boundary pieces are primed:
@@ -173,7 +174,7 @@ func (e *engine) ensureDownloading(idx int) {
 	_, already := e.selected[idx]
 	demote := make([]int, 0, len(e.selected))
 	for i := range e.selected {
-		if i != idx && e.reading[i] == 0 {
+		if i != idx && e.reading[i] == 0 && !e.isBackgroundLocked(i) {
 			demote = append(demote, i)
 			delete(e.selected, i)
 			delete(e.primed, i)
@@ -183,7 +184,7 @@ func (e *engine) ensureDownloading(idx int) {
 	// Files primed only by GuessFileIdx (never selected) must release their
 	// boundary pieces once another file is the one being played.
 	for i := range e.primed {
-		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 {
+		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 && !e.isBackgroundLocked(i) {
 			demote = append(demote, i)
 			delete(e.primed, i)
 			delete(e.prefetched, i)
@@ -278,12 +279,16 @@ type manager struct {
 
 	// scrapes caches recent tracker scrape results (see Scrape).
 	scrapes scrapeCache
+
+	// dl is the background-download registry (downloads.go).
+	dl *downloads
 	// peerHints holds peers recent scrapes found, for torrents opened later.
 	peerHints peerHints
 }
 
 // Compile-time interface satisfaction checks.
 var _ types.EngineManager = (*manager)(nil)
+var _ types.Downloader = (*manager)(nil)
 var _ types.Engine = (*engine)(nil)
 
 // refetchKey identifies an in-flight re-download of one evicted in-RAM piece.
@@ -515,6 +520,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 		purging:                    make(map[string]chan struct{}),
 		establishedConnsPerTorrent: est,
 		maxEngines:                 maxEnginesFromEnv(),
+		dl:                         newDownloads(cfg.AppPath),
 	}
 	// Wire the evicted-piece re-download hook now that the manager (and its
 	// engine map) exists. No torrents are added until EnsureEngine, so this is
@@ -523,6 +529,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 		memStore.refetch = m.refetchPiece
 	}
 	m.keepDHTNodes(cfg.DHTNodesFile)
+	go m.tickDownloads() // resume downloads left incomplete by the last run
 	return m, nil
 }
 
@@ -550,7 +557,7 @@ func (m *manager) oldestIdleLocked() string {
 		e.mu.Lock()
 		idle, la := e.openReaders == 0, e.lastAccess
 		e.mu.Unlock()
-		if idle && (best == "" || la.Before(bestT)) {
+		if idle && !m.dl.hasTorrent(ih) && (best == "" || la.Before(bestT)) {
 			best, bestT = ih, la
 		}
 	}
@@ -744,6 +751,13 @@ func (m *manager) RemoveEngine(infoHash string) error {
 		m.mu.Unlock()
 		return nil // idempotent
 	}
+	if m.dl.hasTorrent(ih) {
+		// Its downloads (and data) stay; only the files a client opened
+		// stop (e.g. a smart-play race loser that is also a download).
+		m.mu.Unlock()
+		e.stopNonBackground()
+		return nil
+	}
 	finish := m.beginPurge(ih, e)
 	m.mu.Unlock()
 	finish()
@@ -825,6 +839,7 @@ func (m *manager) StartJanitor(cacheSizeFn func() int64) {
 			case <-ticker.C:
 				m.evictTick(cacheSizeFn())
 				m.evictIdle(m.cfg.IdleTimeout)
+				m.tickDownloads()
 				m.enforceSeedRatio(m.cfg.MaxSeedRatio)
 			case <-m.done:
 				return
@@ -1135,7 +1150,7 @@ func (m *manager) evict(budget int64) {
 	now := time.Now()
 	for i := 0; i < len(entries)-1 && total > budget; i++ {
 		ent := entries[i]
-		if ent.openReaders > 0 || now.Sub(ent.lastAccess) < graceWindow {
+		if ent.openReaders > 0 || now.Sub(ent.lastAccess) < graceWindow || m.dl.hasTorrent(ent.e.infoHash) {
 			// Actively streaming or recently accessed — never evict.
 			continue
 		}
@@ -1295,7 +1310,9 @@ func (m *manager) purgeReaderless(snap []*engine, threshold time.Duration, event
 		idleFor := now.Sub(e.lastAccess)
 		pinned := e.openReaders > 0
 		e.mu.Unlock()
-		if pinned || idleFor < threshold {
+		// A torrent with downloads keeps its data; tickDownloads unloads it
+		// (without deleting) once they are complete.
+		if pinned || idleFor < threshold || m.dl.hasTorrent(e.infoHash) {
 			continue
 		}
 		ih := e.infoHash
@@ -1799,7 +1816,8 @@ func (p *pinnedReader) Close() error {
 		// re-marks it via ensureDownloading + primeBoundary.
 		// A probe's close leaves the file as it is: the player is about to open
 		// it. If none does, the idle timeout drops the torrent.
-		if p.e.reading[p.idx] == 0 && !p.probe {
+		// A background download keeps its file downloading (downloads.go).
+		if p.e.reading[p.idx] == 0 && !p.probe && !p.e.isBackgroundLocked(p.idx) {
 			delete(p.e.selected, p.idx)
 			delete(p.e.primed, p.idx)
 			demote = true
@@ -1810,7 +1828,7 @@ func (p *pinnedReader) Close() error {
 			// the unlock above and now; demoting then would starve it.
 			p.e.mu.Lock()
 			_, sel := p.e.selected[p.idx]
-			still := p.e.reading[p.idx] == 0 && !sel
+			still := p.e.reading[p.idx] == 0 && !sel && !p.e.isBackgroundLocked(p.idx)
 			if still {
 				delete(p.e.prefetched, p.idx)
 				files := p.e.t.Files()
@@ -2318,7 +2336,7 @@ func (e *engine) PrimeFile(idx int, startFraction float64) {
 	e.mu.Lock()
 	var demote []int
 	for i := range e.primed {
-		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 {
+		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 && !e.isBackgroundLocked(i) {
 			demote = append(demote, i)
 			delete(e.primed, i)
 			delete(e.prefetched, i)

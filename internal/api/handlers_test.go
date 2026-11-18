@@ -304,8 +304,8 @@ func TestHandlerCORSPreflightAllowsDelete(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("preflight status = %d; want 200", rec.Code)
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "POST, GET, DELETE, OPTIONS" {
-		t.Errorf("Access-Control-Allow-Methods = %q; want %q", got, "POST, GET, DELETE, OPTIONS")
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "POST, GET, PATCH, DELETE, OPTIONS" {
+		t.Errorf("Access-Control-Allow-Methods = %q; want %q", got, "POST, GET, PATCH, DELETE, OPTIONS")
 	}
 }
 

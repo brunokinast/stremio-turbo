@@ -600,7 +600,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	hdr["Access-Control-Expose-Headers"] = corsExposeHeaders
 	if r.Method == http.MethodOptions {
-		hdr.Set("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
+		hdr.Set("Access-Control-Allow-Methods", "POST, GET, PATCH, DELETE, OPTIONS")
 		hdr.Set("Access-Control-Allow-Headers", "Range, Content-Type, Accept, Authorization")
 		hdr.Set("Access-Control-Max-Age", "1728000")
 		if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
@@ -752,6 +752,8 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleHwaccelProfiler(w, r)
 	case "list":
 		s.handleList(w, r)
+	case "downloads":
+		s.handleDownloads(w, r)
 	case "generate_url":
 		s.sp.HandleGenerateURL(w, r)
 	case "get-https":
