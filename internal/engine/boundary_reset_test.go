@@ -86,3 +86,24 @@ func TestBoundarySpans(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+// TestOwnBoundaryReleasedForStream: once a stream reads file 0, its head and
+// tail pins go back to None, except a piece shared with another primed file.
+func TestOwnBoundaryReleasedForStream(t *testing.T) {
+	spans := map[int][]pieceSpan{
+		0: {{0, 1}, {9, 10}},   // file 0: head piece 0, tail piece 9
+		1: {{9, 10}, {19, 20}}, // file 1 starts in piece 9
+	}
+	e := &engine{primed: map[int]struct{}{0: {}, 1: {}}, selected: map[int]struct{}{0: {}}}
+	var rec recSetter
+	e.raiseBoundary(append(spans[0], spans[1]...), torrent.PiecePriorityNow, rec.set)
+	got := e.ownBoundaryToRelease(0, 2, func(i int) []pieceSpan { return spans[i] })
+	if want := []int{0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	rec = recSetter{}
+	e.releasePieces(got, rec.set)
+	if len(rec.calls) != 1 || rec.calls[0] != torrent.PiecePriorityNone {
+		t.Fatalf("calls %v, want piece 0 -> None", rec.calls)
+	}
+}

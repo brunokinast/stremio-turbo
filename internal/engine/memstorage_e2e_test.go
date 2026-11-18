@@ -137,8 +137,12 @@ func TestStreamDownloadPolicyByStorage(t *testing.T) {
 					t.Errorf("piece %d beyond the window and boundaries has priority %v, want %v", i, p, tc.beyond)
 				}
 			}
-			if p := prio(tail); p != torrent.PiecePriorityNow {
-				t.Errorf("tail piece %d has priority %v, want now", tail, p)
+			// Once a stream reads the file its head and tail pins are released
+			// (releaseOwnBoundary): the player's own tail read makes the tail
+			// Now when it needs it, so until then it is like any piece past
+			// the window.
+			if p := prio(tail); p != tc.beyond {
+				t.Errorf("tail piece %d has priority %v, want %v", tail, p, tc.beyond)
 			}
 		})
 	}
@@ -186,14 +190,15 @@ func TestMemStorageStreamRecoversEvictedPieces(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts two torrent clients")
 	}
-	// The head and tail windows primeBoundary raises to Now are counted first
-	// against the request budget, so the budget must exceed them for the
-	// stream's own window to be requested at all.
+	// The budget holds a third of the file, so reading its first half evicts
+	// the first pieces before the read goes back to them. (It used to hold
+	// more and rely on the head and tail pins taking part of it; those are
+	// released once a stream reads the file.)
 	const (
 		pieceLen  = 256 << 10
 		boundary  = int((headWindowBytes + tailWindowBytes) / pieceLen)
 		numPieces = 2 * boundary
-		budget    = int64(boundary+8) * pieceLen
+		budget    = int64(numPieces/3) * pieceLen
 	)
 	dir := t.TempDir()
 	want, mi := newPayloadTorrent(t, dir, pieceLen, numPieces)

@@ -5,6 +5,8 @@
 package engine
 
 import (
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,10 @@ const (
 	traceSlowWriteCap = 1000
 	traceCompleteCap  = 2000
 	lockHoldCap       = 1000
+	traceBlockedCap   = 2000
+	// Latencies kept per peer for the urgent-chunk summary, and seconds of per-file bytes.
+	urgentLatencyCap = 4096
+	fileBytesSeconds = 600
 
 	// A read that waits this long for data counts as a stall.
 	stallThreshold = 250 * time.Millisecond
@@ -80,6 +86,20 @@ type torrentTrace struct {
 	completes  ring[types.PieceTiming]
 	writes     int64
 	writeTime  time.Duration
+
+	urgent      map[string]*urgentPeer
+	blocked     ring[types.BlockedPieceSample]
+	fileBegins  []int // first piece of each file, ascending, once known
+	fileBytes   map[int][]int64
+	pendingWait types.PendingWriteWaits
+}
+
+// urgentPeer collects one peer's request-to-receipt times for Now chunks.
+type urgentPeer struct {
+	network string
+	first   time.Time
+	count   int
+	lat     []float64 // ms, the first urgentLatencyCap
 }
 
 func newTracer() *tracer {
@@ -98,6 +118,9 @@ func (tr *tracer) begin(ih string, now time.Time) {
 		samples:    newRing[types.PeerSample](traceSampleCap),
 		slowWrites: newRing[types.SlowWrite](traceSlowWriteCap),
 		completes:  newRing[types.PieceTiming](traceCompleteCap),
+		urgent:     map[string]*urgentPeer{},
+		blocked:    newRing[types.BlockedPieceSample](traceBlockedCap),
+		fileBytes:  map[int][]int64{},
 	}
 	tt.events.add(types.TraceEvent{Name: "created"})
 	tr.torrents[ih] = tt
@@ -199,6 +222,98 @@ func (tr *tracer) onPieceMarkedComplete(ev torrent.PieceMarkedCompleteEvent) {
 	})
 }
 
+// onReceivedUsefulChunk records useful bytes per file per second and, for
+// chunks of Now pieces requested from the delivering peer, the request-to-receipt
+// time. It runs with the client lock held.
+func (tr *tracer) onReceivedUsefulChunk(ev torrent.ReceivedUsefulChunkEvent) {
+	now := time.Now()
+	t := ev.Peer.Torrent()
+	if t == nil {
+		return
+	}
+	tr.with(t.InfoHash().HexString(), func(tt *torrentTrace) {
+		if file := tt.fileOfPiece(ev.Piece); file >= 0 {
+			sec := int(now.Sub(tt.created) / time.Second)
+			if sec >= 0 && sec < fileBytesSeconds {
+				b := tt.fileBytes[file]
+				for len(b) <= sec {
+					b = append(b, 0)
+				}
+				b[sec] += int64(ev.Length)
+				tt.fileBytes[file] = b
+			}
+		}
+		if ev.Priority < torrent.PiecePriorityNow || ev.RequestedAt.IsZero() {
+			return
+		}
+		addr := ev.Peer.RemoteAddr.String()
+		u := tt.urgent[addr]
+		if u == nil {
+			u = &urgentPeer{network: ev.Peer.Network, first: now}
+			tt.urgent[addr] = u
+		}
+		u.count++
+		if len(u.lat) < urgentLatencyCap {
+			u.lat = append(u.lat, msf(now.Sub(ev.RequestedAt)))
+		}
+	})
+}
+
+// fileOfPiece returns the file a piece starts in, or -1 before the file layout
+// is known.
+func (tt *torrentTrace) fileOfPiece(piece int) int {
+	i := sort.SearchInts(tt.fileBegins, piece+1) - 1
+	if i < 0 {
+		return -1
+	}
+	return i
+}
+
+// setFiles records the first piece of each file, for per-file byte counts.
+func (tr *tracer) setFiles(ih string, begins []int) {
+	tr.with(ih, func(tt *torrentTrace) {
+		if tt.fileBegins == nil {
+			tt.fileBegins = begins
+		}
+	})
+}
+
+// blockedPiece records a snapshot of a piece a stream read is waiting on.
+func (tr *tracer) blockedPiece(ih string, s types.BlockedPieceSample, now time.Time) {
+	tr.with(ih, func(tt *torrentTrace) {
+		s.AtMs = tt.ms(now)
+		tt.blocked.add(s)
+	})
+}
+
+// pendingWrites stores the torrent's latest pending-write wait totals.
+func (tr *tracer) pendingWrites(ih string, w torrent.PendingWriteWaits) {
+	tr.with(ih, func(tt *torrentTrace) {
+		tt.pendingWait = types.PendingWriteWaits{Count: w.Count, TotalMs: msf(w.Total), MaxMs: msf(w.Max)}
+	})
+}
+
+// urgentSummary summarises each peer's urgent-chunk latencies, most chunks first.
+func (tt *torrentTrace) urgentSummary() []types.UrgentChunkPeer {
+	out := make([]types.UrgentChunkPeer, 0, len(tt.urgent))
+	for addr, u := range tt.urgent {
+		lat := slices.Clone(u.lat)
+		slices.Sort(lat)
+		q := func(f float64) float64 {
+			if len(lat) == 0 {
+				return 0
+			}
+			return lat[min(len(lat)-1, int(f*float64(len(lat))))]
+		}
+		out = append(out, types.UrgentChunkPeer{
+			Address: addr, Network: u.network, Count: u.count, FirstAtMs: tt.ms(u.first),
+			MedianMs: q(0.5), P90Ms: q(0.9), MaxMs: q(1),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out
+}
+
 // onLockHold is the anacrolix LockHoldCallback.
 func (tr *tracer) onLockHold(held time.Duration, lockedAt string) {
 	tr.mu.Lock()
@@ -298,6 +413,10 @@ func (tr *tracer) get(ih string) (types.Trace, bool) {
 			SlowWrites:      tt.slowWrites.items(),
 			MarkCompletions: tt.completes.items(),
 		},
+		UrgentChunks:      tt.urgentSummary(),
+		BlockedPieces:     tt.blocked.items(),
+		FileBytes:         tt.fileBytesList(),
+		PendingWriteWaits: tt.pendingWait,
 	}, true
 }
 
@@ -305,6 +424,15 @@ func (tr *tracer) lockHolds() []types.LockHold {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
 	return tr.locks.items()
+}
+
+func (tt *torrentTrace) fileBytesList() []types.FileBytes {
+	out := make([]types.FileBytes, 0, len(tt.fileBytes))
+	for f, b := range tt.fileBytes {
+		out = append(out, types.FileBytes{File: f, PerSecond: slices.Clone(b)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out
 }
 
 func msf(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
@@ -325,6 +453,7 @@ func installTracer(cc *torrent.ClientConfig, tr *tracer) {
 	cc.Callbacks.ReadMessage = tr.onReadMessage
 	cc.Callbacks.ChunkWritten = append(cc.Callbacks.ChunkWritten, tr.onChunkWritten)
 	cc.Callbacks.PieceMarkedComplete = append(cc.Callbacks.PieceMarkedComplete, tr.onPieceMarkedComplete)
+	cc.Callbacks.ReceivedUsefulChunk = append(cc.Callbacks.ReceivedUsefulChunk, tr.onReceivedUsefulChunk)
 	cc.LockHoldCallback = tr.onLockHold
 	cc.LockHoldThreshold = lockHoldThreshold
 }
@@ -353,6 +482,34 @@ func (e *engine) samplePeers() {
 				return
 			}
 			e.trace.samplePeers(e.infoHash, e.t, now)
+			e.sampleBlocked(now)
 		}
 	}
+}
+
+// sampleBlocked records the progress of each piece a stream read has been
+// waiting on for at least stallThreshold, and the torrent's pending-write waits.
+func (e *engine) sampleBlocked(now time.Time) {
+	seen := map[int]bool{}
+	e.streams.Range(func(k, _ any) bool {
+		p := k.(*pinnedReader)
+		since := p.readSince.Load()
+		if since == 0 {
+			return true
+		}
+		blocked := now.Sub(time.Unix(0, since))
+		piece := int(p.readPiece.Load())
+		if blocked < stallThreshold || seen[piece] {
+			return true
+		}
+		seen[piece] = true
+		pp := e.t.PieceProgress(piece)
+		e.trace.blockedPiece(e.infoHash, types.BlockedPieceSample{
+			File: p.idx, Piece: piece, BlockedMs: blocked.Milliseconds(),
+			Chunks: pp.Chunks, Have: pp.DirtyChunks, Outstanding: pp.Outstanding,
+			Requesters: pp.Requesters, Availability: pp.Availability, Priority: int(pp.Priority),
+		}, now)
+		return true
+	})
+	e.trace.pendingWrites(e.infoHash, e.t.PendingWriteWaitStats())
 }

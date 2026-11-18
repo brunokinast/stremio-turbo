@@ -303,7 +303,18 @@ func (s *memStorage) freeLocked(mp *memPiece) {
 	}
 	mp.complete = false
 	mp.consumed.Store(false)
+	mp.playedEarly.Store(false)
 	mp.mu.Unlock()
+}
+
+// markPlayedEarly flags a piece a stream moved past before it verified.
+func (mp *memPiece) markPlayedEarly() {
+	mp.mu.RLock()
+	incomplete := !mp.complete
+	mp.mu.RUnlock()
+	if incomplete {
+		mp.playedEarly.Store(true)
+	}
 }
 
 // reserve accounts need bytes for a piece about to become resident, evicting
@@ -556,6 +567,15 @@ func (c *memCursor) read(first, last int) {
 	for i := max(first, 0); i < last && i < len(c.mt.pieces); i++ {
 		if mp := c.mt.pieces[i].Load(); mp != nil && mp.lruIdx >= 0 {
 			s.consumeLocked(mp)
+		} else if mp != nil {
+			mp.markPlayedEarly()
+		}
+	}
+	// The piece the stream was on, when it moves on before that piece verified
+	// (a responsive read): consumed once it completes (MarkComplete).
+	if c.pos >= 0 && c.pos != last && c.pos < len(c.mt.pieces) && (c.pinned == nil || c.pinned.index != c.pos) {
+		if mp := c.mt.pieces[c.pos].Load(); mp != nil {
+			mp.markPlayedEarly()
 		}
 	}
 	c.pos = last
@@ -711,6 +731,10 @@ type memPiece struct {
 	// store.mu, cleared when the buffer is freed or the piece re-completes;
 	// loaded lock-free by stamp.
 	consumed atomic.Bool
+	// playedEarly is set when a player stream moved past this piece before it
+	// verified (responsive reads); MarkComplete then puts it in the consumed
+	// class.
+	playedEarly atomic.Bool
 
 	// key and lruIdx are the piece's heap key (a lower bound of lastUsed) and
 	// position in store.lru (-1 when not in the LRU). pins counts the streams
@@ -911,10 +935,20 @@ func (mp *memPiece) MarkComplete() error {
 	mp.complete = true
 	mp.mu.Unlock()
 	// A freshly verified piece is read-ahead until the reader reads it: it is
-	// keyed to be evicted after every consumed piece (see aheadKeyBase).
-	mp.lastUsed.Store(s.tick.Add(1))
-	mp.consumed.Store(false)
-	mp.key = aheadKey(mp.index)
+	// keyed to be evicted after every consumed piece (see aheadKeyBase). A
+	// responsive stream can read a piece before it verifies, though, and move
+	// past it while it is incomplete (memCursor.read flags it playedEarly).
+	// Such a piece is consumed now: kept as read-ahead it would outlive the
+	// pieces the player still needs.
+	stamp := s.tick.Add(1)
+	mp.lastUsed.Store(stamp)
+	if mp.playedEarly.Swap(false) {
+		mp.consumed.Store(true)
+		mp.key = stamp
+	} else {
+		mp.consumed.Store(false)
+		mp.key = aheadKey(mp.index)
+	}
 	if mp.lruIdx >= 0 {
 		heap.Fix(&s.lru, mp.lruIdx)
 	} else if mp.pins == 0 { // a pinned piece re-enters the LRU on unpin

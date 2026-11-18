@@ -348,6 +348,54 @@ type Trace struct {
 	Requests    []TraceRequest `json:"requests"`
 	PeerSamples []PeerSample   `json:"peerSamples"`
 	Storage     StorageTrace   `json:"storage"`
+	// Start-up instruments: how long urgent chunks took per peer, the progress of pieces stream
+	// reads were blocked on, useful bytes per file per second, and reads' waits for in-flight
+	// piece writes.
+	UrgentChunks      []UrgentChunkPeer    `json:"urgentChunks"`
+	BlockedPieces     []BlockedPieceSample `json:"blockedPieces"`
+	FileBytes         []FileBytes          `json:"fileBytes"`
+	PendingWriteWaits PendingWriteWaits    `json:"pendingWriteWaits"`
+}
+
+// UrgentChunkPeer summarises, for one peer, the time from request to receipt of
+// the chunks it delivered for pieces at priority Now.
+type UrgentChunkPeer struct {
+	Address   string  `json:"address"`
+	Network   string  `json:"network"`
+	Count     int     `json:"count"`
+	FirstAtMs int64   `json:"firstAtMs"`
+	MedianMs  float64 `json:"medianMs"`
+	P90Ms     float64 `json:"p90Ms"`
+	MaxMs     float64 `json:"maxMs"`
+}
+
+// BlockedPieceSample is a once-a-second snapshot of a piece a stream read has
+// been waiting on for at least 250 ms.
+type BlockedPieceSample struct {
+	AtMs         int64 `json:"atMs"`
+	File         int   `json:"file"`
+	Piece        int   `json:"piece"`
+	BlockedMs    int64 `json:"blockedMs"`
+	Chunks       int   `json:"chunks"`
+	Have         int   `json:"have"`
+	Outstanding  int   `json:"outstanding"`
+	Requesters   int   `json:"requesters"`
+	Availability int   `json:"availability"`
+	Priority     int   `json:"priority"`
+}
+
+// FileBytes is the useful bytes received for one file in each second since the
+// trace began.
+type FileBytes struct {
+	File      int     `json:"file"`
+	PerSecond []int64 `json:"perSecond"`
+}
+
+// PendingWriteWaits is the time reads waited for a piece's in-flight writes.
+type PendingWriteWaits struct {
+	Count   int64   `json:"count"`
+	TotalMs float64 `json:"totalMs"`
+	MaxMs   float64 `json:"maxMs"`
 }
 
 // TraceEvent is a milestone such as "metadata", "first-unchoke" or

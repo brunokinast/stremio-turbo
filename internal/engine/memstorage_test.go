@@ -1311,3 +1311,54 @@ func TestMemStorageEvictedReadCapAndThrottle(t *testing.T) {
 		}
 	})
 }
+
+// TestMemStoragePieceCompletedBehindStreamIsConsumed: a responsive stream reads
+// pieces before they verify and moves past them while they are still
+// incomplete. When such a piece completes it must join the consumed class, so
+// the budget evicts it before the read-ahead the player still needs.
+func TestMemStoragePieceCompletedBehindStreamIsConsumed(t *testing.T) {
+	const (
+		pieceLen  = 64
+		numPieces = 16
+	)
+	s := newMemStorage(3 * pieceLen) // room for three resident pieces
+	t.Cleanup(func() { _ = s.Close() })
+	ti, info := openMemTorrent(t, s, 3, pieceLen, numPieces)
+	player := openTestCursor(t, s, 3)
+	writeComplete := func(idx int) {
+		t.Helper()
+		p := ti.Piece(info.Piece(idx))
+		if _, err := p.WriteAt(fillPattern(idx, pieceLen), 0); err != nil {
+			t.Fatalf("piece %d WriteAt: %v", idx, err)
+		}
+		if err := p.MarkComplete(); err != nil {
+			t.Fatalf("piece %d MarkComplete: %v", idx, err)
+		}
+	}
+	complete := func(idx int) bool { return ti.Piece(info.Piece(idx)).Completion().Complete }
+
+	// The stream reads piece 1 before it verifies, then moves on to 4. Piece 0
+	// was skipped, never read. Once 1 completes it is played, so it goes before
+	// the unread 0 (read-ahead below the reader, lowest index first), which
+	// the old rule would have evicted first.
+	p1 := ti.Piece(info.Piece(1))
+	if _, err := p1.WriteAt(fillPattern(1, pieceLen), 0); err != nil {
+		t.Fatal(err)
+	}
+	player.read(1, 1) // a responsive read of written, unverified data
+	player.read(4, 4)
+	writeComplete(0)
+	if err := p1.MarkComplete(); err != nil {
+		t.Fatal(err)
+	}
+	writeComplete(5)
+	writeComplete(6) // needs room
+	if complete(1) {
+		t.Fatal("piece 1, played before it verified, was kept over unread pieces")
+	}
+	for _, idx := range []int{0, 5, 6} {
+		if !complete(idx) {
+			t.Fatalf("piece %d was evicted before the played piece 1", idx)
+		}
+	}
+}

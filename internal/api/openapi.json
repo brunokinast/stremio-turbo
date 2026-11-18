@@ -13172,6 +13172,27 @@
           },
           "storage": {
             "$ref": "#/components/schemas/StorageTrace"
+          },
+          "urgentChunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UrgentChunkPeer"
+            }
+          },
+          "blockedPieces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockedPieceSample"
+            }
+          },
+          "fileBytes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileBytes"
+            }
+          },
+          "pendingWriteWaits": {
+            "$ref": "#/components/schemas/PendingWriteWaits"
           }
         },
         "required": [
@@ -13180,7 +13201,11 @@
           "stalls",
           "requests",
           "peerSamples",
-          "storage"
+          "storage",
+          "urgentChunks",
+          "blockedPieces",
+          "fileBytes",
+          "pendingWriteWaits"
         ]
       },
       "TraceEvent": {
@@ -13561,6 +13586,129 @@
           "at",
           "heldMs",
           "lockedAt"
+        ]
+      },
+      "UrgentChunkPeer": {
+        "type": "object",
+        "description": "Request-to-receipt time of one peer's chunks for pieces at priority Now.",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "firstAtMs": {
+            "type": "integer"
+          },
+          "medianMs": {
+            "type": "number"
+          },
+          "p90Ms": {
+            "type": "number"
+          },
+          "maxMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "address",
+          "network",
+          "count",
+          "firstAtMs",
+          "medianMs",
+          "p90Ms",
+          "maxMs"
+        ]
+      },
+      "BlockedPieceSample": {
+        "type": "object",
+        "description": "Snapshot of a piece a stream read has waited on for at least 250 ms.",
+        "properties": {
+          "atMs": {
+            "type": "integer"
+          },
+          "file": {
+            "type": "integer"
+          },
+          "piece": {
+            "type": "integer"
+          },
+          "blockedMs": {
+            "type": "integer"
+          },
+          "chunks": {
+            "type": "integer"
+          },
+          "have": {
+            "type": "integer"
+          },
+          "outstanding": {
+            "type": "integer"
+          },
+          "requesters": {
+            "type": "integer"
+          },
+          "availability": {
+            "type": "integer"
+          },
+          "priority": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "atMs",
+          "file",
+          "piece",
+          "blockedMs",
+          "chunks",
+          "have",
+          "outstanding",
+          "requesters",
+          "availability",
+          "priority"
+        ]
+      },
+      "FileBytes": {
+        "type": "object",
+        "description": "Useful bytes received for one file in each second since the trace began.",
+        "properties": {
+          "file": {
+            "type": "integer"
+          },
+          "perSecond": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "file",
+          "perSecond"
+        ]
+      },
+      "PendingWriteWaits": {
+        "type": "object",
+        "description": "Time reads waited for a piece's in-flight writes.",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "totalMs": {
+            "type": "number"
+          },
+          "maxMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "count",
+          "totalMs",
+          "maxMs"
         ]
       }
     }

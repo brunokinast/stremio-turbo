@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -100,7 +99,7 @@ type engine struct {
 	lastAccess       time.Time        // last real use (EnsureEngine reuse, NewReader, reader Close, per-torrent Stats); global AllStats does not bump it; drives janitor LRU/idle
 	openReaders      int              // active NewReader handles; >0 pins the torrent against eviction
 	reading          map[int]int      // file idx -> open reader count; a file with readers is never demoted
-	tailWarmed       map[int]struct{} // file idx -> tail (moov) actively pre-read once, to beat front starvation
+	streams          sync.Map         // *pinnedReader -> struct{}: open stream readers, for the trace's blocked-piece samples
 	prefetched       map[int]struct{} // source file idx -> next-file boundary already prefetched (once each)
 	onceMetaPriority sync.Once        // ensures boundary-piece prioritization runs exactly once
 
@@ -393,6 +392,11 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	// idle for a round trip per batch (streaming-research findings/10, findings/13).
 	cc.InitialRequestQueue = 32
 	cc.RequestLowWater = 0.5
+	// Request a reader's piece from its offset, and interleave the pieces two
+	// readers are on: with responsive readers, mpv's head and Cues reads get
+	// their few chunks first instead of waiting for whole 16 MiB pieces
+	// (streaming-research findings/14).
+	cc.ReaderOffsetFirst = true
 
 	dials := newDialLog()
 	cc.Callbacks.OutgoingConnResult = append(cc.Callbacks.OutgoingConnResult, dials.onOutgoing)
@@ -1476,15 +1480,20 @@ func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
 		go e.samplePeers()
 	}
 	e.ensureDownloading(idx) // fetch the file being played; demote abandoned ones
-	e.primeBoundary(idx)     // top-priority the header/moov so playback starts fast
-	if os.Getenv("RIVULET_EXPERIMENT_TAIL") != "high" {
-		e.warmMoov(idx) // pre-read the tail so the moov downloads with the front
-	}
+	// The player's readers drive priority from here: a pinned head or tail at
+	// Now would compete with the piece the player is blocked on.
+	e.releaseOwnBoundary(idx)
 	e.prefetchNext(idx) // opportunistically warm the next episode's header (binge UX)
-	r := f.NewReader()
-	if os.Getenv("RIVULET_EXPERIMENT_RESPONSIVE") == "1" { // EXPERIMENT (research/findings/02): serve blocks before the piece verifies
-		r.SetResponsive()
+	if e.trace != nil {
+		e.trace.setFiles(e.infoHash, fileBeginPieces(files))
 	}
+	r := f.NewReader()
+	// Return each chunk as soon as it is written rather than once its whole
+	// 16 MiB piece is verified: mpv needs 32 KiB of head and the ~100 KiB of
+	// Cues at the end before its first frame (streaming-research findings/14).
+	// A chunk from a piece that then fails its hash shows as a glitch; the
+	// piece is fetched again and the peer that sent it is banned.
+	r.SetResponsive()
 	r.SetReadahead(e.streamReadahead(cachedSpeed))
 	now := time.Now()
 	// ctx is the reader's long-lived context: it lives for the reader's
@@ -1505,174 +1514,8 @@ func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
 	}
 	// nextRAAdj is an atomic.Int64 (unix-nanos); must be set after construction.
 	pr.nextRAAdj.Store(now.Add(readaheadAdjustInterval).UnixNano())
+	e.streams.Store(pr, struct{}{})
 	return pr, f.Length(), nil
-}
-
-// warmMoov pre-fetches the bytes a player needs to start before they would
-// arrive on their own. Non-faststart MP4s (e.g. most RARBG encodes) and MKVs
-// keep their index (moov atom / Cues) at the END of the file; primeBoundary
-// marks those pieces top-priority, but within equal priority the actively-read
-// front wins, so the index trickles in last and playback stalls for a long time
-// even while the torrent downloads fast. warmMoov opens a dedicated reader on
-// the last few MiB and drains it so the index gets real demand and arrives
-// alongside the header. This is the anacrolix equivalent of qBittorrent's
-// "download first and last piece first" / Elementum's start-end buffering.
-//
-// Faststart MP4s already carry the moov at the front, so the main stream read
-// covers it — warming the tail would only steal bandwidth and delay start, so
-// it is skipped. Runs once per file; bounded by a timeout so a tail that never
-// arrives (dead swarm) cannot leak the goroutine; tiny files are ignored.
-func (e *engine) warmMoov(idx int) {
-	if idx < 0 || !e.hasInfo() {
-		return
-	}
-	e.mu.Lock()
-	if e.tailWarmed == nil {
-		e.tailWarmed = map[int]struct{}{}
-	}
-	if _, ok := e.tailWarmed[idx]; ok {
-		e.mu.Unlock()
-		return
-	}
-	e.tailWarmed[idx] = struct{}{}
-	e.mu.Unlock()
-
-	files := e.t.Files()
-	if idx >= len(files) {
-		return
-	}
-	f := files[idx]
-	const minWarmSize int64 = 16 << 20 // ignore subtitles/samples/tiny files
-	if f.Length() < minWarmSize {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		if !needsTailWarm(ctx, f) {
-			return // faststart MP4: index already at the front
-		}
-		r := f.NewReader()
-		defer func() { _ = r.Close() }()
-		r.SetReadahead(tailWindowBytes)
-		off := f.Length() - tailWindowBytes
-		if off < 0 {
-			off = 0
-		}
-		if _, err := r.Seek(off, io.SeekStart); err != nil {
-			e.abandonTailWarm(idx)
-			return
-		}
-		if !drainTail(ctx, r) {
-			e.abandonTailWarm(idx)
-		}
-	}()
-}
-
-// tailReader is the slice of torrent.Reader that drainTail needs.
-type tailReader interface {
-	ReadContext(ctx context.Context, b []byte) (int, error)
-}
-
-// drainTail reads r through to the end, discarding the bytes, so the tail
-// pieces get real demand (see warmMoov). It reports whether the tail was
-// delivered: true on a clean io.EOF, false when the read failed first (ctx
-// deadline, torrent dropped) or stopped making progress. Reaching EOF is the
-// success case — the tail is in hand — so warmMoov must NOT treat it like a
-// timed-out pre-read (abandonTailWarm clears the once-only marker, which made
-// every later NewReader — i.e. every Range request a player issues — re-run
-// needsTailWarm and re-read the whole tail window).
-func drainTail(ctx context.Context, r tailReader) bool {
-	buf := make([]byte, 64<<10)
-	for {
-		n, err := r.ReadContext(ctx, buf) // bounded; errors on timeout or torrent drop
-		if err != nil {
-			return errors.Is(err, io.EOF)
-		}
-		if n == 0 {
-			return false
-		}
-	}
-}
-
-// abandonTailWarm gives up on a bounded tail pre-read that did not complete:
-// it demotes the file's pieces back to "not wanted" (the readahead window the
-// warm reader set) and clears the once-only marker so a later NewReader can
-// retry, instead of leaving the tail requested forever with no reader.
-func (e *engine) abandonTailWarm(idx int) {
-	e.mu.Lock()
-	delete(e.tailWarmed, idx)
-	// Reader and selection state are read under one lock so the demotion
-	// decision cannot race a concurrent NewReader or Close.
-	wanted := e.tailWarmWantedLocked(idx)
-	e.mu.Unlock()
-	if wanted || !e.hasInfo() {
-		return
-	}
-	files := e.t.Files()
-	if idx >= 0 && idx < len(files) {
-		files[idx].SetPriority(torrent.PiecePriorityNone)
-	}
-}
-
-// tailWarmWantedLocked reports whether file idx is still wanted, i.e. whether a
-// reader is streaming it or it is selected for full background download. Callers
-// hold e.mu.
-func (e *engine) tailWarmWantedLocked(idx int) bool {
-	if e.reading[idx] > 0 {
-		return true
-	}
-	_, selected := e.selected[idx]
-	return selected
-}
-
-// needsTailWarm walks the leading MP4 box headers and reports false only when it
-// confirms a faststart layout (a moov box appears before any mdat). For mdat
-// first (moov at the end), non-MP4 containers (e.g. MKV, whose Cues live at the
-// end), or anything it cannot parse, it returns true so the tail is warmed — the
-// safe default. Reads are bounded by ctx.
-func needsTailWarm(ctx context.Context, f *torrent.File) bool {
-	r := f.NewReader()
-	defer func() { _ = r.Close() }()
-	r.SetReadahead(256 << 10)
-	hdr := make([]byte, 8)
-	var pos int64
-	for i := 0; i < 6; i++ {
-		if _, err := r.Seek(pos, io.SeekStart); err != nil {
-			return true
-		}
-		if err := readFullCtx(ctx, r, hdr); err != nil {
-			return true
-		}
-		size := int64(hdr[0])<<24 | int64(hdr[1])<<16 | int64(hdr[2])<<8 | int64(hdr[3])
-		switch string(hdr[4:8]) {
-		case "moov":
-			return false // faststart: index before media data
-		case "mdat":
-			return true // media first: moov is at the end
-		case "ftyp", "free", "skip", "wide", "pdin":
-			// header/filler box; advance to the next one
-		default:
-			return true // not a recognizable faststart MP4 (e.g. MKV)
-		}
-		if size < 8 {
-			return true // 64-bit/edge size: bail to the safe default
-		}
-		pos += size
-	}
-	return true
-}
-
-// readFullCtx fills b from r, honouring ctx for cancellation/timeout.
-func readFullCtx(ctx context.Context, r torrent.Reader, b []byte) error {
-	for got := 0; got < len(b); {
-		n, err := r.ReadContext(ctx, b[got:])
-		got += n
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // Streaming readahead bounds + timing.
@@ -1789,6 +1632,10 @@ type pinnedReader struct {
 
 	// traceReq is the HTTP request this reader serves, for the trace's stall log.
 	traceReq atomic.Uint64
+	// readSince (unix nanos, 0 when idle) and readPiece describe the Read in
+	// progress, for the trace's blocked-piece samples.
+	readSince atomic.Int64
+	readPiece atomic.Int64
 }
 
 // SetTraceRequest tags the reader's stalls with the id of the HTTP request it
@@ -1806,6 +1653,11 @@ func (p *pinnedReader) noteStall(d time.Duration, first bool) {
 
 func (p *pinnedReader) Read(b []byte) (int, error) {
 	p.adjustReadahead()
+	if p.e.trace != nil && p.pieceLen > 0 {
+		p.readPiece.Store((p.base + p.pos) / p.pieceLen)
+		p.readSince.Store(time.Now().UnixNano())
+		defer p.readSince.Store(0)
+	}
 	// Fast path: once started, tr already holds the long-lived ctx (installed
 	// below on the first successful read), so reads block for the swarm
 	// instead of racing a deadline. Lock-free.
@@ -1877,6 +1729,7 @@ func (p *pinnedReader) Close() error {
 		// vendored reader's own idempotency (map-delete + nil-guarded
 		// storageReader close) to make a concurrent double call harmless.
 		p.closeErr = p.tr.Close()
+		p.e.streams.Delete(p)
 		p.cur.close()
 		var demote bool
 		p.e.mu.Lock()
@@ -2410,9 +2263,8 @@ func (e *engine) PrimeFile(idx int) {
 // Boundary priming windows: byte ranges (not fixed piece counts) at the head
 // and tail of the streamed file — see primeBoundary for why these are
 // narrow (≈1 piece each at the default 16 MiB piece length) rather than the
-// previous fixed 8-piece windows. tailWindowBytes also bounds warmMoov's
-// dedicated tail read, so the two mechanisms agree on how much trailer data
-// "the moov" means.
+// previous fixed 8-piece windows. They apply only before a stream reads the
+// file (releaseOwnBoundary).
 const (
 	headWindowBytes int64 = 4 << 20 // 4 MiB: reaches ftyp/moov (faststart) or codec-init box
 	tailWindowBytes int64 = 8 << 20 // 8 MiB: covers moov-at-end MP4 / MKV Cues+Tags trailer
@@ -2493,7 +2345,9 @@ func (e *engine) primeBoundary(idx int) {
 	if e.primed == nil {
 		e.primed = map[int]struct{}{}
 	}
-	if _, ok := e.primed[idx]; ok {
+	if _, ok := e.primed[idx]; ok || e.reading[idx] > 0 {
+		// Primed already, or a stream is reading the file and its readers
+		// drive priority (releaseOwnBoundary).
 		e.mu.Unlock()
 		return
 	}
@@ -2512,12 +2366,7 @@ func (e *engine) primeBoundary(idx int) {
 		return
 	}
 	headEnd, tailBegin := primeBoundaryRange(begin, end, info.PieceLength, headWindowBytes, tailWindowBytes)
-	if os.Getenv("RIVULET_EXPERIMENT_TAIL") == "high" { // EXPERIMENT (research/findings/02): head before tail
-		e.raiseBoundary([]pieceSpan{{begin, headEnd}}, torrent.PiecePriorityNow, e.setPiecePriority)
-		e.raiseBoundary([]pieceSpan{{tailBegin, end}}, torrent.PiecePriorityHigh, e.setPiecePriority)
-	} else {
-		e.raiseBoundary([]pieceSpan{{begin, headEnd}, {tailBegin, end}}, torrent.PiecePriorityNow, e.setPiecePriority)
-	}
+	e.raiseBoundary([]pieceSpan{{begin, headEnd}, {tailBegin, end}}, torrent.PiecePriorityNow, e.setPiecePriority)
 	logging.For("engine").Debug("boundary-prioritized pieces", "info_hash", e.infoHash, "file_idx", idx,
 		"begin", begin, "end", end,
 		"head_bytes", headWindowBytes, "head_pieces", headEnd-begin,
@@ -2637,6 +2486,57 @@ func (e *engine) releaseBoundary(demoted []int) {
 		protected = append(protected, spansOf(i)...)
 	}
 	e.releasePieces(piecesToRelease(demotedSpans, protected), e.setPiecePriority)
+}
+
+// releaseOwnBoundary drops the head and tail pins of file idx once a stream
+// reads it: from then on the player's readers make the piece they are on Now,
+// and a pinned piece at the same level would compete with it (mpv reads the
+// head, then the Cues at the end, then the head again, under 1 MiB before its
+// first frame). Pins are for the preload phase, before any reader exists.
+// Pieces shared with another primed or selected file keep their pin.
+func (e *engine) releaseOwnBoundary(idx int) {
+	if idx < 0 || !e.hasInfo() {
+		return
+	}
+	info := e.t.Info()
+	if info == nil {
+		return
+	}
+	files := e.t.Files()
+	if idx >= len(files) {
+		return
+	}
+	spansOf := func(i int) []pieceSpan {
+		return boundarySpans(files[i].BeginPieceIndex(), files[i].EndPieceIndex(), info.PieceLength)
+	}
+	e.boundaryMu.Lock()
+	defer e.boundaryMu.Unlock()
+	e.releasePieces(e.ownBoundaryToRelease(idx, len(files), spansOf), e.setPiecePriority)
+}
+
+// ownBoundaryToRelease returns the boundary pieces of file idx that no other
+// primed or selected file (of nfiles) shares.
+func (e *engine) ownBoundaryToRelease(idx, nfiles int, spansOf func(int) []pieceSpan) []int {
+	e.mu.Lock()
+	var protected []pieceSpan
+	for _, set := range []map[int]struct{}{e.primed, e.selected} {
+		for i := range set {
+			if i != idx && i < nfiles {
+				protected = append(protected, spansOf(i)...)
+			}
+		}
+	}
+	e.mu.Unlock()
+	return piecesToRelease(spansOf(idx), protected)
+}
+
+// fileBeginPieces returns each file's first piece, for the trace.
+func fileBeginPieces(files []*torrent.File) []int {
+	out := make([]int, len(files))
+	for i, f := range files {
+		out[i] = f.BeginPieceIndex()
+	}
+	return out
 }
 
 // releasePieces resets pieces we explicitly raised back to None. Caller holds
