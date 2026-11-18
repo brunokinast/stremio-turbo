@@ -2259,6 +2259,12 @@ func applyBoundaryPriorities(e *engine) {
 		case <-e.t.Closed():
 			return
 		}
+		// The trace counts downloaded bytes per file from here, before any
+		// reader: a preloaded or racing torrent's download is part of choosing
+		// a source (streaming-research findings/20).
+		if e.trace != nil {
+			e.trace.setFiles(e.infoHash, fileBeginPieces(e.t.Files()))
+		}
 
 		e.fileMu.Lock()
 		defer e.fileMu.Unlock()
