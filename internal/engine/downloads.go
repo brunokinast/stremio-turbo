@@ -604,6 +604,10 @@ func (m *manager) UpdateDownload(infoHash string, idx int, patch types.DownloadP
 	if patch.Watched != nil {
 		en.Watched = *patch.Watched
 	}
+	if patch.Meta != nil {
+		meta := *patch.Meta
+		en.Meta = &meta
+	}
 	resume := false
 	pause := false
 	if patch.Paused != nil && *patch.Paused != en.Paused {

@@ -668,6 +668,13 @@ type DownloadMeta struct {
 	MetaID  string `json:"metaId,omitempty"`
 	VideoID string `json:"videoId,omitempty"`
 	Type    string `json:"type,omitempty"`
+	// What a client shows for the file: the show's name and poster, and the
+	// episode's season, number and title.
+	Name    string `json:"name,omitempty"`
+	Poster  string `json:"poster,omitempty"`
+	Season  int    `json:"season,omitempty"`
+	Episode int    `json:"episode,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 // DownloadRequest is what a client asks for when adding a file (POST
@@ -738,8 +745,9 @@ type Download struct {
 
 // DownloadPatch changes a download (PATCH /downloads/:infoHash/:fileIdx); nil fields are kept.
 type DownloadPatch struct {
-	Paused  *bool `json:"paused,omitempty"`
-	Watched *bool `json:"watched,omitempty"`
+	Paused  *bool         `json:"paused,omitempty"`
+	Watched *bool         `json:"watched,omitempty"`
+	Meta    *DownloadMeta `json:"meta,omitempty"` // replaces the record's meta
 }
 
 // ScrapeRequest is one torrent to scrape: its info hash plus the trackers the

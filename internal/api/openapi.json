@@ -11318,6 +11318,10 @@
           },
           "watched": {
             "type": "boolean"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DownloadMeta",
+            "description": "Replaces the record's meta"
           }
         }
       },
@@ -14442,6 +14446,24 @@
           },
           "type": {
             "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "The show's name"
+          },
+          "poster": {
+            "type": "string",
+            "description": "The show's poster URL"
+          },
+          "season": {
+            "type": "integer"
+          },
+          "episode": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string",
+            "description": "The episode's title"
           }
         }
       },

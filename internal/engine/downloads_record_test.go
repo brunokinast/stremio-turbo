@@ -262,3 +262,18 @@ func TestRemoveTorrentData(t *testing.T) {
 		t.Fatalf("data kept: %v", err)
 	}
 }
+
+// TestPatchMeta attaches a client's episode details to a recorded file.
+func TestPatchMeta(t *testing.T) {
+	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
+	e1 := fileIndex(t, e, "Show.S01E01.mkv")
+	m.notePlayed(e.infoHash, e1)
+	meta := types.DownloadMeta{MetaID: "tt1", VideoID: "tt1:1:1", Name: "Show", Poster: "https://img/p.jpg", Season: 1, Episode: 1, Title: "Pilot"}
+	if _, err := m.UpdateDownload(e.infoHash, e1, types.DownloadPatch{Meta: &meta}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := recordOf(t, m, e.infoHash, e1)
+	if d.Meta == nil || *d.Meta != meta {
+		t.Fatalf("meta = %+v", d.Meta)
+	}
+}
