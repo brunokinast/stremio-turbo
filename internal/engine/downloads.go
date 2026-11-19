@@ -444,6 +444,9 @@ func (m *manager) RemoveDownload(infoHash string, idx int) error {
 	if !m.deleteDownload(k) {
 		return ErrNoDownload
 	}
+	// Removals by a client (DELETE /downloads): logged so a download that
+	// disappears can be traced (budget evictions log their own line).
+	logging.For("engine").Info("removed download on request", "info_hash", k.ih, "file_idx", k.idx)
 	return nil
 }
 
