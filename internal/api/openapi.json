@@ -3270,7 +3270,7 @@
     "/downloads": {
       "get": {
         "operationId": "listDownloads",
-        "summary": "List background downloads",
+        "summary": "List every file on disk",
         "tags": [
           "Downloads"
         ],
@@ -3302,11 +3302,12 @@
               }
             }
           }
-        }
+        },
+        "description": "Kept, temporary and leftover records, oldest first. A file a player streams is recorded as kept (origin play); the server deletes kept files and leftovers only on request."
       },
       "post": {
         "operationId": "addDownload",
-        "summary": "Download a file whole in the background",
+        "summary": "Record a file: kept (downloaded whole) or temporary (primed, leased)",
         "description": "Adds the torrent if needed and fetches the file at normal priority (a playing stream still comes first). The file keeps downloading after its streams close, and the idle and cache janitors keep the torrent and its data. Adding an existing download resumes it.",
         "tags": [
           "Downloads"
@@ -3486,8 +3487,9 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "minimum": 0
-            }
+              "minimum": -1
+            },
+            "description": "File index; -1 deletes a leftover"
           }
         ],
         "requestBody": {
@@ -3576,8 +3578,9 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "minimum": 0
-            }
+              "minimum": -1
+            },
+            "description": "File index; -1 deletes a leftover"
           }
         ],
         "responses": {
@@ -10585,6 +10588,76 @@
           }
         }
       }
+    },
+    "/downloads/disk": {
+      "get": {
+        "operationId": "downloadsDisk",
+        "summary": "Cache volume space and the records' usage",
+        "tags": [
+          "Downloads"
+        ],
+        "responses": {
+          "200": {
+            "description": "Disk space",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiskInfo"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The engine does not support downloads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/downloads/{infoHash}": {
+      "delete": {
+        "operationId": "removeTorrentData",
+        "summary": "Delete every record of a torrent and its cache folder",
+        "description": "Deletes a leftover, or every file of a torrent. A torrent being read keeps its data until it's idle.",
+        "tags": [
+          "Downloads"
+        ],
+        "parameters": [
+          {
+            "name": "infoHash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenOrigin"
+          },
+          "404": {
+            "description": "Nothing recorded or on disk for this torrent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11119,6 +11192,28 @@
               "type": "string"
             },
             "description": "peerSearch sources (\"tracker:<url>\", \"dht:<infoHash>\")"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "kept",
+              "temporary"
+            ],
+            "default": "kept",
+            "description": "kept: download whole (re-adding unpauses; promotes a temporary file). temporary: prime the start, end and the window at startFraction and renew the 2-minute lease (re-add to renew); a kept file stays kept"
+          },
+          "origin": {
+            "type": "string",
+            "description": "Why the file is added (shown to the user)"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DownloadMeta"
+          },
+          "startFraction": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Where playback would start (temporary files)"
           }
         }
       },
@@ -11127,8 +11222,10 @@
         "required": [
           "infoHash",
           "fileIdx",
+          "kind",
           "size",
           "bytesCompleted",
+          "bytesOnDisk",
           "rate",
           "state",
           "watched",
@@ -11141,18 +11238,42 @@
           },
           "fileIdx": {
             "type": "integer",
-            "minimum": 0
+            "minimum": -1,
+            "description": "File index in the torrent; -1 for a leftover (the whole cache folder)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "kept",
+              "temporary",
+              "leftover"
+            ],
+            "description": "kept: downloaded whole, deleted only on request (a played file becomes kept). temporary: primed for a measurement, deleted when its lease lapses. leftover: a cache folder found with no record"
+          },
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why the file is on disk, as the clients said (e.g. picker, next, play, manual-card; leftover)"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DownloadMeta"
           },
           "name": {
             "type": "string",
-            "description": "File path inside the torrent, once metadata is known"
+            "description": "File path inside the torrent once metadata is known; a leftover's single top-level entry"
           },
           "size": {
             "type": "integer",
-            "description": "File size in bytes (0 until metadata is known)"
+            "description": "File size in bytes (0 until metadata is known; a leftover's bytes on disk)"
           },
           "bytesCompleted": {
             "type": "integer"
+          },
+          "bytesOnDisk": {
+            "type": "integer",
+            "description": "Bytes the file's data occupies (allocated: a sparse file's holes don't count)"
           },
           "rate": {
             "type": "number",
@@ -11164,7 +11285,8 @@
               "queued",
               "downloading",
               "paused",
-              "complete"
+              "complete",
+              "idle"
             ]
           },
           "watched": {
@@ -11173,6 +11295,18 @@
           "addedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "lastPlayed": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a player last opened the file"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A leftover folder's files, relative paths"
           }
         }
       },
@@ -14295,6 +14429,43 @@
           "totalMs",
           "maxMs"
         ]
+      },
+      "DownloadMeta": {
+        "type": "object",
+        "description": "The episode a file was added for (the client's ids)",
+        "properties": {
+          "metaId": {
+            "type": "string"
+          },
+          "videoId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "DiskInfo": {
+        "type": "object",
+        "required": [
+          "free",
+          "total",
+          "used"
+        ],
+        "properties": {
+          "free": {
+            "type": "integer",
+            "description": "Bytes available on the cache volume (0 when unknown)"
+          },
+          "total": {
+            "type": "integer",
+            "description": "The volume's size (0 when unknown)"
+          },
+          "used": {
+            "type": "integer",
+            "description": "Bytes the records' files occupy"
+          }
+        }
       }
     }
   }

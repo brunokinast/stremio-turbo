@@ -41,7 +41,7 @@ func TestKeepAwakeAndExitWhenDone(t *testing.T) {
 	}
 
 	e1 := fileIndex(t, e, "Show.S01E01.mkv")
-	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}); err != nil {
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	m.SetExitWhenDone(true)

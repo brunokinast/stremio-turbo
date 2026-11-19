@@ -273,11 +273,6 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	if j, ok := em.(interface{ StartJanitor(func() int64) }); ok {
 		j.StartJanitor(func() int64 { return settingBytes(ss.Get("cacheSize")) })
 	}
-	// The download budget (background downloads, null = unlimited) uses the
-	// same encoding.
-	if d, ok := em.(interface{ SetDownloadBudgetFn(func() int64) }); ok {
-		d.SetDownloadBudgetFn(func() int64 { return settingBytes(ss.Get("downloadBudget")) })
-	}
 
 	// Wire live bandwidth limits from settings — no changes to the types interface.
 	// SetLimitFn is detected via structural assertion on the concrete *manager, matching

@@ -19,14 +19,20 @@ import (
 type fakeDownloadsEM struct {
 	*fakeEM
 	added        []types.AddOptions
+	requests     []types.DownloadRequest
+	removed      []string
 	entries      map[string]types.Download
 	exitWhenDone *bool
 }
 
 func dlKey(ih string, idx int) string { return ih + "/" + strconv.Itoa(idx) }
 
-func (f *fakeDownloadsEM) AddDownload(ih string, idx int, opts types.AddOptions) (types.Download, error) {
+func (f *fakeDownloadsEM) AddDownload(ih string, idx int, opts types.AddOptions, req types.DownloadRequest) (types.Download, error) {
+	if req.Kind != "" && req.Kind != types.DownloadKept && req.Kind != types.DownloadTemporary {
+		return types.Download{}, types.ErrDownloadKind
+	}
 	f.added = append(f.added, opts)
+	f.requests = append(f.requests, req)
 	d := types.Download{InfoHash: ih, FileIdx: idx, State: types.DownloadQueued, AddedAt: time.Now()}
 	f.entries[dlKey(ih, idx)] = d
 	return d, nil
@@ -56,6 +62,13 @@ func (f *fakeDownloadsEM) UpdateDownload(ih string, idx int, p types.DownloadPat
 }
 
 func (f *fakeDownloadsEM) SetExitWhenDone(on bool) { f.exitWhenDone = &on }
+
+func (f *fakeDownloadsEM) RemoveTorrentData(ih string) error {
+	f.removed = append(f.removed, ih)
+	return nil
+}
+
+func (f *fakeDownloadsEM) Disk() types.DiskInfo { return types.DiskInfo{Free: 7, Total: 9, Used: 1} }
 
 func (f *fakeDownloadsEM) RemoveDownload(ih string, idx int) error {
 	if _, ok := f.entries[dlKey(ih, idx)]; !ok {
@@ -119,10 +132,36 @@ func TestDownloadsAPI(t *testing.T) {
 		{http.MethodPut, "/downloads", "", true, http.StatusMethodNotAllowed},
 		{http.MethodPatch, "/downloads/" + dlIH + "/x", "{}", true, http.StatusNotFound},
 		{http.MethodPatch, "/downloads/" + dlIH + "/0", "{}", true, http.StatusNotFound},
+		{http.MethodPost, "/downloads", `{"infoHash":"` + dlIH + `","fileIdx":0,"kind":"leftover"}`, true, http.StatusBadRequest},
+		{http.MethodDelete, "/downloads/" + dlIH, "", false, http.StatusForbidden},
+		{http.MethodGet, "/downloads/" + dlIH, "", true, http.StatusMethodNotAllowed},
+		{http.MethodPost, "/downloads/disk", "", true, http.StatusMethodNotAllowed},
 	} {
 		if rec := doDL(t, h, c.method, c.path, c.body, c.loopback); rec.Code != c.want {
 			t.Errorf("%s %s = %d; want %d", c.method, c.path, rec.Code, c.want)
 		}
+	}
+}
+
+// TestDownloadsAPIRecord: a temporary add carries its request, a torrent's
+// data is deleted by info hash, and /downloads/disk reports the volume.
+func TestDownloadsAPIRecord(t *testing.T) {
+	em := &fakeDownloadsEM{fakeEM: newFakeEM(), entries: map[string]types.Download{}}
+	h := New(em, &fakeSS{}, &fakeProber{}, types.Config{HTTPPort: 11470, AppPath: t.TempDir()})
+
+	add := `{"infoHash":"` + dlIH + `","fileIdx":1,"kind":"temporary","origin":"picker","startFraction":0.4,"meta":{"metaId":"tt1","videoId":"tt1:2:3","type":"series"}}`
+	if rec := doDL(t, h, http.MethodPost, "/downloads", add, true); rec.Code != http.StatusOK {
+		t.Fatalf("POST = %d %s", rec.Code, rec.Body)
+	}
+	req := em.requests[0]
+	if req.Kind != types.DownloadTemporary || req.Origin != "picker" || req.StartFraction != 0.4 || req.Meta == nil || req.Meta.VideoID != "tt1:2:3" {
+		t.Fatalf("request = %+v", req)
+	}
+	if rec := doDL(t, h, http.MethodDelete, "/downloads/"+strings.ToUpper(dlIH), "", true); rec.Code != http.StatusNoContent || len(em.removed) != 1 || em.removed[0] != dlIH {
+		t.Fatalf("DELETE torrent = %d, removed %v", rec.Code, em.removed)
+	}
+	if rec := doDL(t, h, http.MethodGet, "/downloads/disk", "", true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"free":7`) {
+		t.Fatalf("GET disk = %d %s", rec.Code, rec.Body)
 	}
 }
 

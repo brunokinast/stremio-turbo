@@ -23,11 +23,12 @@ type addDownloadBody struct {
 	FileIdx  *int     `json:"fileIdx"`
 	Trackers []string `json:"trackers"`
 	Sources  []string `json:"sources"`
+	types.DownloadRequest
 }
 
-// handleDownloads serves /downloads and /downloads/:infoHash/:fileIdx:
-// background whole-file downloads (download ahead) that outlive their
-// streams and are kept on disk until removed.
+// handleDownloads serves the record of every file on disk: /downloads (list,
+// add), /downloads/disk (space), /downloads/:infoHash (delete a torrent's
+// data) and /downloads/:infoHash/:fileIdx (change, delete one file).
 func (s *server) handleDownloads(w http.ResponseWriter, r *http.Request) {
 	dl, ok := s.em.(types.Downloader)
 	if !ok {
@@ -51,13 +52,39 @@ func (s *server) handleDownloads(w http.ResponseWriter, r *http.Request) {
 		s.exitWhenDone(w, r, dl)
 		return
 	}
+	if rest == "disk" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, dl.Disk())
+		return
+	}
 	seg := strings.Split(rest, "/")
+	if len(seg) == 1 && isInfoHash(seg[0]) {
+		if r.Method != http.MethodDelete {
+			w.Header().Set("Allow", "DELETE")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		if !s.settingsWriteAllowed(r) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "downloads write requires a browser origin, a loopback peer, or api_password"})
+			return
+		}
+		if err := dl.RemoveTorrentData(strings.ToLower(seg[0])); err != nil {
+			writeDownloadErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if len(seg) != 2 || !isInfoHash(seg[0]) {
 		http.NotFound(w, r)
 		return
 	}
 	idx, err := strconv.Atoi(seg[1])
-	if err != nil || idx < 0 {
+	if err != nil || idx < -1 {
 		http.NotFound(w, r)
 		return
 	}
@@ -110,7 +137,7 @@ func (s *server) addDownload(w http.ResponseWriter, r *http.Request, dl types.Do
 		return
 	}
 	opts := types.AddOptions{Trackers: body.Trackers, Sources: body.Sources}
-	d, err := dl.AddDownload(strings.ToLower(body.InfoHash), *body.FileIdx, opts)
+	d, err := dl.AddDownload(strings.ToLower(body.InfoHash), *body.FileIdx, opts, body.DownloadRequest)
 	if err != nil {
 		writeDownloadErr(w, err)
 		return
@@ -144,7 +171,9 @@ func writeDownloadErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, types.ErrNoDownload):
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-	case errors.Is(err, types.ErrDownloadsNeedDisk), errors.Is(err, types.ErrDownloadBudget):
+	case errors.Is(err, types.ErrDownloadKind):
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+	case errors.Is(err, types.ErrDownloadsNeedDisk):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
 	case errors.Is(err, types.ErrTooManyEngines), errors.Is(err, types.ErrDownloadNoMetadata):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})

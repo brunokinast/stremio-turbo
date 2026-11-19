@@ -67,7 +67,7 @@ func TestDownloadsRegistryPersists(t *testing.T) {
 func TestBackgroundFileSurvivesStreams(t *testing.T) {
 	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
 	e1, e2 := fileIndex(t, e, "Show.S01E01.mkv"), fileIndex(t, e, "Show.S01E02.mkv")
-	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}); err != nil {
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	waitBackground(t, e, e1)
@@ -89,8 +89,10 @@ func TestBackgroundFileSurvivesStreams(t *testing.T) {
 		t.Fatalf("download demoted when another file was played")
 	}
 	_ = r2.Close()
-	if p := files[e2].Priority(); p != torrent.PiecePriorityNone {
-		t.Fatalf("plain stream file priority = %v after close; want None", p)
+	// A played file is kept too (downloads_record_test.go), so it keeps
+	// downloading after its stream closes.
+	if p := files[e2].Priority(); p == torrent.PiecePriorityNone {
+		t.Fatalf("played file dropped to None after its stream closed")
 	}
 }
 
@@ -100,7 +102,7 @@ func TestBackgroundFileSurvivesStreams(t *testing.T) {
 func TestDownloadsKeepData(t *testing.T) {
 	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
 	e1 := fileIndex(t, e, "Show.S01E01.mkv")
-	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}); err != nil {
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	fakeData(t, e)
@@ -147,7 +149,7 @@ func TestDownloadsKeepData(t *testing.T) {
 func TestCompletedDownloadsUnloadKeepingData(t *testing.T) {
 	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
 	e1 := fileIndex(t, e, "Show.S01E01.mkv")
-	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}); err != nil {
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	m.dl.mu.Lock()
@@ -175,7 +177,7 @@ func TestCompletedDownloadsUnloadKeepingData(t *testing.T) {
 func TestPausedDownloadIsNotBackground(t *testing.T) {
 	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
 	e1 := fileIndex(t, e, "Show.S01E01.mkv")
-	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}); err != nil {
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	waitBackground(t, e, e1)
@@ -192,7 +194,7 @@ func TestPausedDownloadIsNotBackground(t *testing.T) {
 // TestDownloadsNeedDisk: the in-RAM cache refuses downloads.
 func TestDownloadsNeedDisk(t *testing.T) {
 	m, e := newTestEngine(t, 32<<20, newSeasonPackTorrent(t, 256<<10))
-	if _, err := m.AddDownload(e.infoHash, 0, types.AddOptions{}); !errors.Is(err, ErrDownloadsNeedDisk) {
+	if _, err := m.AddDownload(e.infoHash, 0, types.AddOptions{}, types.DownloadRequest{}); !errors.Is(err, ErrDownloadsNeedDisk) {
 		t.Fatalf("err = %v; want ErrDownloadsNeedDisk", err)
 	}
 }

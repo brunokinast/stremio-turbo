@@ -1404,7 +1404,7 @@ const settingsMaxBody = 64 << 10
 // settingsAllowedKeys is the allowlist of keys a POST /settings patch may
 // set; anything else is silently dropped (stremio-web round-trips extras).
 var settingsAllowedKeys = map[string]struct{}{
-	"cacheSize": {}, "downloadBudget": {}, "btMaxConnections": {}, "btHandshakeTimeout": {}, "btRequestTimeout": {},
+	"cacheSize": {}, "btMaxConnections": {}, "btHandshakeTimeout": {}, "btRequestTimeout": {},
 	"btDownloadSpeedSoftLimit": {}, "btDownloadSpeedHardLimit": {}, "btMinPeersForStable": {},
 	"remoteHttps": {}, "localAddonEnabled": {}, "transcodeHorsepower": {}, "transcodeMaxBitRate": {},
 	"transcodeConcurrency": {}, "transcodeTrackConcurrency": {}, "transcodeHardwareAccel": {},
@@ -1437,7 +1437,7 @@ func (s *server) settingsWriteAllowed(r *http.Request) bool {
 // responsibility to strip once validation succeeds. Returns "" when patch is
 // acceptable, otherwise a message naming the offending key.
 func validateSettingsPatch(patch map[string]any) string {
-	for _, key := range []string{"cacheSize", "downloadBudget"} {
+	for _, key := range []string{"cacheSize"} {
 		if v, ok := patch[key]; ok && v != nil {
 			if n, isNum := v.(float64); !isNum || n < 0 {
 				return key + " must be null or a non-negative number"

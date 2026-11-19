@@ -632,18 +632,60 @@ type EngineManager interface {
 	Close() error
 }
 
-// Downloader is implemented by engine managers that support background
-// downloads (download ahead): whole files fetched in the background,
-// persisted, and kept on disk until removed.
+// Downloader is implemented by engine managers that keep a record of every
+// file on disk: kept files (downloaded whole in the background, persisted, and
+// deleted only on request), temporary ones (a client measuring candidates:
+// primed, leased, deleted when the lease lapses) and leftovers (cache folders
+// found on disk with no record).
 type Downloader interface {
-	AddDownload(infoHash string, fileIdx int, opts AddOptions) (Download, error)
+	AddDownload(infoHash string, fileIdx int, opts AddOptions, req DownloadRequest) (Download, error)
 	Downloads() []Download
 	UpdateDownload(infoHash string, fileIdx int, patch DownloadPatch) (Download, error)
 	RemoveDownload(infoHash string, fileIdx int) error
-	// SetExitWhenDone makes the process exit once no download is left to
+	// RemoveTorrentData forgets every record of a torrent and deletes its
+	// cache folder (a leftover, or a whole show's group).
+	RemoveTorrentData(infoHash string) error
+	// Disk reports the cache volume's space and what the records use.
+	Disk() DiskInfo
+	// SetExitWhenDone makes the process exit once no kept file is left to
 	// fetch and no torrent is being read (the launcher leaves the server
 	// running after the player closes to finish downloads).
 	SetExitWhenDone(on bool)
+}
+
+// DownloadKind is what a record is kept for.
+type DownloadKind string
+
+// Download kinds.
+const (
+	DownloadKept      DownloadKind = "kept"      // downloaded whole; deleted only on request
+	DownloadTemporary DownloadKind = "temporary" // primed for a measurement; deleted when its lease lapses
+	DownloadLeftover  DownloadKind = "leftover"  // a cache folder found with no record (fileIdx -1)
+)
+
+// DownloadMeta names the episode a file was added for (the client's ids).
+type DownloadMeta struct {
+	MetaID  string `json:"metaId,omitempty"`
+	VideoID string `json:"videoId,omitempty"`
+	Type    string `json:"type,omitempty"`
+}
+
+// DownloadRequest is what a client asks for when adding a file (POST
+// /downloads): its kind (kept by default), why (origin), the episode, and
+// for a temporary file where playback would start (0-1).
+type DownloadRequest struct {
+	Kind          DownloadKind  `json:"kind,omitempty"`
+	Origin        string        `json:"origin,omitempty"`
+	Meta          *DownloadMeta `json:"meta,omitempty"`
+	StartFraction float64       `json:"startFraction,omitempty"`
+}
+
+// DiskInfo is GET /downloads/disk: the cache volume's free and total bytes,
+// and the bytes the records' files occupy on disk.
+type DiskInfo struct {
+	Free  int64 `json:"free"`
+	Total int64 `json:"total"`
+	Used  int64 `json:"used"`
 }
 
 // ErrNoDownload is returned for an unknown download.
@@ -652,9 +694,9 @@ var ErrNoDownload = errors.New("no such download")
 // ErrDownloadsNeedDisk is returned when the engine keeps pieces in RAM only.
 var ErrDownloadsNeedDisk = errors.New("downloads need the disk piece cache")
 
-// ErrDownloadBudget is returned when a new download doesn't fit the download
-// budget even after deleting the completed downloads that can be deleted.
-var ErrDownloadBudget = errors.New("download budget exceeded")
+// ErrDownloadKind is returned for an unknown DownloadRequest.Kind (a client
+// can add kept or temporary files only).
+var ErrDownloadKind = errors.New(`kind must be "kept" or "temporary"`)
 
 // ErrDownloadNoMetadata is returned when a new download's torrent metadata
 // (needed for the file's size) did not arrive in time; retry later.
@@ -669,19 +711,29 @@ const (
 	DownloadDownloading DownloadState = "downloading" // fetching in the background
 	DownloadPaused      DownloadState = "paused"
 	DownloadComplete    DownloadState = "complete"
+	DownloadIdle        DownloadState = "idle" // a temporary or leftover file not being fetched
 )
 
-// Download is one background download (GET /downloads).
+// Download is one record (GET /downloads).
 type Download struct {
 	InfoHash       string        `json:"infoHash"`
 	FileIdx        int           `json:"fileIdx"`
+	Kind           DownloadKind  `json:"kind"`
+	Origins        []string      `json:"origins,omitempty"`
+	Meta           *DownloadMeta `json:"meta,omitempty"`
 	Name           string        `json:"name,omitempty"`
 	Size           int64         `json:"size"`
 	BytesCompleted int64         `json:"bytesCompleted"`
-	Rate           float64       `json:"rate"` // bytes per second
-	State          DownloadState `json:"state"`
-	Watched        bool          `json:"watched"`
-	AddedAt        time.Time     `json:"addedAt"`
+	// BytesOnDisk is the space the file's data occupies (allocated, so the
+	// holes of a sparse file don't count).
+	BytesOnDisk int64         `json:"bytesOnDisk"`
+	Rate        float64       `json:"rate"` // bytes per second
+	State       DownloadState `json:"state"`
+	Watched     bool          `json:"watched"`
+	AddedAt     time.Time     `json:"addedAt"`
+	LastPlayed  *time.Time    `json:"lastPlayed,omitempty"`
+	// Files lists a leftover folder's files (relative paths).
+	Files []string `json:"files,omitempty"`
 }
 
 // DownloadPatch changes a download (PATCH /downloads/:infoHash/:fileIdx); nil fields are kept.

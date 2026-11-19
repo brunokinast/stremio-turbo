@@ -8,7 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,16 +24,27 @@ import (
 	"github.com/rivulet-kodi/rivulet-engine/internal/types"
 )
 
-// Downloads: files a client asked to have downloaded whole in the background
-// (download ahead: the next episode fetched while the current one plays, so it
-// later plays from disk without buffering). A download is a per-file intent
-// that outlives the file's readers: closing the last stream, or playing
-// another file of the torrent, no longer drops it to priority None, and the
-// janitor's idle and LRU passes (which delete a torrent's data) leave torrents
-// with downloads alone. The registry is persisted, so incomplete downloads
-// resume after a restart; a torrent whose downloads are all complete is
-// unloaded without deleting its data, and piece completion (persisted per
-// torrent directory) makes it play from disk when it's opened again.
+// Downloads: the record of every file on disk. Three kinds:
+//
+//   - kept: downloaded whole in the background and deleted only on request (a
+//     client's DELETE). A file the player streams becomes kept (origin
+//     "play"), so the episode being watched finishes downloading even after
+//     it stops; a client adds the next episode as kept too. A kept download
+//     outlives its readers: closing the last stream, or playing another file
+//     of the torrent, doesn't drop it to priority None.
+//   - temporary: a client measuring candidates. Its start, end and the window
+//     at the resume point are primed; it holds a lease the client renews, and
+//     is deleted once the lease lapses (also at startup), so a closed or
+//     crashed client leaves nothing behind. Playing it makes it kept.
+//   - leftover: a cache folder found at startup with no record (data from
+//     before the record existed, or of a server that was stopped). Listed so
+//     the user can delete it; never fetched.
+//
+// The janitor's idle and LRU passes (which delete a torrent's data) leave
+// torrents with records alone; they only reclaim torrents nobody recorded. The
+// registry is persisted, so incomplete kept files resume after a restart; a
+// torrent whose kept files are all complete is unloaded without deleting its
+// data, and piece completion makes it play from disk when it's opened again.
 
 // downloadsFile is the registry's file name under the app path.
 const downloadsFile = "downloads.json"
@@ -41,13 +52,16 @@ const downloadsFile = "downloads.json"
 // resumeReadyTimeout bounds the wait for a re-added torrent's metadata.
 const resumeReadyTimeout = 10 * time.Minute
 
-// addMetadataTimeout bounds AddDownload's wait for a new download's metadata
-// (its size is needed for the budget).
+// addMetadataTimeout bounds AddDownload's wait for a new kept file's
+// metadata (to check the file index).
 const addMetadataTimeout = 30 * time.Second
 
-// defaultDownloadBudget is the disk space downloads may use when no budget
-// function is set (the downloadBudget setting's default).
-const defaultDownloadBudget = int64(60e9)
+// temporaryLease is how long a temporary file lives without its client
+// renewing it (re-adding it).
+const temporaryLease = 2 * time.Minute
+
+// leftoverIdx is a leftover's file index: the record covers the whole folder.
+const leftoverIdx = -1
 
 type downloadKey struct {
 	ih  string
@@ -56,8 +70,15 @@ type downloadKey struct {
 
 // downloadEntry is one registry record, persisted as JSON.
 type downloadEntry struct {
-	InfoHash string    `json:"infoHash"`
-	FileIdx  int       `json:"fileIdx"`
+	InfoHash string              `json:"infoHash"`
+	FileIdx  int                 `json:"fileIdx"`
+	Kind     types.DownloadKind  `json:"kind,omitempty"` // "" (older registries) is kept
+	Origins  []string            `json:"origins,omitempty"`
+	Meta     *types.DownloadMeta `json:"meta,omitempty"`
+	// LastPlayed is when a player last opened the file.
+	LastPlayed *time.Time `json:"lastPlayed,omitempty"`
+	// Files lists a leftover folder's files.
+	Files    []string  `json:"files,omitempty"`
 	Trackers []string  `json:"trackers,omitempty"`
 	Paused   bool      `json:"paused,omitempty"`
 	Watched  bool      `json:"watched,omitempty"`
@@ -77,6 +98,17 @@ type downloadEntry struct {
 	sampleAt    time.Time
 	sampleBytes int64
 	rate        float64
+
+	// A temporary file's lease (not persisted: a temporary file found at
+	// startup has lapsed).
+	leaseUntil time.Time
+}
+
+func (en *downloadEntry) kind() types.DownloadKind {
+	if en.Kind == "" {
+		return types.DownloadKept
+	}
+	return en.Kind
 }
 
 type downloads struct {
@@ -115,7 +147,7 @@ func newDownloads(appPath string) *downloads {
 		return d
 	}
 	for _, en := range list {
-		if !isHexInfoHash(en.InfoHash) || en.FileIdx < 0 {
+		if !isHexInfoHash(en.InfoHash) || (en.FileIdx < 0 && (en.FileIdx != leftoverIdx || en.Kind != types.DownloadLeftover)) {
 			continue
 		}
 		en.InfoHash = strings.ToLower(en.InfoHash)
@@ -171,12 +203,12 @@ func (d *downloads) hasTorrent(ih string) bool {
 	return false
 }
 
-// background reports whether file idx of infoHash is an active (unpaused) download.
+// background reports whether file idx of infoHash is an active (unpaused) kept download.
 func (d *downloads) background(ih string, idx int) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	en, ok := d.entries[downloadKey{ih, idx}]
-	return ok && !en.Paused
+	return ok && en.kind() == types.DownloadKept && !en.Paused
 }
 
 // Download errors, aliased from types.
@@ -185,49 +217,114 @@ var (
 	ErrNoDownload        = types.ErrNoDownload
 )
 
-// AddDownload registers file idx of infoHash for a whole-file background
-// download, adding the torrent if needed. Adding an existing download unpauses
-// it.
-func (m *manager) AddDownload(infoHash string, idx int, opts types.AddOptions) (types.Download, error) {
+// AddDownload records file idx of infoHash, adding the torrent if needed.
+// A kept file is downloaded whole in the background; re-adding one unpauses
+// it. A temporary file has its start, end and the window at
+// req.StartFraction primed, and its lease renewed; adding a temporary file
+// that is already kept changes nothing but its origins, and adding a kept one
+// that is temporary promotes it. A leftover record of the torrent is dropped:
+// its folder is the new record's data.
+func (m *manager) AddDownload(infoHash string, idx int, opts types.AddOptions, req types.DownloadRequest) (types.Download, error) {
 	if m.mem != nil {
 		return types.Download{}, ErrDownloadsNeedDisk
 	}
 	if idx < 0 {
 		return types.Download{}, ErrNoDownload
 	}
+	kind := req.Kind
+	switch kind {
+	case "":
+		kind = types.DownloadKept
+	case types.DownloadKept, types.DownloadTemporary:
+	default:
+		return types.Download{}, types.ErrDownloadKind
+	}
 	ih := strings.ToLower(infoHash)
 	eng, err := m.EnsureEngine(ih, opts)
 	if err != nil {
 		return types.Download{}, err
 	}
+	e := eng.(*engine)
 	key := downloadKey{ih, idx}
 	m.dl.mu.Lock()
 	_, exists := m.dl.entries[key]
 	m.dl.mu.Unlock()
-	if !exists {
-		size, err := m.waitFileSize(eng.(*engine), idx)
-		if err != nil {
-			return types.Download{}, err
-		}
-		if err := m.makeRoom(size, key); err != nil {
+	if !exists && kind == types.DownloadKept {
+		if _, err := m.waitFileSize(e, idx); err != nil {
 			return types.Download{}, err
 		}
 	}
 	trackers := append(append([]string{}, opts.Trackers...), trackersFromSources(opts.Sources)...)
 	m.dl.mu.Lock()
+	delete(m.dl.entries, downloadKey{ih, leftoverIdx})
 	en, ok := m.dl.entries[key]
 	if !ok {
-		en = &downloadEntry{InfoHash: ih, FileIdx: idx, AddedAt: time.Now()}
+		en = &downloadEntry{InfoHash: ih, FileIdx: idx, Kind: kind, AddedAt: time.Now()}
 		m.dl.entries[key] = en
 	}
-	en.Paused = false
+	if kind == types.DownloadKept {
+		en.Kind = types.DownloadKept
+		en.Paused = false
+		en.leaseUntil = time.Time{}
+	}
+	keep := en.kind() == types.DownloadKept
+	if !keep {
+		en.leaseUntil = time.Now().Add(temporaryLease)
+	}
+	if req.Origin != "" {
+		en.Origins = mergeStrings(en.Origins, []string{req.Origin})
+	}
+	if req.Meta != nil && (req.Meta.MetaID != "" || req.Meta.VideoID != "") {
+		meta := *req.Meta
+		en.Meta = &meta
+	}
 	if len(trackers) > 0 {
 		en.Trackers = mergeStrings(en.Trackers, trackers)
 	}
 	m.dl.saveLocked()
 	m.dl.mu.Unlock()
-	m.startDownload(ih, idx)
+	e.setHeld(idx, !keep)
+	if keep {
+		m.startDownload(ih, idx)
+	} else {
+		e.PrimeFile(idx, req.StartFraction)
+	}
 	return m.downloadView(key), nil
+}
+
+// notePlayed records that a player opened file idx of infoHash: the file
+// becomes kept (origin "play") and downloads whole, so an episode that is
+// stopped still finishes. Called for every player reader (not probes).
+func (m *manager) notePlayed(ih string, idx int) {
+	if m.mem != nil || idx < 0 {
+		return
+	}
+	now := time.Now()
+	key := downloadKey{ih, idx}
+	m.dl.mu.Lock()
+	delete(m.dl.entries, downloadKey{ih, leftoverIdx})
+	en, ok := m.dl.entries[key]
+	if !ok {
+		en = &downloadEntry{InfoHash: ih, FileIdx: idx, Kind: types.DownloadKept, AddedAt: now}
+		m.dl.entries[key] = en
+	}
+	promoted := ok && en.kind() != types.DownloadKept
+	en.Kind = types.DownloadKept
+	en.leaseUntil = time.Time{}
+	en.Origins = mergeStrings(en.Origins, []string{"play"})
+	en.LastPlayed = &now
+	m.dl.saveLocked()
+	m.dl.mu.Unlock()
+	if !ok || promoted {
+		logging.For("engine").Info("keeping played file", "info_hash", ih, "file_idx", idx, "promoted", promoted)
+	}
+	m.mu.RLock()
+	e, loaded := m.engines[ih]
+	m.mu.RUnlock()
+	if loaded {
+		e.setHeld(idx, false)
+	}
+	m.startDownload(ih, idx)
 }
 
 // trackersFromSources keeps the tracker URLs of peerSearch sources ("tracker:<url>").
@@ -266,6 +363,14 @@ func (m *manager) startDownload(ih string, idx int) {
 	already := e.isBackgroundLocked(idx)
 	e.mu.Unlock()
 	if already {
+		return
+	}
+	if e.hasInfo() {
+		// Mark it now: a player's reader closing right after (notePlayed)
+		// would otherwise demote the file before the goroutine ran.
+		if m.dl.background(ih, idx) {
+			e.setBackground(idx, true)
+		}
 		return
 	}
 	go func() {
@@ -318,6 +423,29 @@ func (e *engine) isBackgroundLocked(idx int) bool {
 	return ok
 }
 
+// setHeld marks (or unmarks) file idx as a temporary record's file: its primed
+// pieces are kept when another file of the torrent is played (a measurement of
+// the next episode of the playing pack would otherwise read a demoted file).
+func (e *engine) setHeld(idx int, on bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.held == nil {
+		e.held = map[int]struct{}{}
+	}
+	if on {
+		e.held[idx] = struct{}{}
+	} else {
+		delete(e.held, idx)
+	}
+}
+
+// isWantedLocked reports whether file idx has a record that keeps it from
+// being demoted: a background (kept) download or a temporary one. e.mu held.
+func (e *engine) isWantedLocked(idx int) bool {
+	_, held := e.held[idx]
+	return held || e.isBackgroundLocked(idx)
+}
+
 // Downloads lists every download with its progress.
 func (m *manager) Downloads() []types.Download {
 	m.dl.mu.Lock()
@@ -355,6 +483,9 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 	if !ok {
 		return types.Download{InfoHash: k.ih, FileIdx: k.idx}
 	}
+	if en.kind() == types.DownloadLeftover {
+		return m.leftoverViewLocked(en)
+	}
 	now := time.Now()
 	if known {
 		if en.Name != name || en.Size != size || en.Path == "" {
@@ -385,6 +516,11 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 		state = types.DownloadComplete
 	case en.Paused:
 		state = types.DownloadPaused
+	case en.kind() == types.DownloadTemporary:
+		state = types.DownloadIdle
+		if loaded && en.rate > 0 {
+			state = types.DownloadDownloading
+		}
 	case loaded && known:
 		state = types.DownloadDownloading
 	}
@@ -392,10 +528,68 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 	if state != types.DownloadDownloading {
 		rate = 0
 	}
-	return types.Download{
-		InfoHash: en.InfoHash, FileIdx: en.FileIdx, Name: en.Name, Size: en.Size,
-		BytesCompleted: done, Rate: rate, State: state, Watched: en.Watched, AddedAt: en.AddedAt,
+	d := types.Download{
+		InfoHash: en.InfoHash, FileIdx: en.FileIdx, Kind: en.kind(), Origins: append([]string(nil), en.Origins...),
+		Name: en.Name, Size: en.Size, BytesCompleted: done, BytesOnDisk: m.fileOnDisk(en),
+		Rate: rate, State: state, Watched: en.Watched, AddedAt: en.AddedAt, LastPlayed: en.LastPlayed,
 	}
+	if en.Meta != nil {
+		meta := *en.Meta
+		d.Meta = &meta
+	}
+	return d
+}
+
+// fileOnDisk returns the allocated bytes of a recorded file (its final name
+// or its .part), 0 while its path is unknown.
+func (m *manager) fileOnDisk(en *downloadEntry) int64 {
+	if en.Path == "" || m.cfg.CacheRoot == "" {
+		return 0
+	}
+	p := filepath.Join(m.cfg.CacheRoot, en.InfoHash, filepath.FromSlash(en.Path))
+	for _, f := range []string{p, p + ".part"} {
+		if info, err := os.Stat(f); err == nil {
+			return allocatedSize(f, info)
+		}
+	}
+	return 0
+}
+
+// leftoverViewLocked is a leftover's public form: its folder's files and the
+// bytes they occupy. m.dl.mu held.
+func (m *manager) leftoverViewLocked(en *downloadEntry) types.Download {
+	onDisk, files := folderUsage(filepath.Join(m.cfg.CacheRoot, en.InfoHash))
+	if len(files) > 0 {
+		en.Files = files
+	}
+	return types.Download{
+		InfoHash: en.InfoHash, FileIdx: leftoverIdx, Kind: types.DownloadLeftover, Origins: []string{"leftover"},
+		Name: en.Name, Size: onDisk, BytesCompleted: onDisk, BytesOnDisk: onDisk,
+		State: types.DownloadIdle, AddedAt: en.AddedAt, Files: append([]string(nil), en.Files...),
+	}
+}
+
+// folderUsage returns the allocated bytes of every file under dir and their
+// paths relative to it (a torrent's partial files keep their .part suffix).
+func folderUsage(dir string) (int64, []string) {
+	var total int64
+	var files []string
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		total += allocatedSize(p, info)
+		if rel, err := filepath.Rel(dir, p); err == nil {
+			files = append(files, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(files)
+	return total, files
 }
 
 // UpdateDownload pauses/resumes a download or marks it watched.
@@ -441,13 +635,139 @@ func (m *manager) UpdateDownload(infoHash string, idx int, patch types.DownloadP
 // reclaims it later as usual).
 func (m *manager) RemoveDownload(infoHash string, idx int) error {
 	k := downloadKey{strings.ToLower(infoHash), idx}
+	if idx == leftoverIdx {
+		return m.RemoveTorrentData(k.ih)
+	}
 	if !m.deleteDownload(k) {
 		return ErrNoDownload
 	}
-	// Removals by a client (DELETE /downloads): logged so a download that
-	// disappears can be traced (budget evictions log their own line).
+	// Removals by a client (DELETE /downloads): logged so a record that
+	// disappears can be traced (lapsed leases log their own line).
 	logging.For("engine").Info("removed download on request", "info_hash", k.ih, "file_idx", k.idx)
 	return nil
+}
+
+// RemoveTorrentData forgets every record of a torrent and deletes its cache
+// folder. A torrent being read keeps its data until the janitor reclaims it
+// (it has no record left).
+func (m *manager) RemoveTorrentData(infoHash string) error {
+	ih := strings.ToLower(infoHash)
+	m.dl.mu.Lock()
+	found := false
+	for k := range m.dl.entries {
+		if k.ih == ih {
+			delete(m.dl.entries, k)
+			found = true
+		}
+	}
+	if found {
+		m.dl.saveLocked()
+	}
+	m.dl.mu.Unlock()
+	m.mu.Lock()
+	e, loaded := m.engines[ih]
+	if loaded {
+		e.mu.Lock()
+		reading := e.openReaders > 0
+		e.background = nil
+		e.held = nil
+		e.mu.Unlock()
+		if reading {
+			m.mu.Unlock()
+			e.stopNonBackground()
+			logging.For("engine").Info("removed torrent records on request (being read; data reclaimed later)", "info_hash", ih)
+			return nil
+		}
+		finish := m.beginPurge(ih, e)
+		m.mu.Unlock()
+		finish()
+		logging.For("engine").Info("removed torrent data on request", "info_hash", ih)
+		return nil
+	}
+	m.mu.Unlock()
+	dir := filepath.Join(m.cfg.CacheRoot, ih)
+	if _, err := os.Stat(dir); err != nil {
+		if found {
+			return nil
+		}
+		return ErrNoDownload
+	}
+	m.waitPurge(ih)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	logging.For("engine").Info("removed torrent data on request", "info_hash", ih)
+	return nil
+}
+
+// Disk reports the cache volume's free and total space and the bytes the
+// records' files occupy.
+func (m *manager) Disk() types.DiskInfo {
+	var used int64
+	for _, d := range m.Downloads() {
+		used += d.BytesOnDisk
+	}
+	free, total := diskSpace(m.cfg.CacheRoot)
+	return types.DiskInfo{Free: free, Total: total, Used: used}
+}
+
+// scanLeftovers records every torrent cache folder that has no record and no
+// loaded torrent as a leftover, and drops leftover records whose folder is
+// gone. Runs at start.
+func (m *manager) scanLeftovers() {
+	if m.mem != nil || m.cfg.CacheRoot == "" {
+		return
+	}
+	dirs, err := os.ReadDir(m.cfg.CacheRoot)
+	if err != nil {
+		return
+	}
+	present := map[string]os.DirEntry{}
+	for _, d := range dirs {
+		if d.IsDir() && isHexInfoHash(d.Name()) {
+			present[strings.ToLower(d.Name())] = d
+		}
+	}
+	m.mu.RLock()
+	loaded := make(map[string]bool, len(m.engines))
+	for ih := range m.engines {
+		loaded[ih] = true
+	}
+	m.mu.RUnlock()
+	m.dl.mu.Lock()
+	defer m.dl.mu.Unlock()
+	recorded := map[string]bool{}
+	changed := false
+	for k, en := range m.dl.entries {
+		if en.kind() == types.DownloadLeftover {
+			if _, ok := present[k.ih]; !ok {
+				delete(m.dl.entries, k)
+				changed = true
+			}
+			continue
+		}
+		recorded[k.ih] = true
+	}
+	for ih, d := range present {
+		key := downloadKey{ih, leftoverIdx}
+		if _, ok := m.dl.entries[key]; ok || recorded[ih] || loaded[ih] {
+			continue
+		}
+		added := time.Now()
+		if info, err := d.Info(); err == nil {
+			added = info.ModTime()
+		}
+		name := ""
+		if sub, err := os.ReadDir(filepath.Join(m.cfg.CacheRoot, d.Name())); err == nil && len(sub) == 1 {
+			name = strings.TrimSuffix(sub[0].Name(), ".part")
+		}
+		m.dl.entries[key] = &downloadEntry{InfoHash: ih, FileIdx: leftoverIdx, Kind: types.DownloadLeftover, Name: name, AddedAt: added}
+		changed = true
+		logging.For("engine").Info("found leftover cache folder", "info_hash", ih)
+	}
+	if changed {
+		m.dl.saveLocked()
+	}
 }
 
 // deleteDownload forgets a download and deletes its data: the whole torrent
@@ -475,6 +795,7 @@ func (m *manager) deleteDownload(k downloadKey) bool {
 		e.mu.Unlock()
 		if reading {
 			m.mu.Unlock()
+			e.setHeld(k.idx, false)
 			e.setBackground(k.idx, false)
 			return true
 		}
@@ -562,65 +883,6 @@ func (m *manager) waitFileSize(e *engine, idx int) (int64, error) {
 	return files[idx].Length(), nil
 }
 
-// SetDownloadBudgetFn sets the function returning the download budget in
-// bytes (<0 unlimited), read on every add.
-func (m *manager) SetDownloadBudgetFn(fn func() int64) {
-	m.dl.mu.Lock()
-	m.dlBudget = fn
-	m.dl.mu.Unlock()
-}
-
-// makeRoom deletes completed downloads until need more bytes fit the budget:
-// watched ones first, then unwatched ones, oldest first within each. Neither
-// incomplete downloads nor torrents being read are deleted. keep is the
-// download being added.
-func (m *manager) makeRoom(need int64, keep downloadKey) error {
-	m.dl.mu.Lock()
-	budget := defaultDownloadBudget
-	if m.dlBudget != nil {
-		budget = m.dlBudget()
-	}
-	var used int64
-	var cands []*downloadEntry
-	for k, en := range m.dl.entries {
-		if k == keep {
-			continue
-		}
-		used += en.Size
-		if en.Complete {
-			c := *en
-			cands = append(cands, &c)
-		}
-	}
-	m.dl.mu.Unlock()
-	if budget < 0 || used+need <= budget {
-		return nil
-	}
-	sort.Slice(cands, func(i, j int) bool {
-		if cands[i].Watched != cands[j].Watched {
-			return cands[i].Watched
-		}
-		return cands[i].AddedAt.Before(cands[j].AddedAt)
-	})
-	for _, c := range cands {
-		if used+need <= budget {
-			break
-		}
-		if m.torrentReading(c.InfoHash) {
-			continue
-		}
-		if m.deleteDownload(downloadKey{c.InfoHash, c.FileIdx}) {
-			used -= c.Size
-			logging.For("engine").Info("deleted download for budget", "info_hash", c.InfoHash, "file", c.Name, "watched", c.Watched, "freed_bytes", c.Size)
-		}
-	}
-	if used+need > budget {
-		return fmt.Errorf("%w: needs %.1f GB, downloads that can't be deleted use %.1f of %.1f GB",
-			types.ErrDownloadBudget, float64(need)/1e9, float64(used)/1e9, float64(budget)/1e9)
-	}
-	return nil
-}
-
 // torrentReading reports whether infoHash is loaded with open readers.
 func (m *manager) torrentReading(ih string) bool {
 	m.mu.RLock()
@@ -651,6 +913,7 @@ func (m *manager) tickDownloads() {
 	if m.mem != nil {
 		return
 	}
+	m.expireTemporary()
 	m.dl.mu.Lock()
 	type torrentState struct {
 		trackers   []string
@@ -658,6 +921,9 @@ func (m *manager) tickDownloads() {
 	}
 	byTorrent := map[string]*torrentState{}
 	for k, en := range m.dl.entries {
+		if en.kind() != types.DownloadKept {
+			continue
+		}
 		st := byTorrent[k.ih]
 		if st == nil {
 			st = &torrentState{}
@@ -698,6 +964,28 @@ func (m *manager) tickDownloads() {
 		}
 		if loaded {
 			m.unloadIfDone(ih, e)
+		}
+	}
+}
+
+// expireTemporary deletes temporary files whose lease lapsed, unless a reader
+// has the torrent open (the player is about to make it kept).
+func (m *manager) expireTemporary() {
+	now := time.Now()
+	m.dl.mu.Lock()
+	var lapsed []downloadKey
+	for k, en := range m.dl.entries {
+		if en.kind() == types.DownloadTemporary && now.After(en.leaseUntil) {
+			lapsed = append(lapsed, k)
+		}
+	}
+	m.dl.mu.Unlock()
+	for _, k := range lapsed {
+		if m.torrentReading(k.ih) {
+			continue
+		}
+		if m.deleteDownload(k) {
+			logging.For("engine").Info("removed temporary file (lease lapsed)", "info_hash", k.ih, "file_idx", k.idx)
 		}
 	}
 }
@@ -797,7 +1085,7 @@ func (e *engine) stopNonBackground() {
 	e.mu.Lock()
 	var stop []int
 	for i := range files {
-		if e.reading[i] == 0 && !e.isBackgroundLocked(i) {
+		if e.reading[i] == 0 && !e.isWantedLocked(i) {
 			stop = append(stop, i)
 			delete(e.selected, i)
 			delete(e.primed, i)

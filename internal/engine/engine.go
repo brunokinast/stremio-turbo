@@ -93,19 +93,22 @@ type engine struct {
 	// under the manager lock. Set once at creation.
 	optsSource func() types.Options
 
-	mu               sync.Mutex
-	last             speedSample
-	lastDLSpeed      float64          // cached bytes/sec from last Stats(); used for readahead scaling
-	selected         map[int]struct{} // file indices marked for background download
-	primed           map[int]struct{} // file indices whose moov/header pieces are primed (once each)
-	resumeFrac       map[int]float64  // file idx -> where PrimeFile said playback starts (fraction); its window is primed too
-	lastAccess       time.Time        // last real use (EnsureEngine reuse, NewReader, reader Close, per-torrent Stats); global AllStats does not bump it; drives janitor LRU/idle
-	openReaders      int              // active NewReader handles; >0 pins the torrent against eviction
-	reading          map[int]int      // file idx -> open reader count; a file with readers is never demoted
-	streams          sync.Map         // *pinnedReader -> struct{}: open stream readers, for the trace's blocked-piece samples
-	prefetched       map[int]struct{} // source file idx -> next-file boundary already prefetched (once each)
-	background       map[int]struct{} // file indices downloaded whole in the background (downloads.go); never demoted
-	onceMetaPriority sync.Once        // ensures boundary-piece prioritization runs exactly once
+	mu          sync.Mutex
+	last        speedSample
+	lastDLSpeed float64          // cached bytes/sec from last Stats(); used for readahead scaling
+	selected    map[int]struct{} // file indices marked for background download
+	primed      map[int]struct{} // file indices whose moov/header pieces are primed (once each)
+	resumeFrac  map[int]float64  // file idx -> where PrimeFile said playback starts (fraction); its window is primed too
+	lastAccess  time.Time        // last real use (EnsureEngine reuse, NewReader, reader Close, per-torrent Stats); global AllStats does not bump it; drives janitor LRU/idle
+	openReaders int              // active NewReader handles; >0 pins the torrent against eviction
+	reading     map[int]int      // file idx -> open reader count; a file with readers is never demoted
+	streams     sync.Map         // *pinnedReader -> struct{}: open stream readers, for the trace's blocked-piece samples
+	prefetched  map[int]struct{} // source file idx -> next-file boundary already prefetched (once each)
+	background  map[int]struct{} // file indices downloaded whole in the background (downloads.go); never demoted
+	held        map[int]struct{} // file indices of temporary records (downloads.go): primed, never demoted
+	// onPlay is told when a player (not a probe) opens a file (manager.notePlayed).
+	onPlay           func(ih string, idx int)
+	onceMetaPriority sync.Once // ensures boundary-piece prioritization runs exactly once
 
 	// fileMu serializes the choice of which file's boundary pieces are primed:
 	// the largest-file guess (applyBoundaryPriorities), an explicit PrimeFile,
@@ -175,7 +178,7 @@ func (e *engine) ensureDownloading(idx int) {
 	_, already := e.selected[idx]
 	demote := make([]int, 0, len(e.selected))
 	for i := range e.selected {
-		if i != idx && e.reading[i] == 0 && !e.isBackgroundLocked(i) {
+		if i != idx && e.reading[i] == 0 && !e.isWantedLocked(i) {
 			demote = append(demote, i)
 			delete(e.selected, i)
 			delete(e.primed, i)
@@ -185,7 +188,7 @@ func (e *engine) ensureDownloading(idx int) {
 	// Files primed only by GuessFileIdx (never selected) must release their
 	// boundary pieces once another file is the one being played.
 	for i := range e.primed {
-		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 && !e.isBackgroundLocked(i) {
+		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 && !e.isWantedLocked(i) {
 			demote = append(demote, i)
 			delete(e.primed, i)
 			delete(e.prefetched, i)
@@ -286,8 +289,6 @@ type manager struct {
 	// completion is the disk storage's piece-completion database (nil with the
 	// in-RAM cache); deleting one downloaded file marks its pieces incomplete.
 	completion storage.PieceCompletion
-	// dlBudget returns the download budget in bytes (<0 unlimited); nil = default.
-	dlBudget func() int64
 	// peerHints holds peers recent scrapes found, for torrents opened later.
 	peerHints peerHints
 }
@@ -538,7 +539,8 @@ func New(cfg types.Config) (types.EngineManager, error) {
 		memStore.refetch = m.refetchPiece
 	}
 	m.keepDHTNodes(cfg.DHTNodesFile)
-	go m.tickDownloads() // resume downloads left incomplete by the last run
+	m.scanLeftovers()    // cache folders with no record (earlier runs) become leftovers
+	go m.tickDownloads() // resume downloads left incomplete by the last run; drop lapsed temporaries
 	return m, nil
 }
 
@@ -688,6 +690,7 @@ func (m *manager) EnsureEngine(infoHash string, opts types.AddOptions) (types.En
 			mem:        m.mem,
 			trace:      m.trace,
 			chosenFile: -1,
+			onPlay:     m.notePlayed,
 		}
 		m.engines[ih] = e
 		m.mu.Unlock()
@@ -1553,7 +1556,12 @@ func (e *engine) newReader(idx int, probe bool) (io.ReadSeekCloser, int64, error
 		// The player's readers drive priority from here: a pinned head or tail at
 		// Now would compete with the piece the player is blocked on.
 		e.releaseOwnBoundary(idx)
-		e.prefetchNext(idx) // opportunistically warm the next episode's header (binge UX)
+		// A played file is kept and finishes downloading (downloads.go). The
+		// next episode is the client's to choose (it may be another torrent),
+		// so the next file of a pack is no longer prefetched here.
+		if e.onPlay != nil {
+			e.onPlay(e.infoHash, idx)
+		}
 	}
 	if e.trace != nil {
 		e.trace.setFiles(e.infoHash, fileBeginPieces(files))
@@ -1826,7 +1834,7 @@ func (p *pinnedReader) Close() error {
 		// A probe's close leaves the file as it is: the player is about to open
 		// it. If none does, the idle timeout drops the torrent.
 		// A background download keeps its file downloading (downloads.go).
-		if p.e.reading[p.idx] == 0 && !p.probe && !p.e.isBackgroundLocked(p.idx) {
+		if p.e.reading[p.idx] == 0 && !p.probe && !p.e.isWantedLocked(p.idx) {
 			delete(p.e.selected, p.idx)
 			delete(p.e.primed, p.idx)
 			demote = true
@@ -1837,7 +1845,7 @@ func (p *pinnedReader) Close() error {
 			// the unlock above and now; demoting then would starve it.
 			p.e.mu.Lock()
 			_, sel := p.e.selected[p.idx]
-			still := p.e.reading[p.idx] == 0 && !sel && !p.e.isBackgroundLocked(p.idx)
+			still := p.e.reading[p.idx] == 0 && !sel && !p.e.isWantedLocked(p.idx)
 			if still {
 				delete(p.e.prefetched, p.idx)
 				files := p.e.t.Files()
@@ -1868,42 +1876,6 @@ func (p *pinnedReader) adjustReadahead() {
 	sp := p.e.lastDLSpeed
 	p.e.mu.Unlock()
 	p.tr.SetReadahead(p.e.streamReadahead(sp))
-}
-
-// prefetchNext opportunistically warms the NEXT video file's header and tail
-// (moov) at low (Normal) priority, so advancing to the next episode of a season
-// pack starts fast. It touches only a few boundary pieces (not the whole file)
-// and never raises them above the active stream's read window, so it uses only
-// spare bandwidth and cannot starve current playback. Runs once per source file;
-// the prefetch target is not added to e.selected, so demotion never touches it.
-func (e *engine) prefetchNext(idx int) {
-	if idx < 0 || !e.hasInfo() {
-		return
-	}
-	e.mu.Lock()
-	if e.prefetched == nil {
-		e.prefetched = map[int]struct{}{}
-	}
-	if _, ok := e.prefetched[idx]; ok {
-		e.mu.Unlock()
-		return
-	}
-	e.prefetched[idx] = struct{}{}
-	e.mu.Unlock()
-
-	next := e.nextVideoIdx(idx)
-	if next < 0 {
-		return
-	}
-	files := e.t.Files()
-	f := files[next]
-	begin := f.BeginPieceIndex()
-	end := f.EndPieceIndex()
-	_ = begin
-	// Raise-only: a boundary piece already at Now (e.g. shared with the file
-	// being played) must never be lowered to Normal.
-	e.raiseBoundary(prefetchSpans(begin, end), torrent.PiecePriorityNormal, e.setPiecePriority)
-	logging.For("engine").Debug("prefetched next-file boundary", "info_hash", e.infoHash, "file_idx", next)
 }
 
 // prefetchSpans returns the header and tail piece spans prefetchNext raises for
@@ -2345,7 +2317,7 @@ func (e *engine) PrimeFile(idx int, startFraction float64) {
 	e.mu.Lock()
 	var demote []int
 	for i := range e.primed {
-		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 && !e.isBackgroundLocked(i) {
+		if _, sel := e.selected[i]; !sel && i != idx && e.reading[i] == 0 && !e.isWantedLocked(i) {
 			demote = append(demote, i)
 			delete(e.primed, i)
 			delete(e.prefetched, i)
