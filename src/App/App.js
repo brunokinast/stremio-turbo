@@ -7,6 +7,7 @@ const { createPath, useLocation, useNavigate } = require('react-router');
 const { useCore } = require('stremio/core');
 const { Routes, useGoBack } = require('stremio-router');
 const { Chromecast, ServicesProvider, GamepadProvider } = require('stremio/services');
+const { PortCheck } = require('stremio/smartPlay');
 const { FullscreenProvider, ToastProvider, TooltipProvider, ShortcutsProvider, DiscordProvider, CONSTANTS, useBinaryState, useProfile, withCoreSuspender, usePlatform } = require('stremio/common');
 const ServicesToaster = require('./ServicesToaster');
 const SearchParamsHandler = require('./SearchParamsHandler');
@@ -179,6 +180,7 @@ const App = () => {
                                         gamepadModalOpen && <GamepadModal onClose={closeGamepadModal}/>
                                     }
                                     <ServicesToaster />
+                                    <PortCheck />
                                     <SearchParamsHandler />
                                     <DeepLinkHandler />
                                     <ShellOpenHandler />

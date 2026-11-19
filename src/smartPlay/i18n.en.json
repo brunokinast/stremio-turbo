@@ -38,5 +38,6 @@
     "SMART_PLAY_DOWNLOAD_PROGRESS": "{{percent}}% · {{rate}} MB/s · {{minutes}} min",
     "SMART_PLAY_DOWNLOAD_PERCENT": "{{percent}}%",
     "SMART_PLAY_REMOVE_DOWNLOAD": "Remove download",
-    "SMART_PLAY_AHEAD_TRIAL": "Downloading {{episode}} ahead in {{quality}} from the season pack you're playing ({{size}} GB); its speed is checked in a minute"
+    "SMART_PLAY_AHEAD_TRIAL": "Downloading {{episode}} ahead in {{quality}} from the season pack you're playing ({{size}} GB); its speed is checked in a minute",
+    "SMART_PLAY_PORT_UNREACHABLE": "No peer could connect to you (port {{port}}). Small swarms will be slow: forward this port on your router."
 }
