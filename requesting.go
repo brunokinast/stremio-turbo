@@ -456,9 +456,11 @@ func (p *PeerConn) applyRequestState(next desiredRequestState) {
 	critical := next.Requests.critical
 	now := time.Now()
 	originalRequestCount := current.Requests.GetCardinality()
+	// Once per pass: it depends on the time, and each request below is checked against it too.
+	limit := p.nominalMaxRequests()
 	for requestHeap.Len() > 0 {
 		numPending := maxRequests(current.Requests.GetCardinality() + current.Cancelled.GetCardinality())
-		if limit := p.nominalMaxRequests(); numPending >= limit {
+		if numPending >= limit {
 			// Only critical requests, which sort first, may go over, and only by a few.
 			if critical == nil || numPending >= limit+criticalRequestsOverLimit ||
 				!isCriticalRequest(critical, next.Requests.requestIndexes[0]) {
@@ -496,7 +498,7 @@ func (p *PeerConn) applyRequestState(next desiredRequestState) {
 					f(CriticalRequestStolenEvent{&existing.Peer, &p.Peer, req, from, to})
 				}
 				t.cancelRequest(req)
-				more = p.mustRequest(req)
+				more = p.mustRequest(req, limit)
 				if !more {
 					break
 				}
@@ -518,7 +520,7 @@ func (p *PeerConn) applyRequestState(next desiredRequestState) {
 			}
 			t.cancelRequest(req)
 		}
-		more = p.mustRequest(req)
+		more = p.mustRequest(req, limit)
 		if !more {
 			break
 		}

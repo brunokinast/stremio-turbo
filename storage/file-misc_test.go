@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-quicktest/qt"
@@ -90,4 +93,15 @@ func TestExtentCompleteRequiredLengths(t *testing.T) {
 	}))
 	qt.Check(t, qt.HasLen(extentCompleteRequiredLengths(info, 5, 0), 0))
 	check(6, 1)
+}
+
+// A promoted (read-only) file has nothing to flush: fsync must not fail on it, or every checkpoint
+// that touches it (a boundary piece shared with the next file) fails and is retried forever.
+func TestFsyncReadOnlyFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "promoted")
+	qt.Assert(t, qt.IsNil(os.WriteFile(p, []byte("data"), 0o644)))
+	qt.Assert(t, qt.IsNil(os.Chmod(p, 0o444)))
+	t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
+	qt.Check(t, qt.IsNil(fsync(p)))
+	qt.Check(t, qt.ErrorIs(fsync(filepath.Join(t.TempDir(), "missing")), fs.ErrNotExist))
 }

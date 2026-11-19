@@ -2013,22 +2013,25 @@ func (cn *PeerConn) shouldRequest(r RequestIndex) error {
 	return nil
 }
 
-func (cn *PeerConn) mustRequest(r RequestIndex) bool {
-	more, err := cn.request(r)
+// mustRequest issues r within limit outstanding requests. The caller computes limit once per
+// request-state pass: nominalMaxRequests depends on the time (the queue follows a decaying recent
+// rate), so recomputing it here could find it smaller than the caller's own check did and panic.
+func (cn *PeerConn) mustRequest(r RequestIndex, limit maxRequests) bool {
+	more, err := cn.request(r, limit)
 	if err != nil {
 		panic(err)
 	}
 	return more
 }
 
-func (cn *PeerConn) request(r RequestIndex) (more bool, err error) {
+func (cn *PeerConn) request(r RequestIndex, limit maxRequests) (more bool, err error) {
 	if err := cn.shouldRequest(r); err != nil {
 		panic(err)
 	}
 	if cn.requestState.Requests.Contains(r) {
 		return true, nil
 	}
-	if maxRequests(cn.requestState.Requests.GetCardinality()) >= cn.nominalMaxRequests()+cn.t.criticalExtraRequests() {
+	if maxRequests(cn.requestState.Requests.GetCardinality()) >= limit+cn.t.criticalExtraRequests() {
 		return true, errors.New("too many outstanding requests")
 	}
 	cn.requestState.Requests.Add(r)

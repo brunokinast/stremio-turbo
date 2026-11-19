@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -31,6 +33,13 @@ func minFileLengthsForTorrentExtent(
 func fsync(filePath string) (err error) {
 	f, err := os.OpenFile(filePath, os.O_WRONLY, filePerm)
 	if err != nil {
+		// A read-only file is a promoted part file (promotePartFile flushes before renaming and
+		// clearing the write bits), so nothing is pending. Failing here made every later
+		// checkpoint touching it fail too, e.g. a boundary piece it shares with a neighbouring
+		// file that completes after it, so those completions were never checkpointed.
+		if errors.Is(err, fs.ErrPermission) && isReadOnlyFile(filePath) {
+			return nil
+		}
 		return
 	}
 	defer f.Close()
@@ -100,4 +109,10 @@ type fileExtra struct {
 
 func (f *fileExtra) partFilePath() string {
 	return f.safeOsPath + ".part"
+}
+
+// Whether the file exists with no write permission bits.
+func isReadOnlyFile(filePath string) bool {
+	fi, err := os.Stat(filePath)
+	return err == nil && fi.Mode().Perm()&0o222 == 0
 }
