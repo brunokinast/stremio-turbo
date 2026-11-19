@@ -35,6 +35,9 @@ const REPLAN_EVERY = 5 * 60 * 1000;
 const WATCHED_AT = 0.9;
 // How long a download runs before its actual average rate is checked.
 const CHECK_AFTER = 4 * 60 * 1000;
+// The same for a download queued on trial (an episode of the torrent being
+// played), whose own progress is its only measurement.
+const CHECK_TRIAL = 60 * 1000;
 // Episodes ahead downloaded at most.
 const MAX_AHEAD = 2;
 // Sources whose rate is measured when none is remembered, and for how long.
@@ -80,6 +83,9 @@ type AheadEntry = {
     // rate since is checked against what it needs (plan).
     at: number,
     bytes?: number,
+    // Queued without a measurement (same torrent as the one playing): checked
+    // after CHECK_TRIAL instead of CHECK_AFTER.
+    trial?: boolean,
     // Sources found too slow for this episode, not chosen again.
     slow?: string[],
 };
@@ -125,6 +131,8 @@ type AheadChoice = {
     // Seconds the download is expected to take at the full measured rate (0:
     // already on disk).
     eta: number,
+    // Queued on trial: its rate is unknown until its first check.
+    trial: boolean,
 };
 
 // Whether a source of `size` bytes downloading at `rate` finishes ahead of
@@ -285,13 +293,14 @@ const trace = (entry: object) => {
     }
 };
 
-const describe = (sources: RankedSource[], rateOf: (source: RankedSource) => number | null, windowSeconds: number) => sources.map((source) => {
+const describe = (sources: RankedSource[], rateOf: (source: RankedSource) => number | null, windowSeconds: number, basis: (source: RankedSource) => string) => sources.map((source) => {
     const rate = rateOf(source);
     return {
         infoHash: source.infoHash.slice(0, 8),
         fileIdx: source.fileIdx,
         gb: source.size !== null ? Math.round(source.size / 1e8) / 10 : null,
-        mbps: rate !== null ? Math.round(rate / 1e5) / 10 : null,
+        mbps: rate !== null && Number.isFinite(rate) ? Math.round(rate / 1e5) / 10 : null,
+        basis: basis(source),
         fits: source.size !== null && rate !== null && fitsWindow(source.size, rate, windowSeconds),
     };
 });
@@ -300,7 +309,7 @@ const describe = (sources: RankedSource[], rateOf: (source: RankedSource) => num
 // passed, else null.
 const averageRate = (known: AheadEntry, entry: Download): number | null => {
     const seconds = (Date.now() - known.at) / 1000;
-    return known.bytes !== undefined && seconds * 1000 >= CHECK_AFTER ? Math.max(0, entry.bytesCompleted - known.bytes) / seconds : null;
+    return known.bytes !== undefined && seconds * 1000 >= (known.trial ? CHECK_TRIAL : CHECK_AFTER) ? Math.max(0, entry.bytesCompleted - known.bytes) / seconds : null;
 };
 
 // Queues the first of the next MAX_AHEAD episodes not downloaded yet, one at
@@ -345,10 +354,21 @@ const plan = async (ctx: PlanContext): Promise<PlanResult> => {
         if (ctx.playingInfoHash !== null) {
             keep.add(ctx.playingInfoHash);
         }
-        // Only a rate measured now qualifies a source; a remembered one can
-        // only rule it out (one learnt from a read of data already on disk is
-        // far above the swarm's rate). Sources found too slow are skipped.
-        const rateOf = (source: RankedSource) => slow.has(source.infoHash) ? null : meter.rate(source.infoHash);
+        // A copy already complete on disk fits. A source in the torrent being
+        // played can't be measured by opening it (the server holds a playing
+        // torrent's other files back, so a probe gets almost nothing): it
+        // counts as fitting on trial, and its own download progress is
+        // checked after CHECK_TRIAL.
+        const onDisk = new Set(downloads.filter((d) => d.state === 'complete').map((d) => `${d.infoHash} ${d.fileIdx}`));
+        const isOnDisk = (source: RankedSource) => onDisk.has(`${source.infoHash} ${source.fileIdx}`);
+        const isTrial = (source: RankedSource) => source.infoHash === ctx.playingInfoHash && !isOnDisk(source);
+        // Otherwise only a rate measured now qualifies a source; a remembered
+        // one can only rule it out (one learnt from a read of data already on
+        // disk is far above the swarm's rate). Sources found too slow are
+        // skipped.
+        const rateOf = (source: RankedSource) => slow.has(source.infoHash) ? null :
+            isOnDisk(source) || isTrial(source) ? Infinity : meter.rate(source.infoHash);
+        const basis = (source: RankedSource) => slow.has(source.infoHash) ? 'slow' : isOnDisk(source) ? 'disk' : isTrial(source) ? 'trial' : 'measured';
         const ruledOut = (source: RankedSource) => {
             const remembered = knownRate(new RateMeter(), source, ctx.runtime);
             return slow.has(source.infoHash) || (remembered !== null && source.size !== null && !fitsWindow(source.size, remembered.rate, windowSeconds));
@@ -373,7 +393,7 @@ const plan = async (ctx: PlanContext): Promise<PlanResult> => {
                 await measure(ctx.baseUrl, unknown, meter);
             }
             const fit = chooseFitting(group.sources, rateOf, windowSeconds);
-            trace({ video: video.id, windowSeconds: Math.round(windowSeconds), left: Math.round(ctx.left), runtime: Math.round(ctx.runtime), k, group: group.label, sources: describe(group.sources, rateOf, windowSeconds), chosen: fit?.source.infoHash.slice(0, 8) ?? null });
+            trace({ video: video.id, windowSeconds: Math.round(windowSeconds), left: Math.round(ctx.left), runtime: Math.round(ctx.runtime), k, group: group.label, sources: describe(group.sources, rateOf, windowSeconds, basis), chosen: fit?.source.infoHash.slice(0, 8) ?? null });
             if (fit === null) {
                 continue;
             }
@@ -386,12 +406,14 @@ const plan = async (ctx: PlanContext): Promise<PlanResult> => {
                 return { kind: 'full', video, reason: e instanceof Error ? e.message : String(e) };
             }
             closeMeasured(source.infoHash);
-            rememberAhead(ctx.meta.id, video.id, { infoHash: source.infoHash, fileIdx: source.fileIdx!, bytes: added.bytesCompleted, slow: Array.from(slow) });
             // What's left to fetch (part may be on disk already), at the full rate.
             const left = Math.max(0, added.size - added.bytesCompleted);
+            const done = added.state === 'complete' || left === 0;
+            const trial = !done && isTrial(source);
+            rememberAhead(ctx.meta.id, video.id, { infoHash: source.infoHash, fileIdx: source.fileIdx!, bytes: added.bytesCompleted, trial, slow: Array.from(slow) });
             const rate = rateOf(source);
-            const eta = added.state === 'complete' || left === 0 ? 0 : rate !== null && rate > 0 ? left / rate : fit.eta;
-            return { kind: 'queued', video, choice: { source, tierLabel: group.label, eta }, stepped: g > 0, replaced };
+            const eta = done ? 0 : rate !== null && Number.isFinite(rate) && rate > 0 ? left / rate : fit.eta;
+            return { kind: 'queued', video, choice: { source, tierLabel: group.label, eta, trial }, stepped: g > 0, replaced };
         }
         closeMeasured(null);
         if (order.length === 0) {
@@ -404,7 +426,7 @@ const plan = async (ctx: PlanContext): Promise<PlanResult> => {
 
 type Notify = (result: Exclude<PlanResult, null>, label: string) => void;
 
-const runPlan = (ctx: PlanContext, notify: Notify) => {
+const runPlan = (ctx: PlanContext, notify: Notify, done?: (result: PlanResult) => void) => {
     if (planning || !isAheadEnabled()) {
         return;
     }
@@ -414,6 +436,7 @@ const runPlan = (ctx: PlanContext, notify: Notify) => {
             if (result !== null) {
                 notify(result, episodeLabel(result.video));
             }
+            done?.(result);
         })
         .catch(() => undefined)
         .finally(() => {
@@ -443,6 +466,9 @@ const useDownloadAhead = ({ baseUrl, addons, meta, videoId, playingInfoHash, pla
     const lastTime = useRef<number | null>(null);
     const lastAt = useRef<number | null>(null);
     const lastPlan = useRef<number | null>(null);
+    // Until the next plan: REPLAN_EVERY, or just past CHECK_TRIAL after a
+    // download was queued on trial (counted from when it was queued).
+    const replanAfter = useRef(REPLAN_EVERY);
     const ctxRef = useRef<PlanContext | null>(null);
     const notifyRef = useRef(notify);
     notifyRef.current = notify;
@@ -484,10 +510,16 @@ const useDownloadAhead = ({ baseUrl, addons, meta, videoId, playingInfoHash, pla
         if (prev !== null && prevAt !== null && paused === false && time > prev && time - prev <= (now - prevAt) * 2 + 1000) {
             played.current += Math.min(time - prev, now - prevAt) / 1000;
         }
-        const due = lastPlan.current === null ? played.current >= PLAN_AFTER : now - lastPlan.current >= REPLAN_EVERY && paused === false;
+        const due = lastPlan.current === null ? played.current >= PLAN_AFTER : now - lastPlan.current >= replanAfter.current && paused === false;
         if (due && ctxRef.current !== null) {
             lastPlan.current = now;
-            runPlan(ctxRef.current, notifyRef.current);
+            replanAfter.current = REPLAN_EVERY;
+            runPlan(ctxRef.current, notifyRef.current, (result) => {
+                if (result?.kind === 'queued' && result.choice.trial) {
+                    lastPlan.current = Date.now();
+                    replanAfter.current = CHECK_TRIAL + 5000;
+                }
+            });
         }
     }, [time, paused]);
 

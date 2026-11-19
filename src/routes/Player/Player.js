@@ -115,7 +115,7 @@ const Player = () => {
             const { source, tierLabel, eta } = result.choice;
             toast.show({
                 type: 'info',
-                title: t(eta === 0 ? 'SMART_PLAY_AHEAD_ON_DISK' : result.stepped ? 'SMART_PLAY_AHEAD_QUEUED_LOWER' : 'SMART_PLAY_AHEAD_QUEUED', {
+                title: t(result.choice.trial ? 'SMART_PLAY_AHEAD_TRIAL' : eta === 0 ? 'SMART_PLAY_AHEAD_ON_DISK' : result.stepped ? 'SMART_PLAY_AHEAD_QUEUED_LOWER' : 'SMART_PLAY_AHEAD_QUEUED', {
                     episode,
                     quality: tierLabel,
                     size: (source.size / 1e9).toFixed(1),
