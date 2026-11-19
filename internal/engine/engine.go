@@ -34,6 +34,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/mse"
+	"github.com/anacrolix/torrent/storage"
 	"golang.org/x/net/proxy"
 	"golang.org/x/time/rate"
 
@@ -282,6 +283,11 @@ type manager struct {
 
 	// dl is the background-download registry (downloads.go).
 	dl *downloads
+	// completion is the disk storage's piece-completion database (nil with the
+	// in-RAM cache); deleting one downloaded file marks its pieces incomplete.
+	completion storage.PieceCompletion
+	// dlBudget returns the download budget in bytes (<0 unlimited); nil = default.
+	dlBudget func() int64
 	// peerHints holds peers recent scrapes found, for torrents opened later.
 	peerHints peerHints
 }
@@ -448,6 +454,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	// closes it (see Close).
 	var storageCloser io.Closer
 	var memStore *memStorage
+	var pieceCompletion storage.PieceCompletion
 	if cfg.MemoryCacheSize > 0 {
 		ms := newMemStorage(cfg.MemoryCacheSize)
 		cc.DefaultStorage = ms
@@ -455,7 +462,8 @@ func New(cfg types.Config) (types.EngineManager, error) {
 		memStore = ms
 		logging.For("engine").Info("in-RAM piece cache enabled; piece data not written to disk", "bytes", cfg.MemoryCacheSize)
 	} else {
-		fs := newFileStorage(cfg.CacheRoot, cfg.StorageMmap)
+		fs, pc := newFileStorage(cfg.CacheRoot, cfg.StorageMmap)
+		pieceCompletion = pc
 		cc.DefaultStorage = fs
 		storageCloser = fs
 		fileIO := "classic"
@@ -521,6 +529,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 		establishedConnsPerTorrent: est,
 		maxEngines:                 maxEnginesFromEnv(),
 		dl:                         newDownloads(cfg.AppPath),
+		completion:                 pieceCompletion,
 	}
 	// Wire the evicted-piece re-download hook now that the manager (and its
 	// engine map) exists. No torrents are added until EnsureEngine, so this is

@@ -635,6 +635,14 @@ var ErrNoDownload = errors.New("no such download")
 // ErrDownloadsNeedDisk is returned when the engine keeps pieces in RAM only.
 var ErrDownloadsNeedDisk = errors.New("downloads need the disk piece cache")
 
+// ErrDownloadBudget is returned when a new download doesn't fit the download
+// budget even after deleting the completed downloads that can be deleted.
+var ErrDownloadBudget = errors.New("download budget exceeded")
+
+// ErrDownloadNoMetadata is returned when a new download's torrent metadata
+// (needed for the file's size) did not arrive in time; retry later.
+var ErrDownloadNoMetadata = errors.New("torrent metadata not available yet")
+
 // DownloadState is a download's progress state.
 type DownloadState string
 

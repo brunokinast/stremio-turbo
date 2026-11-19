@@ -118,9 +118,9 @@ func writeDownloadErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, types.ErrNoDownload):
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-	case errors.Is(err, types.ErrDownloadsNeedDisk):
+	case errors.Is(err, types.ErrDownloadsNeedDisk), errors.Is(err, types.ErrDownloadBudget):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
-	case errors.Is(err, types.ErrTooManyEngines):
+	case errors.Is(err, types.ErrTooManyEngines), errors.Is(err, types.ErrDownloadNoMetadata):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
 	default:
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})

@@ -266,32 +266,17 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 
 	// Wire the cache-eviction janitor without adding to the types interface.
 	// StartJanitor is detected via structural type assertion on the concrete *manager.
+	// Contract 1: nil/unknown/non-numeric => -1 (unlimited); numeric =>
+	// int64(n); a negative number is normalized to -1. engine.evict
+	// interprets <0 as unlimited, 0 as "no caching" (purge readerless
+	// engines past the grace window), >0 as a byte cap.
 	if j, ok := em.(interface{ StartJanitor(func() int64) }); ok {
-		j.StartJanitor(func() int64 {
-			// Contract 1: nil/unknown/non-numeric => -1 (unlimited); numeric =>
-			// int64(n); a negative number is normalized to -1. engine.evict
-			// interprets <0 as unlimited, 0 as "no caching" (purge readerless
-			// engines past the grace window), >0 as a byte cap.
-			switch n := ss.Get("cacheSize").(type) {
-			case float64:
-				if n < 0 {
-					return -1
-				}
-				return int64(n)
-			case int:
-				if n < 0 {
-					return -1
-				}
-				return int64(n)
-			case int64:
-				if n < 0 {
-					return -1
-				}
-				return n
-			default:
-				return -1 // nil/unknown => unlimited
-			}
-		})
+		j.StartJanitor(func() int64 { return settingBytes(ss.Get("cacheSize")) })
+	}
+	// The download budget (background downloads, null = unlimited) uses the
+	// same encoding.
+	if d, ok := em.(interface{ SetDownloadBudgetFn(func() int64) }); ok {
+		d.SetDownloadBudgetFn(func() int64 { return settingBytes(ss.Get("downloadBudget")) })
 	}
 
 	// Wire live bandwidth limits from settings — no changes to the types interface.
@@ -799,5 +784,29 @@ func shutdownServer(ctx context.Context, s *http.Server, name string) {
 	logging.For(name).Error("shutdown error", "err", err)
 	if errors.Is(err, context.DeadlineExceeded) {
 		_ = s.Close()
+	}
+}
+
+// settingBytes decodes a byte-size setting: a number is int64(n), a negative
+// number or nil/unknown/non-numeric value is -1 (unlimited).
+func settingBytes(v any) int64 {
+	switch n := v.(type) {
+	case float64:
+		if n < 0 {
+			return -1
+		}
+		return int64(n)
+	case int:
+		if n < 0 {
+			return -1
+		}
+		return int64(n)
+	case int64:
+		if n < 0 {
+			return -1
+		}
+		return n
+	default:
+		return -1
 	}
 }

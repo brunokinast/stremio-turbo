@@ -22,7 +22,7 @@ func mappedAfterWrite(t *testing.T, mmap bool, name string) bool {
 	const pieceLen = 256 << 10
 	info := &metainfo.Info{Name: name, Length: 4 * pieceLen, PieceLength: pieceLen, Pieces: make([]byte, 20*4)}
 	dir := t.TempDir()
-	st := newFileStorage(dir, mmap)
+	st, _ := newFileStorage(dir, mmap)
 	t.Cleanup(func() { _ = st.Close() })
 	ih := metainfo.Hash{3}
 	tor, err := st.OpenTorrent(context.Background(), info, ih)

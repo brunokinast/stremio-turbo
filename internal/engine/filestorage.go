@@ -26,7 +26,10 @@ import (
 // low-memory killer and anything reading RSS, and 32-bit builds cannot map
 // files of 4 GiB or more at all. Classic costs ~100 ms of CPU per GB read
 // (under 1 ms/s for a 4K stream) at equivalent throughput.
-func newFileStorage(dir string, mmap bool) storage.ClientImplCloser {
+//
+// The piece-completion database is returned too: deleting one downloaded file
+// of a torrent (downloads.go) marks its pieces incomplete there.
+func newFileStorage(dir string, mmap bool) (storage.ClientImplCloser, storage.PieceCompletion) {
 	// Mirrors anacrolix's pieceCompletionForDir: create the dir before the
 	// completion database opens inside it, fall back to in-memory completion.
 	_ = os.MkdirAll(dir, 0o700)
@@ -35,7 +38,7 @@ func newFileStorage(dir string, mmap bool) storage.ClientImplCloser {
 		logging.For("engine").Warn("piece completion db unavailable; using in-memory completion", "dir", dir, "err", err)
 		pc = storage.NewMapPieceCompletion()
 	}
-	return storage.NewFileOpts(storage.NewFileClientOpts{
+	fs := storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: dir,
 		TorrentDirMaker: func(baseDir string, _ *metainfo.Info, ih metainfo.Hash) string {
 			return filepath.Join(baseDir, ih.HexString())
@@ -43,4 +46,5 @@ func newFileStorage(dir string, mmap bool) storage.ClientImplCloser {
 		PieceCompletion: pc,
 		DisableMmap:     !mmap,
 	})
+	return fs, pc
 }

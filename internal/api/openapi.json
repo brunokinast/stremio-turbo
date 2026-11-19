@@ -3353,7 +3353,7 @@
             }
           },
           "409": {
-            "description": "The engine keeps pieces in RAM only",
+            "description": "The engine keeps pieces in RAM only, or the file doesn't fit the download budget even after deleting completed downloads (watched first, then unwatched, oldest first); the error says how much is needed and used",
             "content": {
               "application/json": {
                 "schema": {
@@ -3373,7 +3373,7 @@
             }
           },
           "503": {
-            "description": "Too many active torrents",
+            "description": "Too many active torrents, or the torrent's metadata (needed for the file's size) did not arrive within 30 s; retry later",
             "content": {
               "application/json": {
                 "schema": {
@@ -12795,6 +12795,13 @@
             ],
             "minimum": 0
           },
+          "downloadBudget": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
           "btMaxConnections": {
             "type": "number",
             "minimum": 0
@@ -12949,6 +12956,14 @@
             ],
             "minimum": 0,
             "description": "Bytes; null = unlimited (default 10737418240)"
+          },
+          "downloadBudget": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Bytes background downloads may keep on disk; null = unlimited (default 60000000000). Completed downloads are deleted to make room, watched ones first."
           },
           "btMaxConnections": {
             "type": "number",

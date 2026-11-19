@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,7 +16,9 @@ import (
 	"sync"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/rivulet-kodi/rivulet-engine/internal/logging"
 	"github.com/rivulet-kodi/rivulet-engine/internal/types"
@@ -38,6 +41,14 @@ const downloadsFile = "downloads.json"
 // resumeReadyTimeout bounds the wait for a re-added torrent's metadata.
 const resumeReadyTimeout = 10 * time.Minute
 
+// addMetadataTimeout bounds AddDownload's wait for a new download's metadata
+// (its size is needed for the budget).
+const addMetadataTimeout = 30 * time.Second
+
+// defaultDownloadBudget is the disk space downloads may use when no budget
+// function is set (the downloadBudget setting's default).
+const defaultDownloadBudget = int64(60e9)
+
 type downloadKey struct {
 	ih  string
 	idx int
@@ -52,9 +63,15 @@ type downloadEntry struct {
 	Watched  bool      `json:"watched,omitempty"`
 	Complete bool      `json:"complete,omitempty"`
 	AddedAt  time.Time `json:"addedAt"`
-	// Name and Size are filled once the torrent's metadata is known.
-	Name string `json:"name,omitempty"`
-	Size int64  `json:"size,omitempty"`
+	// Filled once the torrent's metadata is known: the display name, size,
+	// path on disk (relative to the torrent's cache dir) and the pieces that
+	// lie wholly inside the file, so one file of a season pack can be deleted
+	// while the torrent is unloaded.
+	Name       string `json:"name,omitempty"`
+	Size       int64  `json:"size,omitempty"`
+	Path       string `json:"path,omitempty"`
+	PieceBegin int    `json:"pieceBegin,omitempty"`
+	PieceEnd   int    `json:"pieceEnd,omitempty"`
 
 	// Last progress sample, for the reported rate (not persisted).
 	sampleAt    time.Time
@@ -168,12 +185,25 @@ func (m *manager) AddDownload(infoHash string, idx int, opts types.AddOptions) (
 		return types.Download{}, ErrNoDownload
 	}
 	ih := strings.ToLower(infoHash)
-	if _, err := m.EnsureEngine(ih, opts); err != nil {
+	eng, err := m.EnsureEngine(ih, opts)
+	if err != nil {
 		return types.Download{}, err
+	}
+	key := downloadKey{ih, idx}
+	m.dl.mu.Lock()
+	_, exists := m.dl.entries[key]
+	m.dl.mu.Unlock()
+	if !exists {
+		size, err := m.waitFileSize(eng.(*engine), idx)
+		if err != nil {
+			return types.Download{}, err
+		}
+		if err := m.makeRoom(size, key); err != nil {
+			return types.Download{}, err
+		}
 	}
 	trackers := append(append([]string{}, opts.Trackers...), trackersFromSources(opts.Sources)...)
 	m.dl.mu.Lock()
-	key := downloadKey{ih, idx}
 	en, ok := m.dl.entries[key]
 	if !ok {
 		en = &downloadEntry{InfoHash: ih, FileIdx: idx, AddedAt: time.Now()}
@@ -316,8 +346,9 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 	}
 	now := time.Now()
 	if known {
-		if en.Name != name || en.Size != size {
+		if en.Name != name || en.Size != size || en.Path == "" {
 			en.Name, en.Size = name, size
+			en.Path, en.PieceBegin, en.PieceEnd = e.fileLayout(k.idx)
 			m.dl.saveLocked()
 		}
 		if !en.sampleAt.IsZero() && now.Sub(en.sampleAt) >= time.Second {
@@ -394,43 +425,199 @@ func (m *manager) UpdateDownload(infoHash string, idx int, patch types.DownloadP
 	return m.downloadView(k), nil
 }
 
-// RemoveDownload forgets a download. The torrent's data is deleted when no
-// other download of it remains and nothing is reading it; otherwise the file
-// just stops being a download (deleting one file inside a torrent is a later
-// step's budget work).
+// RemoveDownload forgets a download and deletes its data, unless the torrent
+// is being read (then the file just stops being a download, and the janitor
+// reclaims it later as usual).
 func (m *manager) RemoveDownload(infoHash string, idx int) error {
 	k := downloadKey{strings.ToLower(infoHash), idx}
-	m.dl.mu.Lock()
-	if _, ok := m.dl.entries[k]; !ok {
-		m.dl.mu.Unlock()
+	if !m.deleteDownload(k) {
 		return ErrNoDownload
 	}
+	return nil
+}
+
+// deleteDownload forgets a download and deletes its data: the whole torrent
+// directory when no other download of it remains, otherwise just the file
+// (the torrent is unloaded for that, and the file's pieces are marked
+// incomplete; boundary pieces shared with a neighbouring file stay). A torrent
+// that is being read keeps its data. Reports false for an unknown download.
+func (m *manager) deleteDownload(k downloadKey) bool {
+	m.dl.mu.Lock()
+	en, ok := m.dl.entries[k]
+	if !ok {
+		m.dl.mu.Unlock()
+		return false
+	}
+	gone := *en
 	delete(m.dl.entries, k)
 	m.dl.saveLocked()
 	m.dl.mu.Unlock()
 	others := m.dl.hasTorrent(k.ih)
 	m.mu.Lock()
 	e, loaded := m.engines[k.ih]
-	if !loaded {
-		m.mu.Unlock()
-		if !others {
-			m.waitPurge(k.ih)
-			_ = os.RemoveAll(filepath.Join(m.cfg.CacheRoot, k.ih))
+	if loaded {
+		e.mu.Lock()
+		reading := e.openReaders > 0
+		e.mu.Unlock()
+		if reading {
+			m.mu.Unlock()
+			e.setBackground(k.idx, false)
+			return true
 		}
-		return nil
-	}
-	e.mu.Lock()
-	idle := e.openReaders == 0
-	e.mu.Unlock()
-	if !others && idle {
-		finish := m.beginPurge(k.ih, e)
-		m.mu.Unlock()
-		finish()
-		return nil
+		if !others {
+			finish := m.beginPurge(k.ih, e)
+			m.mu.Unlock()
+			finish()
+			return true
+		}
+		m.unloadLocked(k.ih, e)
 	}
 	m.mu.Unlock()
-	e.setBackground(k.idx, false)
+	if !others {
+		m.waitPurge(k.ih)
+		_ = os.RemoveAll(filepath.Join(m.cfg.CacheRoot, k.ih))
+		return true
+	}
+	m.deleteFileData(gone)
+	if loaded {
+		go m.tickDownloads() // reload the torrent for its other downloads
+	}
+	return true
+}
+
+// deleteFileData deletes one file's data from an unloaded torrent's cache dir
+// and marks the pieces wholly inside it incomplete.
+func (m *manager) deleteFileData(en downloadEntry) {
+	if en.Path == "" {
+		return
+	}
+	p := filepath.Join(m.cfg.CacheRoot, en.InfoHash, filepath.FromSlash(en.Path))
+	for _, f := range []string{p, p + ".part"} {
+		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logging.For("engine").Warn("deleting downloaded file", "path", f, "err", err)
+		}
+	}
+	if m.completion == nil {
+		return
+	}
+	ih := metainfo.NewHashFromHex(en.InfoHash)
+	for i := en.PieceBegin; i < en.PieceEnd; i++ {
+		if err := m.completion.Set(metainfo.PieceKey{InfoHash: ih, Index: i}, g.Some(false)); err != nil {
+			logging.For("engine").Warn("marking piece incomplete", "info_hash", en.InfoHash, "piece", i, "err", err)
+			return
+		}
+	}
+}
+
+// fileLayout returns file idx's path relative to the torrent's cache dir and
+// the range of pieces lying wholly inside it ([begin, end)).
+func (e *engine) fileLayout(idx int) (path string, begin, end int) {
+	info := e.t.Info()
+	files := e.t.Files()
+	if info == nil || idx < 0 || idx >= len(files) || info.PieceLength <= 0 {
+		return "", 0, 0
+	}
+	f := files[idx]
+	pl := info.PieceLength
+	off, stop := f.Offset(), f.Offset()+f.Length()
+	begin = int((off + pl - 1) / pl)
+	end = int(stop / pl)
+	if stop == info.TotalLength() {
+		end = info.NumPieces()
+	}
+	if end < begin {
+		end = begin
+	}
+	return f.Path(), begin, end
+}
+
+// waitFileSize waits (bounded) for the torrent's metadata and returns file
+// idx's size.
+func (m *manager) waitFileSize(e *engine, idx int) (int64, error) {
+	select {
+	case <-e.t.GotInfo():
+	case <-time.After(addMetadataTimeout):
+		return 0, types.ErrDownloadNoMetadata
+	case <-m.done:
+		return 0, types.ErrDownloadNoMetadata
+	}
+	files := e.t.Files()
+	if idx >= len(files) {
+		return 0, ErrNoDownload
+	}
+	return files[idx].Length(), nil
+}
+
+// SetDownloadBudgetFn sets the function returning the download budget in
+// bytes (<0 unlimited), read on every add.
+func (m *manager) SetDownloadBudgetFn(fn func() int64) {
+	m.dl.mu.Lock()
+	m.dlBudget = fn
+	m.dl.mu.Unlock()
+}
+
+// makeRoom deletes completed downloads until need more bytes fit the budget:
+// watched ones first, then unwatched ones, oldest first within each. Neither
+// incomplete downloads nor torrents being read are deleted. keep is the
+// download being added.
+func (m *manager) makeRoom(need int64, keep downloadKey) error {
+	m.dl.mu.Lock()
+	budget := defaultDownloadBudget
+	if m.dlBudget != nil {
+		budget = m.dlBudget()
+	}
+	var used int64
+	var cands []*downloadEntry
+	for k, en := range m.dl.entries {
+		if k == keep {
+			continue
+		}
+		used += en.Size
+		if en.Complete {
+			c := *en
+			cands = append(cands, &c)
+		}
+	}
+	m.dl.mu.Unlock()
+	if budget < 0 || used+need <= budget {
+		return nil
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].Watched != cands[j].Watched {
+			return cands[i].Watched
+		}
+		return cands[i].AddedAt.Before(cands[j].AddedAt)
+	})
+	for _, c := range cands {
+		if used+need <= budget {
+			break
+		}
+		if m.torrentReading(c.InfoHash) {
+			continue
+		}
+		if m.deleteDownload(downloadKey{c.InfoHash, c.FileIdx}) {
+			used -= c.Size
+			logging.For("engine").Info("deleted download for budget", "info_hash", c.InfoHash, "file", c.Name, "watched", c.Watched, "freed_bytes", c.Size)
+		}
+	}
+	if used+need > budget {
+		return fmt.Errorf("%w: needs %.1f GB, downloads that can't be deleted use %.1f of %.1f GB",
+			types.ErrDownloadBudget, float64(need)/1e9, float64(used)/1e9, float64(budget)/1e9)
+	}
 	return nil
+}
+
+// torrentReading reports whether infoHash is loaded with open readers.
+func (m *manager) torrentReading(ih string) bool {
+	m.mu.RLock()
+	e, ok := m.engines[ih]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.openReaders > 0
 }
 
 // waitPurge blocks while infoHash's cache directory is being deleted.
@@ -509,11 +696,16 @@ func (m *manager) unloadIfDone(ih string, e *engine) {
 	if busy {
 		return
 	}
+	m.unloadLocked(ih, e)
+	logging.For("engine").Info("unloaded completed downloads", "info_hash", ih)
+}
+
+// unloadLocked drops a torrent without deleting its data. m.mu held.
+func (m *manager) unloadLocked(ih string, e *engine) {
 	e.t.Drop()
 	delete(m.engines, ih)
 	m.dials.forget(ih)
 	m.trace.forget(ih)
-	logging.For("engine").Info("unloaded completed downloads", "info_hash", ih)
 }
 
 // stopNonBackground drops every file that is not a background download to
