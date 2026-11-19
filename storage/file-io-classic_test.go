@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,6 +87,34 @@ func TestClassicFileIoRenameClosesCachedWriter(t *testing.T) {
 	data, err := os.ReadFile(newPath)
 	qt.Assert(t, qt.IsNil(err))
 	qt.Assert(t, qt.DeepEquals(data, []byte("hello")))
+}
+
+// A rename whose source doesn't exist (a piece of a still-downloading file failed its hash, and
+// its files are renamed back to part files) must not close the target's cached writer: chunk writes
+// in flight on it would fail and disable the torrent's data download.
+func TestClassicFileIoRenameMissingSourceKeepsWriter(t *testing.T) {
+	tempDir := t.TempDir()
+	finalPath := filepath.Join(tempDir, "episode.mkv")
+	partPath := finalPath + ".part"
+
+	ioImpl, ok := newClassicFileIo().(*classicFileIo)
+	qt.Assert(t, qt.IsTrue(ok))
+	t.Cleanup(func() { _ = ioImpl.Close() })
+
+	writer, err := ioImpl.openForWrite(partPath, 0)
+	qt.Assert(t, qt.IsNil(err))
+	_, err = writer.WriteAt([]byte("hello"), 0)
+	qt.Assert(t, qt.IsNil(err))
+
+	err = ioImpl.rename(finalPath, partPath)
+	qt.Assert(t, qt.ErrorIs(err, fs.ErrNotExist))
+
+	// The writer obtained before the rename still works.
+	_, err = writer.WriteAt([]byte("world"), 5)
+	qt.Assert(t, qt.IsNil(err))
+	data, err := os.ReadFile(partPath)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.DeepEquals(data, []byte("helloworld")))
 }
 
 func TestClassicFileIoOpenForReadBorrowsWriterHandle(t *testing.T) {

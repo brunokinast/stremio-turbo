@@ -64,6 +64,13 @@ func (me *classicFileIo) rename(from, to string) error {
 	if err := me.closedErr(); err != nil {
 		return err
 	}
+	// Nothing to rename: leave the handles alone. onFileNotComplete renames every file of a piece
+	// that failed its hash back to its part file; for a file still downloading that's a no-op, and
+	// closing its cached writer under in-flight chunk writes failed them ("file already closed"),
+	// which disables data download for the whole torrent.
+	if _, err := os.Lstat(from); err != nil {
+		return err
+	}
 	err := me.closeWriterLocked(from)
 	err = errors.Join(err, me.closeWriterLocked(to))
 	err = errors.Join(err, os.Rename(from, to))

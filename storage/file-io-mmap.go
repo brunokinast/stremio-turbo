@@ -75,6 +75,10 @@ func (me *mmapFileIo) closedErr() error {
 func (me *mmapFileIo) rename(from, to string) (err error) {
 	me.mu.Lock()
 	defer me.mu.Unlock()
+	// Nothing to rename: keep the mappings of a file still being written (see classicFileIo.rename).
+	if _, err := os.Lstat(from); err != nil {
+		return err
+	}
 	me.closeName(from)
 	me.closeName(to)
 	return os.Rename(from, to)
