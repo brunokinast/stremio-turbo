@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anacrolix/missinggo/v2"
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -244,6 +245,8 @@ func (r *reader) waitAvailable(
 ) (avail int64, err error) {
 	t := r.t
 	var wait *readerWait
+	// While blocked with critical requests on: look for the chunk's request becoming overdue.
+	var overdueCheck <-chan time.Time
 	defer func() {
 		if wait != nil {
 			r.endWait(wait)
@@ -264,10 +267,18 @@ func (r *reader) waitAvailable(
 			// About to block: note it, then look again, since the chunk may have arrived while
 			// unlocked.
 			wait = r.beginWait(r.offset + pos)
+			if t.cl.config.ReaderCriticalBytes > 0 {
+				ticker := time.NewTicker(criticalOverdueCheck)
+				defer ticker.Stop()
+				overdueCheck = ticker.C
+			}
 			continue
 		}
 		select {
 		case <-readerCond:
+			continue
+		case <-overdueCheck:
+			r.checkWaitOverdue(wait)
 			continue
 		case <-r.t.closed.Done():
 			err = errTorrentClosed

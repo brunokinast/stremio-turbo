@@ -19,6 +19,12 @@ const (
 	criticalStealMinGain = 200 * time.Millisecond
 	// How far a peer may exceed its request limit with critical requests.
 	criticalRequestsOverLimit = 16
+	// A critical request outstanding longer than this, twice its holder's estimate and twice its
+	// holder's round trip is overdue: the holder most likely dropped it (a choke without the fast
+	// extension, a lost message) though its queue says it's next.
+	criticalOverdueMin = 500 * time.Millisecond
+	// How often a blocked read looks for its chunk's request becoming overdue.
+	criticalOverdueCheck = 250 * time.Millisecond
 	// Shorter reader waits aren't reported.
 	readerWaitReportMin = 20 * time.Millisecond
 	unknownDelivery     = time.Duration(1<<63 - 1)
@@ -118,15 +124,36 @@ func criticalStealPays(mine, holder time.Duration) bool {
 	return mine*criticalStealFactor <= holder && holder-mine >= criticalStealMinGain
 }
 
-// Whether p should take critical request r from holder, and the two estimates.
-func (p *PeerConn) shouldStealCritical(holder *PeerConn, r RequestIndex, now time.Time) (ok bool, from, to time.Duration) {
+// Whether holder's request r is overdue (see criticalOverdueMin), given its expected delivery.
+func (t *Torrent) requestOverdue(holder *PeerConn, r RequestIndex, est time.Duration, now time.Time) (overdue bool, age time.Duration) {
+	age = now.Sub(t.requestState[r].when)
+	limit := max(criticalOverdueMin, 2*holder.reqRTT.rtt)
+	if est != unknownDelivery {
+		limit = max(limit, 2*est)
+	}
+	return age > limit, age
+}
+
+// Whether p should take critical request r from holder, and the two estimates. An overdue request's
+// holder is expected to take at least as long again as the request has waited, whatever its queue
+// says.
+func (p *PeerConn) shouldStealCritical(holder *PeerConn, r RequestIndex, now time.Time) (ok bool, from, to time.Duration, overdue bool) {
 	to = p.newRequestDelivery(now)
-	// Cheap refusal first: the bound is never below the exact estimate.
-	if !criticalStealPays(to, holder.heldRequestDeliveryBound(now)) {
-		return false, 0, to
+	if to == unknownDelivery {
+		return false, 0, to, false
+	}
+	// Cheap refusal first, for a request too young to be overdue: the bound is never below the
+	// exact estimate.
+	if now.Sub(p.t.requestState[r].when) <= max(criticalOverdueMin, 2*holder.reqRTT.rtt) &&
+		!criticalStealPays(to, holder.heldRequestDeliveryBound(now)) {
+		return false, 0, to, false
 	}
 	from, _ = p.t.heldRequestDelivery(holder, r, now)
-	return criticalStealPays(to, from), from, to
+	overdue, age := p.t.requestOverdue(holder, r, from, now)
+	if overdue && from != unknownDelivery {
+		from = max(from, age)
+	}
+	return criticalStealPays(to, from), from, to, overdue
 }
 
 func estimateOrUnknown(d time.Duration) time.Duration {
@@ -179,6 +206,8 @@ type readerWait struct {
 	start time.Time
 	off   int64
 	state ChunkWaitState
+	// When the request last found overdue was made, so each request triggers one re-plan.
+	replanned time.Time
 }
 
 // Marks r blocked on torrent offset off: records what the chunk is waiting on for
@@ -202,18 +231,46 @@ func (r *reader) beginWait(off int64) *readerWait {
 		w.state = t.chunkWaitState(off, w.start)
 	}
 	if cfg.ReaderCriticalBytes > 0 && t.readerWaitMayNeedReplan(off, w.start) {
-		piece := pieceIndex(off / t.info.PieceLength)
-		for c := range t.conns {
-			if c.peerHasPiece(piece) {
-				c.onNeedUpdateRequests(peerUpdateRequestsReaderWaitingReason)
-			}
-		}
+		t.replanPeersWithPieceAt(off)
 	}
 	return w
 }
 
+func (t *Torrent) replanPeersWithPieceAt(off int64) {
+	piece := pieceIndex(off / t.info.PieceLength)
+	for c := range t.conns {
+		if c.peerHasPiece(piece) {
+			c.onNeedUpdateRequests(peerUpdateRequestsReaderWaitingReason)
+		}
+	}
+}
+
+// During a blocked read: if the chunk's request has become overdue, every peer with the piece
+// reconsiders its requests (once per request), so a request the holder dropped can move.
+func (r *reader) checkWaitOverdue(w *readerWait) {
+	t := r.t
+	t.cl.lock()
+	defer t.cl.unlock()
+	if !t.haveInfo() || w.off >= t.length() {
+		return
+	}
+	req := t.requestIndexAtOffset(w.off)
+	holder := t.requestingPeer(req)
+	if holder == nil {
+		return
+	}
+	now := time.Now()
+	est, _ := t.heldRequestDelivery(holder, req, now)
+	if overdue, _ := t.requestOverdue(holder, req, est, now); !overdue || w.replanned == t.requestState[req].when {
+		return
+	}
+	w.replanned = t.requestState[req].when
+	t.replanPeersWithPieceAt(w.off)
+}
+
 // Whether a wait on torrent offset off is worth every peer reconsidering its requests: the chunk
-// isn't requested, or it is far enough back in its holder's queue that a steal could pay. A reader
+// isn't requested, it is far enough back in its holder's queue that a steal could pay, or its
+// request is overdue. A reader
 // at the download frontier blocks many times a second on chunks about to arrive; those don't
 // qualify, and the queue walk stops at the chunk, so it's short for them.
 func (t *Torrent) readerWaitMayNeedReplan(off int64, now time.Time) bool {
@@ -223,7 +280,8 @@ func (t *Torrent) readerWaitMayNeedReplan(off int64, now time.Time) bool {
 		return true
 	}
 	est, _ := t.heldRequestDelivery(holder, r, now)
-	return est >= criticalStealMinGain
+	overdue, _ := t.requestOverdue(holder, r, est, now)
+	return est >= criticalStealMinGain || overdue
 }
 
 func (r *reader) endWait(w *readerWait) {

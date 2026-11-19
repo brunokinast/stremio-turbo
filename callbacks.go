@@ -142,6 +142,9 @@ type CriticalRequestStolenEvent struct {
 	Request  RequestIndex
 	// Expected delivery on the holder that lost the request, and on the peer that took it.
 	FromEstimate, ToEstimate time.Duration
+	// The request had waited longer than its holder should have needed (FromEstimate is then at
+	// least that wait).
+	Overdue bool
 }
 
 type PeerMessageEvent struct {

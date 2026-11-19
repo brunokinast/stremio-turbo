@@ -490,12 +490,12 @@ func (p *PeerConn) applyRequestState(next desiredRequestState) {
 			}
 			if critical != nil && isCriticalRequest(critical, req) {
 				// By expected delivery, not by queue lengths or the grace.
-				ok, from, to := p.shouldStealCritical(existing, req, now)
+				ok, from, to, overdue := p.shouldStealCritical(existing, req, now)
 				if !ok {
 					continue
 				}
 				for _, f := range t.cl.config.Callbacks.CriticalRequestStolen {
-					f(CriticalRequestStolenEvent{&existing.Peer, &p.Peer, req, from, to})
+					f(CriticalRequestStolenEvent{From: &existing.Peer, To: &p.Peer, Request: req, FromEstimate: from, ToEstimate: to, Overdue: overdue})
 				}
 				t.cancelRequest(req)
 				more = p.mustRequest(req, limit)

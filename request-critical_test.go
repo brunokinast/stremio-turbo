@@ -117,13 +117,73 @@ func TestShouldStealCriticalByDelivery(t *testing.T) {
 		holdRequests(slow, req(1, i), req(1, i+4), req(1, i+8), req(1, i+12), req(2, i))
 	}
 	holdRequests(slow, req(0, 3))
-	ok, from, to := fast.shouldStealCritical(slow, req(0, 3), now)
+	ok, from, to, overdue := fast.shouldStealCritical(slow, req(0, 3), now)
+	qt.Check(t, qt.IsFalse(overdue))
 	qt.Check(t, qt.IsTrue(ok))
 	qt.Check(t, qt.Equals(from, deliveryTime(21, defaultChunkSize, 64<<10)))
 	qt.Check(t, qt.Equals(to, deliveryTime(1, defaultChunkSize, 4<<20)))
 	// The other way round never pays.
-	ok, _, _ = slow.shouldStealCritical(fast, req(0, 3), now)
+	ok, _, _, _ = slow.shouldStealCritical(fast, req(0, 3), now)
 	qt.Check(t, qt.IsFalse(ok))
+}
+
+// A critical request first in a fast holder's queue looks due at once, but if it has waited far
+// longer than that, the holder most likely dropped it: it moves to a peer expected to deliver it
+// well within the time it has already waited, and not to one that would be slower still.
+func TestShouldStealCriticalOverdue(t *testing.T) {
+	tor, holder := offsetFirstSetup(t, false)
+	other := addSecondPeer(tor)
+	now := time.Now()
+	setRecentRate(holder, now, 4<<20) // estimate for the head of its queue: ~4 ms
+	setRecentRate(other, now, 256<<10)
+	holder.reqRTT.rtt = 200 * time.Millisecond
+	tor.cl.lock()
+	defer tor.cl.unlock()
+	holdRequests(holder, req(0, 3))
+
+	// Young: the holder's estimate stands, no steal.
+	tor.requestState[req(0, 3)] = requestState{peer: tor.requestState[req(0, 3)].peer, when: now.Add(-100 * time.Millisecond)}
+	ok, _, _, overdue := other.shouldStealCritical(holder, req(0, 3), now)
+	qt.Check(t, qt.IsFalse(ok))
+	qt.Check(t, qt.IsFalse(overdue))
+
+	// Waited 2.6 s (M2's case): overdue, and the holder counts as at least that far away.
+	tor.requestState[req(0, 3)] = requestState{peer: tor.requestState[req(0, 3)].peer, when: now.Add(-2600 * time.Millisecond)}
+	ok, from, to, overdue := other.shouldStealCritical(holder, req(0, 3), now)
+	qt.Check(t, qt.IsTrue(overdue))
+	qt.Check(t, qt.IsTrue(ok), qt.Commentf("from %v to %v", from, to))
+	qt.Check(t, qt.IsTrue(from >= 2600*time.Millisecond))
+
+	// Overdue, but the only other peer would take longer than that: stays.
+	setRecentRate(other, now, 4<<10) // ~4 s per chunk
+	ok, _, _, overdue = other.shouldStealCritical(holder, req(0, 3), now)
+	qt.Check(t, qt.IsTrue(overdue))
+	qt.Check(t, qt.IsFalse(ok))
+
+	holder.requestState.Requests.CheckedRemove(req(0, 3))
+	delete(tor.requestState, req(0, 3))
+}
+
+func TestRequestOverdueLimit(t *testing.T) {
+	tor, holder := offsetFirstSetup(t, false)
+	now := time.Now()
+	tor.cl.lock()
+	defer tor.cl.unlock()
+	holdRequests(holder, req(0, 1))
+	at := func(ago, est, rtt time.Duration) bool {
+		holder.reqRTT.rtt = rtt
+		tor.requestState[req(0, 1)] = requestState{peer: tor.requestState[req(0, 1)].peer, when: now.Add(-ago)}
+		overdue, _ := tor.requestOverdue(holder, req(0, 1), est, now)
+		return overdue
+	}
+	ms := time.Millisecond
+	qt.Check(t, qt.IsFalse(at(400*ms, 10*ms, 100*ms)), qt.Commentf("under the 500 ms floor"))
+	qt.Check(t, qt.IsTrue(at(600*ms, 10*ms, 100*ms)))
+	qt.Check(t, qt.IsFalse(at(600*ms, 10*ms, 400*ms)), qt.Commentf("under two round trips"))
+	qt.Check(t, qt.IsFalse(at(1500*ms, time.Second, 100*ms)), qt.Commentf("under twice its estimate"))
+	qt.Check(t, qt.IsTrue(at(600*ms, unknownDelivery, 100*ms)), qt.Commentf("holder with no rate"))
+	holder.requestState.Requests.CheckedRemove(req(0, 1))
+	delete(tor.requestState, req(0, 1))
 }
 
 // A blocked reader's next chunks go first, ahead of another reader's piece that would otherwise
