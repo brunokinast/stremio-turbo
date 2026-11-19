@@ -627,6 +627,10 @@ type Downloader interface {
 	Downloads() []Download
 	UpdateDownload(infoHash string, fileIdx int, patch DownloadPatch) (Download, error)
 	RemoveDownload(infoHash string, fileIdx int) error
+	// SetExitWhenDone makes the process exit once no download is left to
+	// fetch and no torrent is being read (the launcher leaves the server
+	// running after the player closes to finish downloads).
+	SetExitWhenDone(on bool)
 }
 
 // ErrNoDownload is returned for an unknown download.

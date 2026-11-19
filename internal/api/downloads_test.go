@@ -18,8 +18,9 @@ import (
 // fakeDownloadsEM adds an in-memory types.Downloader to fakeEM.
 type fakeDownloadsEM struct {
 	*fakeEM
-	added   []types.AddOptions
-	entries map[string]types.Download
+	added        []types.AddOptions
+	entries      map[string]types.Download
+	exitWhenDone *bool
 }
 
 func dlKey(ih string, idx int) string { return ih + "/" + strconv.Itoa(idx) }
@@ -53,6 +54,8 @@ func (f *fakeDownloadsEM) UpdateDownload(ih string, idx int, p types.DownloadPat
 	f.entries[dlKey(ih, idx)] = d
 	return d, nil
 }
+
+func (f *fakeDownloadsEM) SetExitWhenDone(on bool) { f.exitWhenDone = &on }
 
 func (f *fakeDownloadsEM) RemoveDownload(ih string, idx int) error {
 	if _, ok := f.entries[dlKey(ih, idx)]; !ok {
@@ -120,6 +123,24 @@ func TestDownloadsAPI(t *testing.T) {
 		if rec := doDL(t, h, c.method, c.path, c.body, c.loopback); rec.Code != c.want {
 			t.Errorf("%s %s = %d; want %d", c.method, c.path, rec.Code, c.want)
 		}
+	}
+}
+
+// TestExitWhenDoneAPI: POST /downloads/exit-when-done toggles drain mode.
+func TestExitWhenDoneAPI(t *testing.T) {
+	em := &fakeDownloadsEM{fakeEM: newFakeEM(), entries: map[string]types.Download{}}
+	h := New(em, &fakeSS{}, &fakeProber{}, types.Config{HTTPPort: 11470, AppPath: t.TempDir()})
+	if rec := doDL(t, h, http.MethodPost, "/downloads/exit-when-done", `{"on":true}`, true); rec.Code != http.StatusOK || em.exitWhenDone == nil || !*em.exitWhenDone {
+		t.Fatalf("on = %d %s", rec.Code, rec.Body)
+	}
+	if rec := doDL(t, h, http.MethodPost, "/downloads/exit-when-done", `{}`, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty body = %d; want 400", rec.Code)
+	}
+	if rec := doDL(t, h, http.MethodPost, "/downloads/exit-when-done", `{"on":false}`, false); rec.Code != http.StatusForbidden {
+		t.Fatalf("remote = %d; want 403", rec.Code)
+	}
+	if rec := doDL(t, h, http.MethodGet, "/downloads/exit-when-done", "", true); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET = %d; want 405", rec.Code)
 	}
 }
 

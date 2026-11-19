@@ -536,10 +536,17 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	// Block until asked to stop (ctx cancelled — the executable's signal
 	// handler or library mode's ServerStop) or a listener reports a fatal
 	// startup error.
+	// Exit when done: the launcher leaves the server running after the
+	// player closes so downloads finish; the engine signals when they have.
+	var drained <-chan struct{}
+	if d, ok := em.(interface{ Drained() <-chan struct{} }); ok {
+		drained = d.Drained()
+	}
 	var runErr error
 	select {
 	case <-ctx.Done():
 	case runErr = <-fatalCh:
+	case <-drained:
 	}
 	logging.For("http").Info("shutting down")
 	// Tell the HLS manager first: draining the servers (and stopping the

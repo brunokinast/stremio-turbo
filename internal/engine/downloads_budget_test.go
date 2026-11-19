@@ -97,7 +97,12 @@ func TestDeleteOneFileInPack(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		// Full size (sparse), as a completed file is: a wrong size makes the
+		// storage treat the file as incomplete when the torrent reloads.
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Truncate(p, en.Size); err != nil {
 			t.Fatal(err)
 		}
 		return p

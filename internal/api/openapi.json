@@ -3385,6 +3385,84 @@
         }
       }
     },
+    "/downloads/exit-when-done": {
+      "post": {
+        "operationId": "exitWhenDone",
+        "summary": "Exit once downloads are done",
+        "description": "When on, the process exits cleanly once no download is left to fetch and no torrent is being read (a launcher leaves the server running after the player closes so downloads finish). While downloads are being fetched the server keeps the system from sleeping (Windows; the display may still turn off).",
+        "tags": [
+          "Downloads"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "on"
+                ],
+                "properties": {
+                  "on": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "on"
+                  ],
+                  "properties": {
+                    "on": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Write not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The engine does not support downloads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/downloads/{infoHash}/{fileIdx}": {
       "patch": {
         "operationId": "updateDownload",

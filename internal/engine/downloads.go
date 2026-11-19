@@ -83,10 +83,21 @@ type downloads struct {
 	mu      sync.Mutex
 	path    string // "" keeps the registry in memory only
 	entries map[downloadKey]*downloadEntry
+
+	// Exit when done (SetExitWhenDone): drained is closed once no download
+	// is left to fetch and nothing reads a torrent, and the process exits.
+	exitWhenDone bool
+	drained      chan struct{}
+	drainOnce    sync.Once
+
+	// awake keeps the system from sleeping while downloads are being
+	// fetched (systemKeepAwake; replaced in tests). awakeOn is its state.
+	awake   func(bool)
+	awakeOn bool
 }
 
 func newDownloads(appPath string) *downloads {
-	d := &downloads{entries: map[downloadKey]*downloadEntry{}}
+	d := &downloads{entries: map[downloadKey]*downloadEntry{}, drained: make(chan struct{}), awake: systemKeepAwake}
 	if appPath == "" {
 		return d
 	}
@@ -655,6 +666,12 @@ func (m *manager) tickDownloads() {
 		}
 	}
 	m.dl.mu.Unlock()
+	active := false
+	for _, st := range byTorrent {
+		active = active || len(st.incomplete) > 0
+	}
+	m.setAwake(active)
+	defer m.checkDrained(active)
 	for ih, st := range byTorrent {
 		m.mu.RLock()
 		e, loaded := m.engines[ih]
@@ -680,6 +697,64 @@ func (m *manager) tickDownloads() {
 			m.unloadIfDone(ih, e)
 		}
 	}
+}
+
+// setAwake keeps the system awake while downloads are being fetched.
+func (m *manager) setAwake(active bool) {
+	m.dl.mu.Lock()
+	changed := m.dl.awakeOn != active
+	m.dl.awakeOn = active
+	awake := m.dl.awake
+	m.dl.mu.Unlock()
+	if !changed {
+		return
+	}
+	awake(active)
+	if active {
+		logging.For("engine").Info("keeping the system awake while downloads run")
+	} else {
+		logging.For("engine").Info("downloads idle; the system may sleep")
+	}
+}
+
+// SetExitWhenDone turns exit-when-done on or off: when on, the process exits
+// (Drained closes) once no download is left to fetch and no torrent is being
+// read. Turning it on checks at once.
+func (m *manager) SetExitWhenDone(on bool) {
+	m.dl.mu.Lock()
+	m.dl.exitWhenDone = on
+	m.dl.mu.Unlock()
+	if on {
+		go m.tickDownloads()
+	}
+}
+
+// Drained is closed when exit-when-done is on and the work is done.
+func (m *manager) Drained() <-chan struct{} { return m.dl.drained }
+
+// checkDrained closes drained when exit-when-done is on, no download is
+// active and no torrent has an open reader.
+func (m *manager) checkDrained(active bool) {
+	m.dl.mu.Lock()
+	on := m.dl.exitWhenDone
+	m.dl.mu.Unlock()
+	if !on || active {
+		return
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, e := range m.engines {
+		e.mu.Lock()
+		reading := e.openReaders > 0
+		e.mu.Unlock()
+		if reading {
+			return
+		}
+	}
+	m.dl.drainOnce.Do(func() {
+		logging.For("engine").Info("downloads done; exiting (exit when done)")
+		close(m.dl.drained)
+	})
 }
 
 // unloadIfDone drops a torrent whose downloads are all complete and that has

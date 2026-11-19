@@ -47,6 +47,10 @@ func (s *server) handleDownloads(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if rest == "exit-when-done" {
+		s.exitWhenDone(w, r, dl)
+		return
+	}
 	seg := strings.Split(rest, "/")
 	if len(seg) != 2 || !isInfoHash(seg[0]) {
 		http.NotFound(w, r)
@@ -112,6 +116,28 @@ func (s *server) addDownload(w http.ResponseWriter, r *http.Request, dl types.Do
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// exitWhenDone serves POST /downloads/exit-when-done {"on": bool}.
+func (s *server) exitWhenDone(w http.ResponseWriter, r *http.Request, dl types.Downloader) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if !s.settingsWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "downloads write requires a browser origin, a loopback peer, or api_password"})
+		return
+	}
+	var body struct {
+		On *bool `json:"on"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, downloadsMaxBody)).Decode(&body); err != nil || body.On == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": `body must be {"on": true|false}`})
+		return
+	}
+	dl.SetExitWhenDone(*body.On)
+	writeJSON(w, http.StatusOK, map[string]any{"on": *body.On})
 }
 
 func writeDownloadErr(w http.ResponseWriter, err error) {
