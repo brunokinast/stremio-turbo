@@ -22,5 +22,20 @@
     "SMART_PLAY_START_BUFFER": "Buffering {{seconds}} s before playing: this source is still speeding up",
     "SMART_PLAY_WARMUP": "Warm up continue watching",
     "SMART_PLAY_WARMUP_DESCRIPTION": "While the board is open, gets the first continue-watching item ready to play: downloads up to 32 MB around where it resumes and shares it with peers. Removed after 10 minutes if you don't play it.",
-    "SMART_PLAY_PASSED_SLOW_EARLIER": "Playing the {{size}} GB source: the {{passedSize}} GB one couldn't keep up earlier ({{rate}} of {{needed}} MB/s)"
+    "SMART_PLAY_PASSED_SLOW_EARLIER": "Playing the {{size}} GB source: the {{passedSize}} GB one couldn't keep up earlier ({{rate}} of {{needed}} MB/s)",
+    "SMART_PLAY_AHEAD_QUEUED": "Downloading {{episode}} ahead in {{quality}}: {{size}} GB, ready in about {{minutes}} min",
+    "SMART_PLAY_AHEAD_QUEUED_LOWER": "Downloading {{episode}} ahead in {{quality}} ({{size}} GB, ready in about {{minutes}} min): no source in your quality could finish before you'd reach it",
+    "SMART_PLAY_AHEAD_NONE": "Not downloading {{episode}} ahead: no source can finish before you'd reach it",
+    "SMART_PLAY_AHEAD_FULL": "Couldn't download {{episode}} ahead: {{reason}}",
+    "SMART_PLAY_DOWNLOADED_COPY": "Playing the downloaded copy ({{size}} GB)",
+    "SMART_PLAY_AHEAD": "Download next episodes ahead",
+    "SMART_PLAY_AHEAD_DESCRIPTION": "While an episode plays, download the next one in the best quality that can finish before you reach it, so it plays without buffering. The server keeps downloading after Stremio closes, up to 60 GB; watched episodes are deleted first.",
+    "SMART_PLAY_AHEAD_ON_DISK": "{{episode}} is already downloaded in {{quality}} ({{size}} GB)",
+    "SMART_PLAY_AHEAD_REPLACED": "The {{passedSize}} GB download of {{episode}} was too slow to finish in time ({{rate}} of {{needed}} MB/s), so it was replaced",
+    "SMART_PLAY_DOWNLOAD_ON_DISK": "On disk",
+    "SMART_PLAY_DOWNLOAD_QUEUED": "Queued",
+    "SMART_PLAY_DOWNLOAD_PAUSED": "Paused",
+    "SMART_PLAY_DOWNLOAD_PROGRESS": "{{percent}}% · {{rate}} MB/s · {{minutes}} min",
+    "SMART_PLAY_DOWNLOAD_PERCENT": "{{percent}}%",
+    "SMART_PLAY_REMOVE_DOWNLOAD": "Remove download"
 }

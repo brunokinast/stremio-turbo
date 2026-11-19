@@ -17,6 +17,7 @@ import useScrollMemory from './useScrollMemory';
 import useSeasons from 'stremio/common/useSeasons';
 import type { ScrollMemory } from './useScrollMemory';
 import styles from './Videos.less';
+import { useEpisodeDownloads } from 'stremio/smartPlay';
 
 export type { ScrollMemory };
 
@@ -68,6 +69,9 @@ const Videos = ({
     }, [videos, search, i18n.language]);
 
     const seasonWatched = useMemo(() => videos.every((video) => video.watched), [videos]);
+    // Smart play: episodes downloaded ahead, and how far each download is.
+    const videoIds = useMemo(() => videos.map(({ id }) => id), [videos]);
+    const episodeDownloads = useEpisodeDownloads(metaItem?.id ?? null, videoIds, !hidden);
 
     const ready = metaItem !== null && !error && videos.length > 0;
     const onSelectVideo = useScrollMemory(listRef, scrollMemoryRef, `${metaItem?.id}:${selectedSeason}`, ready && !hidden);
@@ -137,6 +141,8 @@ const Videos = ({
                             onSelect={onSelectVideo}
                             onMarkVideoWatched={onMarkVideoWatched}
                             onMarkSeasonWatched={onMarkSeasonWatched}
+                            download={episodeDownloads.downloads.get(video.id) ?? null}
+                            onRemoveDownload={episodeDownloads.remove}
                         />
                     ))
                 }

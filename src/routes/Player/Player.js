@@ -34,7 +34,7 @@ const { default: useCastDevice } = require('./useCastDevice');
 const { default: useKeyboardSeek } = require('./useKeyboardSeek');
 const { default: usePlaybackSpeedHold } = require('./usePlaybackSpeedHold');
 const { default: useStatistics } = require('./useStatistics');
-const { requestAutoplay, useStartBuffer, START_BUFFER_SECONDS } = require('stremio/smartPlay');
+const { requestAutoplay, useStartBuffer, useDownloadAhead, START_BUFFER_SECONDS } = require('stremio/smartPlay');
 const useVideo = require('./useVideo');
 const { default: useAudio } = require('./useAudio');
 const { default: useSubtitles } = require('./useSubtitles');
@@ -108,6 +108,51 @@ const Player = () => {
     const [statisticsMenuOpen, openStatisticsMenu, closeStatisticsMenu, toggleStatisticsMenu] = useBinaryState(false);
     const [castDevicesMenuOpen, , closeCastDevicesMenu, toggleCastDevicesMenu] = useBinaryState(false);
     const metaItemContent = player.metaItem !== null && player.metaItem.type === 'Ready' ? player.metaItem.content : null;
+
+    // Smart play: download the next episodes ahead (each decision is said in a toast).
+    const onAheadPlanned = React.useCallback((result, episode) => {
+        if (result.kind === 'queued') {
+            const { source, tierLabel, eta } = result.choice;
+            toast.show({
+                type: 'info',
+                title: t(eta === 0 ? 'SMART_PLAY_AHEAD_ON_DISK' : result.stepped ? 'SMART_PLAY_AHEAD_QUEUED_LOWER' : 'SMART_PLAY_AHEAD_QUEUED', {
+                    episode,
+                    quality: tierLabel,
+                    size: (source.size / 1e9).toFixed(1),
+                    minutes: Math.max(1, Math.round(eta / 60)),
+                }),
+                timeout: 8000
+            });
+            if (result.replaced !== null) {
+                toast.show({
+                    type: 'info',
+                    title: t('SMART_PLAY_AHEAD_REPLACED', {
+                        episode,
+                        passedSize: result.replaced.gb.toFixed(1),
+                        rate: (result.replaced.rate / 1e6).toFixed(1),
+                        needed: (result.replaced.needed / 1e6).toFixed(1),
+                    }),
+                    timeout: 8000
+                });
+            }
+        } else if (result.kind === 'none') {
+            toast.show({ type: 'info', title: t('SMART_PLAY_AHEAD_NONE', { episode }), timeout: 8000 });
+        } else {
+            toast.show({ type: 'error', title: t('SMART_PLAY_AHEAD_FULL', { episode, reason: result.reason }), timeout: 8000 });
+        }
+    }, [toast, t]);
+    useDownloadAhead({
+        baseUrl: streamingServer.selected?.transportUrl ?? null,
+        addons: profile.addons,
+        meta: metaItemContent,
+        videoId: player.selected?.streamRequest?.path?.id ?? null,
+        playingInfoHash: typeof player.selected?.stream?.infoHash === 'string' ? player.selected.stream.infoHash.toLowerCase() : null,
+        playingFileIdx: typeof player.selected?.stream?.fileIdx === 'number' ? player.selected.stream.fileIdx : null,
+        time: video.state.time,
+        duration: video.state.duration,
+        paused: video.state.paused,
+        notify: onAheadPlanned,
+    });
 
     const isEpg = (player.live ?? null) !== null;
     const currentEpgVideo = player.live?.currentProgram ?? null;

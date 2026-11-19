@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import Icon from '@stremio/stremio-icons/react';
 import { MultiselectMenu, Toggle } from 'stremio/components';
-import { useWarmUpToggle } from 'stremio/smartPlay';
+import { useAheadToggle, useWarmUpToggle } from 'stremio/smartPlay';
 import { useToast } from 'stremio/common';
 import { Group, Row, RowButton } from '../components';
 import URLsManager from './URLsManager';
@@ -29,6 +29,7 @@ const Streaming = ({ profile, streamingServer }: Props) => {
         transcodingProfileSelect,
     } = useStreamingOptions(streamingServer);
     const warmUpToggle = useWarmUpToggle();
+    const aheadToggle = useAheadToggle();
 
     const onCopyRemoteUrl = useCallback(() => {
         if (streamingServer.remoteUrl) {
@@ -111,6 +112,9 @@ const Streaming = ({ profile, streamingServer }: Props) => {
             <Group>
                 <Row rowId={'warmUp'} label={t('SMART_PLAY_WARMUP')} description={t('SMART_PLAY_WARMUP_DESCRIPTION')}>
                     <Toggle aria-label={t('SMART_PLAY_WARMUP')} {...warmUpToggle} />
+                </Row>
+                <Row rowId={'downloadAhead'} label={t('SMART_PLAY_AHEAD')} description={t('SMART_PLAY_AHEAD_DESCRIPTION')}>
+                    <Toggle aria-label={t('SMART_PLAY_AHEAD')} {...aheadToggle} />
                 </Row>
             </Group>
         </React.Fragment>

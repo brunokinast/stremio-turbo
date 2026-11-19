@@ -72,12 +72,14 @@ const isForVideo = (stream: Stream, videoId: string) => {
     return typeof stream.deepLinks?.player === 'string' && stream.deepLinks.player.endsWith(`/${encodeURIComponent(videoId)}`);
 };
 
-const groupByQuality = (groups: StreamGroup[], videoId: string): Tier[] => {
+// videoId null: the streams were requested for one video already (an
+// addon's own response, which carries no player links).
+const groupByQuality = (groups: StreamGroup[], videoId: string | null): Tier[] => {
     const tiers = new Map<string, Tier>();
     groups.forEach(({ addon, streams }) => {
         streams.forEach((stream) => {
             const label = qualityLabel(stream);
-            if (label === null || typeof stream.infoHash !== 'string' || !isForVideo(stream, videoId)) {
+            if (label === null || typeof stream.infoHash !== 'string' || (videoId !== null && !isForVideo(stream, videoId))) {
                 return;
             }
             const key = tierKey(label);

@@ -18,6 +18,9 @@ import { neededRate, parseRuntime, RateMeter } from './supply';
 import { getLastQuality, getQuality, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
 import { claim } from './warmup';
+import { downloadedSource } from './ahead';
+import { listDownloads } from './downloads';
+import type { RankedSource } from './groupByQuality';
 
 type Options = {
     groups: StreamGroup[],
@@ -159,9 +162,36 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         setRacing(null);
     }, []);
 
+    // The copy of this episode downloaded ahead (ahead.ts), when it is still
+    // on the server and among the listed sources: it was chosen to finish
+    // before playback could catch it, so it plays directly, without a race.
+    const downloadedCopy = useCallback(async (): Promise<RankedSource | null> => {
+        const known = metaId !== null && videoId !== null ? downloadedSource(metaId, videoId) : null;
+        if (known === null || baseUrl === null) {
+            return null;
+        }
+        const source = tiers.flatMap((tier) => tier.sources).find((s) => s.infoHash === known.infoHash && s.fileIdx === known.fileIdx);
+        if (source === undefined) {
+            return null;
+        }
+        const downloads = await listDownloads(baseUrl);
+        return downloads !== null && downloads.some((d) => d.infoHash === known.infoHash && d.fileIdx === known.fileIdx) ? source : null;
+    }, [metaId, videoId, baseUrl, tiers]);
+
+    const playDirect = useCallback((source: RankedSource) => {
+        if (typeof source.stream.deepLinks?.player !== 'string') {
+            return;
+        }
+        toast.show({ type: 'info', title: t('SMART_PLAY_DOWNLOADED_COPY', { size: source.size !== null ? (source.size / 1e9).toFixed(1) : '?' }), timeout: 6000 });
+        core.transport.analytics({ event: 'StreamClicked', args: { stream: source.stream } });
+        claim(source.infoHash);
+        setState({ handoff: null });
+        navigate(toPath(source.stream.deepLinks.player));
+    }, [core.transport, navigate, toast, t]);
+
     // remember: an explicit choice becomes the show's quality; a fallback
     // chosen for the user (autoplay) doesn't replace it.
-    const play = useCallback((tierKey: string, remember = true) => {
+    const raceTier = useCallback((tierKey: string, remember = true) => {
         const tier = tiers.find((tier) => tier.key === tierKey);
         if (baseUrl === null || metaId === null || videoId === null || tier === undefined || tier.sources.length === 0) {
             return;
@@ -209,6 +239,24 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
             .catch(() => undefined);
     }, [tiers, baseUrl, metaId, videoId, startFraction, runtimeSeconds, core.transport, navigate, toast, t]);
 
+    // Plays a quality: its downloaded copy when there is one (any quality
+    // for autoplay, which follows the copy chosen for the user; only the
+    // clicked quality's otherwise), else the race.
+    const play = useCallback((tierKey: string, remember = true, auto = false) => {
+        playStarted.current = true;
+        downloadedCopy().then((copy) => {
+            const inTier = copy !== null && tiers.find((tier) => tier.key === tierKey)?.sources.includes(copy) === true;
+            if (copy !== null && (auto || inTier)) {
+                if (remember && metaId !== null) {
+                    setQuality(metaId, tierKey);
+                }
+                playDirect(copy);
+            } else {
+                raceTier(tierKey, remember);
+            }
+        });
+    }, [downloadedCopy, playDirect, raceTier, tiers, metaId]);
+
     // Resume / next episode asked to autoplay this video: once the remembered
     // quality has a live count (or nothing more is coming), play it. If the
     // episode doesn't offer it, the closest quality plays (fallbackTier); the
@@ -220,12 +268,12 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         const tier = remembered !== null ? tiers.find((tier) => tier.key === remembered) : undefined;
         if (tier !== undefined && (tier.best !== null || (settled && !streamsLoading))) {
             setState({ autoplay: null });
-            play(tier.key);
+            play(tier.key, true, true);
         } else if (tier === undefined && !streamsLoading) {
             const fallback = remembered !== null ? fallbackTier(tiers, remembered) : undefined;
             if (fallback !== undefined && (fallback.best !== null || settled)) {
                 setState({ autoplay: null });
-                play(fallback.key, false);
+                play(fallback.key, false, true);
             } else if (fallback === undefined || settled) {
                 setState({ autoplay: null });
             }

@@ -15,6 +15,7 @@ import useRowMenu from '../useRowMenu';
 import useEpisodeNavigation from '../useEpisodeNavigation';
 import { formatDate, hidesSpoiler } from '../format';
 import { getScrollParent } from './useScrollMemory';
+import type { EpisodeDownload } from 'stremio/smartPlay';
 import styles from './Video.less';
 
 type Props = {
@@ -25,6 +26,9 @@ type Props = {
     onSelect: () => void,
     onMarkVideoWatched: (video: Pick<Video, 'id' | 'released'>, watched: boolean) => void,
     onMarkSeasonWatched: (season: number, watched: boolean) => void,
+    // Smart play: the episode's download ahead, if any.
+    download?: EpisodeDownload | null,
+    onRemoveDownload?: (videoId: string) => void,
 };
 
 type LabelProps = React.ComponentProps<typeof Button> & {
@@ -37,7 +41,7 @@ const renderThumbnailFallback = () => (
     </div>
 );
 
-const Video = ({ video, selected, seasonWatched, minutesLeft, onSelect, onMarkVideoWatched, onMarkSeasonWatched }: Props) => {
+const Video = ({ video, selected, seasonWatched, minutesLeft, onSelect, onMarkVideoWatched, onMarkSeasonWatched, download = null, onRemoveDownload }: Props) => {
     const { t, i18n } = useTranslation();
     const profile = useProfile();
     const { openEpisode } = useEpisodeNavigation();
@@ -49,6 +53,18 @@ const Video = ({ video, selected, seasonWatched, minutesLeft, onSelect, onMarkVi
     const blurThumbnail = hidesSpoiler(video, profile.settings.hideSpoilers);
     const releasedLabel = formatDate(released, i18n.language);
     const shouldScroll = selected && (!watched || hasProgress);
+    const downloadLabel = download === null ? null :
+        download.state === 'complete' ? t('SMART_PLAY_DOWNLOAD_ON_DISK') :
+            download.state === 'queued' ? t('SMART_PLAY_DOWNLOAD_QUEUED') :
+                download.state === 'paused' ? t('SMART_PLAY_DOWNLOAD_PAUSED') :
+                    download.rate > 0 ?
+                        t('SMART_PLAY_DOWNLOAD_PROGRESS', {
+                            percent: Math.floor(100 * download.bytesCompleted / Math.max(1, download.size)),
+                            rate: (download.rate / 1e6).toFixed(1),
+                            minutes: Math.max(1, Math.round((download.size - download.bytesCompleted) / download.rate / 60)),
+                        })
+                        :
+                        t('SMART_PLAY_DOWNLOAD_PERCENT', { percent: Math.floor(100 * download.bytesCompleted / Math.max(1, download.size)) });
 
     useEffect(() => {
         const row = rowRef.current;
@@ -80,6 +96,12 @@ const Video = ({ video, selected, seasonWatched, minutesLeft, onSelect, onMarkVi
             onSelect();
         }
     }, [closeMenu, onSelect, deepLinks.player]);
+
+    const handleRemoveDownload = useCallback((event: React.MouseEvent) => {
+        event.stopPropagation();
+        closeMenu();
+        onRemoveDownload?.(id);
+    }, [closeMenu, onRemoveDownload, id]);
 
     const handleToggleWatched = useCallback((event: React.MouseEvent) => {
         event.preventDefault();
@@ -149,11 +171,20 @@ const Video = ({ video, selected, seasonWatched, minutesLeft, onSelect, onMarkVi
                             :
                             null
                     }
+                    {
+                        downloadLabel !== null ?
+                            <span className={styles['download']} title={download?.name}>
+                                <Icon className={styles['download-icon']} name={'download'} />
+                                {downloadLabel}
+                            </span>
+                            :
+                            null
+                    }
                 </div>
             </div>
             {children}
         </Button>
-    ), [selected, watched, title, thumbnail, blurThumbnail, hasProgress, progress, episode, id, releasedLabel, scheduled, minutesLeft, upcoming, t]);
+    ), [selected, watched, title, thumbnail, blurThumbnail, hasProgress, progress, episode, id, releasedLabel, scheduled, minutesLeft, upcoming, downloadLabel, download?.name, t]);
 
     const renderMenu = useCallback(() => (
         <div className={styles['menu']} {...menuProps}>
@@ -171,8 +202,16 @@ const Video = ({ video, selected, seasonWatched, minutesLeft, onSelect, onMarkVi
                     :
                     null
             }
+            {
+                download !== null ?
+                    <Button className={styles['option']} title={t('SMART_PLAY_REMOVE_DOWNLOAD')} onClick={handleRemoveDownload}>
+                        <div className={styles['option-label']}>{t('SMART_PLAY_REMOVE_DOWNLOAD')}</div>
+                    </Button>
+                    :
+                    null
+            }
         </div>
-    ), [menuProps, deepLinks.player, handleWatchClick, handleToggleWatched, handleToggleSeasonWatched, watched, season, seasonWatched, t]);
+    ), [menuProps, deepLinks.player, handleWatchClick, handleToggleWatched, handleToggleSeasonWatched, handleRemoveDownload, download, watched, season, seasonWatched, t]);
 
     return (
         <div ref={rowRef} className={styles['row']}>
