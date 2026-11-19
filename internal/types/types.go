@@ -412,6 +412,9 @@ type CriticalSteal struct {
 	To             string  `json:"to"`
 	FromEstimateMs float64 `json:"fromEstimateMs"`
 	ToEstimateMs   float64 `json:"toEstimateMs"`
+	// The request had waited longer than its holder should have needed (it was
+	// likely dropped); FromEstimateMs is then at least that wait.
+	Overdue bool `json:"overdue,omitempty"`
 }
 
 // BlockedPieceSample is a once-a-second snapshot of a piece a stream read has

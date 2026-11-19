@@ -273,6 +273,7 @@ func (tr *tracer) onCriticalRequestStolen(ev torrent.CriticalRequestStolenEvent)
 		tt.steals.add(types.CriticalSteal{
 			AtMs: tt.ms(now), From: peerAddr(ev.From), To: peerAddr(ev.To),
 			FromEstimateMs: estimateMs(ev.FromEstimate), ToEstimateMs: estimateMs(ev.ToEstimate),
+			Overdue: ev.Overdue,
 		})
 	})
 }
