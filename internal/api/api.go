@@ -843,7 +843,11 @@ func (s *server) handleRemoveAll(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) handleNetworkInfo(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"availableInterfaces": availableInterfaces()})
+	body := map[string]any{"availableInterfaces": availableInterfaces()}
+	if in, ok := s.em.(interface{ Incoming() types.IncomingStats }); ok {
+		body["incoming"] = in.Incoming()
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *server) handleDeviceInfo(w http.ResponseWriter, _ *http.Request) {

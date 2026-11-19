@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,6 +30,11 @@ const dialLogCap = 2000
 type dialLog struct {
 	mu       sync.Mutex
 	torrents map[string]*torrentDials
+	// Accepted incoming connections since start, and the last one's time (Unix
+	// ms): none while torrents are active means peers can't reach the listening
+	// port (GET /network-info), which on a thin swarm decides the speed.
+	incoming     atomic.Int64
+	lastIncoming atomic.Int64
 }
 
 type torrentDials struct {
@@ -109,6 +115,7 @@ func (d *dialLog) onPeerConnAdded(pc *torrent.PeerConn) {
 	if pc.Discovery != torrent.PeerSourceIncoming {
 		return
 	}
+	d.noteIncoming(time.Now())
 	t := pc.Torrent()
 	if t == nil {
 		return
@@ -146,4 +153,38 @@ func dialResult(err error) string {
 // Dials implements types.EngineManager.
 func (m *manager) Dials(infoHash string) ([]types.DialRecord, bool) {
 	return m.dials.get(strings.ToLower(infoHash))
+}
+
+// noteIncoming counts an accepted incoming connection.
+func (d *dialLog) noteIncoming(now time.Time) {
+	d.incoming.Add(1)
+	d.lastIncoming.Store(now.UnixMilli())
+}
+
+// activeSince is when the longest-loaded torrent was added (zero when none is).
+func (d *dialLog) activeSince() time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var since time.Time
+	for _, td := range d.torrents {
+		if since.IsZero() || td.created.Before(since) {
+			since = td.created
+		}
+	}
+	return since
+}
+
+// Incoming reports accepted incoming peer connections since start, the
+// listening port, and since when torrents have been loaded, so a client can
+// tell an unreachable port (no incoming connections after a while).
+func (m *manager) Incoming() types.IncomingStats {
+	st := types.IncomingStats{Count: m.dials.incoming.Load(), ListenPort: m.client.LocalPort()}
+	if ms := m.dials.lastIncoming.Load(); ms > 0 {
+		at := time.UnixMilli(ms)
+		st.LastAt = &at
+	}
+	if since := m.dials.activeSince(); !since.IsZero() {
+		st.ActiveSince = &since
+	}
+	return st
 }

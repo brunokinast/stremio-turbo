@@ -973,6 +973,26 @@ func TestHandlerNetworkInfo(t *testing.T) {
 	}
 }
 
+// incomingEM is a fake manager that also reports incoming connections.
+type incomingEM struct{ *fakeEM }
+
+func (incomingEM) Incoming() types.IncomingStats {
+	return types.IncomingStats{Count: 3, ListenPort: 49881}
+}
+
+func TestHandlerNetworkInfoIncoming(t *testing.T) {
+	h := New(incomingEM{newFakeEM()}, &fakeSS{}, &fakeProber{}, types.Config{HTTPPort: 11470, AppPath: t.TempDir()})
+	rec := serve(t, h, http.MethodGet, "/network-info", nil)
+	m := decodeJSON(t, rec.Body.Bytes())
+	in, ok := m["incoming"].(map[string]any)
+	if !ok {
+		t.Fatalf("incoming missing: %v", m)
+	}
+	if in["count"] != float64(3) || in["listenPort"] != float64(49881) || in["lastAt"] != nil || in["activeSince"] != nil {
+		t.Errorf("incoming = %v", in)
+	}
+}
+
 // ─── GET /device-info ────────────────────────────────────────────────────────
 
 func TestHandlerDeviceInfo(t *testing.T) {

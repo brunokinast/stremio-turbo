@@ -57,3 +57,31 @@ func TestDialLogRingAndTimes(t *testing.T) {
 		t.Error("forgotten torrent still logged")
 	}
 }
+
+// Incoming connections are counted with the last one's time, and activeSince
+// is the longest-loaded torrent's add time (zero once none is loaded).
+func TestDialLogIncomingAndActiveSince(t *testing.T) {
+	d := newDialLog()
+	if d.incoming.Load() != 0 || !d.activeSince().IsZero() {
+		t.Fatalf("fresh log: count %d, activeSince %v", d.incoming.Load(), d.activeSince())
+	}
+	t0 := time.Unix(1_800_000_000, 0)
+	d.begin("aa", t0.Add(time.Minute))
+	d.begin("bb", t0)
+	if got := d.activeSince(); !got.Equal(t0) {
+		t.Errorf("activeSince = %v; want the older torrent's %v", got, t0)
+	}
+	d.noteIncoming(t0.Add(2 * time.Minute))
+	d.noteIncoming(t0.Add(3 * time.Minute))
+	if d.incoming.Load() != 2 || d.lastIncoming.Load() != t0.Add(3*time.Minute).UnixMilli() {
+		t.Errorf("count %d last %d; want 2 and the second's time", d.incoming.Load(), d.lastIncoming.Load())
+	}
+	d.forget("bb")
+	if got := d.activeSince(); !got.Equal(t0.Add(time.Minute)) {
+		t.Errorf("after forgetting the older: activeSince = %v", got)
+	}
+	d.forget("aa")
+	if !d.activeSince().IsZero() {
+		t.Errorf("no torrents: activeSince = %v; want zero", d.activeSince())
+	}
+}

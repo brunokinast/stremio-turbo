@@ -12181,10 +12181,47 @@
               "type": "string"
             },
             "description": "Non-loopback, non-link-local IPv4/IPv6 addresses of up interfaces"
+          },
+          "incoming": {
+            "$ref": "#/components/schemas/IncomingStats"
           }
         },
         "required": [
           "availableInterfaces"
+        ]
+      },
+      "IncomingStats": {
+        "type": "object",
+        "description": "Accepted incoming peer connections since the server started. None while torrents have been loaded for a while means peers can't reach the listening port (e.g. no router forward), which on small swarms costs most of the speed.",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "listenPort": {
+            "type": "integer"
+          },
+          "activeSince": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the longest-loaded torrent was added; null when none is"
+          }
+        },
+        "required": [
+          "count",
+          "lastAt",
+          "listenPort",
+          "activeSince"
         ]
       },
       "NzbCreateRequest": {

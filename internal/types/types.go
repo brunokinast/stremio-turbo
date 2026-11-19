@@ -332,6 +332,16 @@ type Engine interface {
 
 // DialRecord is one entry of a torrent's connection log (GET
 // /debug/dials/:infoHash).
+// IncomingStats is GET /network-info's `incoming`: accepted incoming peer
+// connections since start (none after a while means the port is unreachable).
+type IncomingStats struct {
+	Count      int64      `json:"count"`
+	LastAt     *time.Time `json:"lastAt"`
+	ListenPort int        `json:"listenPort"`
+	// ActiveSince is when the longest-loaded torrent was added; null when none is.
+	ActiveSince *time.Time `json:"activeSince"`
+}
+
 type DialRecord struct {
 	Address string `json:"address"`
 	// Source is how the peer was found (anacrolix code, e.g. "Hg" DHT, "Tr"
