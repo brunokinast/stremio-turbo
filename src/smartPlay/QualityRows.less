@@ -18,7 +18,7 @@
 
 .row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
 }
 
@@ -181,6 +181,83 @@
         &.open {
             transform: rotate(180deg);
         }
+    }
+}
+
+// Manual download (plan 12): the row's ⬇, and its state once started.
+.download {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    color: var(--primary-foreground-color);
+
+    &:hover,
+    &:focus-visible {
+        background-color: @overlay-hover;
+        color: var(--primary-accent-color);
+    }
+
+    .icon {
+        width: 1.125rem;
+        height: 1.125rem;
+    }
+}
+
+.download-cell {
+    width: 2.75rem;
+}
+
+.download.choosing {
+    animation: checking 1.2s ease-in-out infinite;
+}
+
+.download-status {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--primary-foreground-color);
+    white-space: nowrap;
+
+    .download-status-icon {
+        width: 1rem;
+        height: 1rem;
+        color: var(--primary-accent-color);
+    }
+}
+
+.source {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+
+    > :first-child {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+.source-download {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    color: var(--primary-foreground-color);
+
+    &:hover,
+    &:focus-visible {
+        background-color: @overlay-hover;
+        color: var(--primary-accent-color);
+    }
+
+    .icon {
+        width: 1rem;
+        height: 1rem;
     }
 }
 

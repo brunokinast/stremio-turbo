@@ -8,10 +8,13 @@ import { useNowWatch } from './nowWatch';
 import useEpisodeDownloads from './episodeDownloads';
 import PortCheck from './PortCheck';
 import DiskCheck from './DiskCheck';
+import ManualDownloadToasts from './ManualDownloadToasts';
+import useEpisodeDownload from './useEpisodeDownload';
+import SeasonDownload from './SeasonDownload';
 import useNamePlaying from './namePlaying';
 import type { Download as EpisodeDownload } from './episodeDownloads';
 
 const START_BUFFER_SECONDS = START_BUFFER_MS / 1000;
 
 export type { EpisodeDownload };
-export { PortCheck, DiskCheck, useNamePlaying, useEpisodeDownloads, QualityRows, useSmartPlay, useStartBuffer, useNextSlot, useNowWatch, useAheadToggle, START_BUFFER_SECONDS, requestAutoplay, hasRememberedQuality, offersRememberedQuality };
+export { PortCheck, DiskCheck, ManualDownloadToasts, useEpisodeDownload, SeasonDownload, useNamePlaying, useEpisodeDownloads, QualityRows, useSmartPlay, useStartBuffer, useNextSlot, useNowWatch, useAheadToggle, START_BUFFER_SECONDS, requestAutoplay, hasRememberedQuality, offersRememberedQuality };

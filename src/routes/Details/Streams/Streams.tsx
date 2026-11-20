@@ -16,7 +16,7 @@ import Message from '../Message';
 import EpisodePicker from '../EpisodePicker';
 import Stream from './Stream';
 import useStreamsByAddon from './useStreamsByAddon';
-import { QualityRows, useSmartPlay } from 'stremio/smartPlay';
+import { QualityRows, useSmartPlay, useEpisodeDownload } from 'stremio/smartPlay';
 import styles from './Streams.less';
 
 type Props = {
@@ -52,6 +52,9 @@ const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, v
         enabled: profile.settings.playerType === null,
     });
     const hasQualities = smartPlay.tiers.length > 0;
+    // Manual downloads (plan 12): the quality rows' ⬇.
+    const show = useMemo(() => metaId !== null ? { id: metaId, type, name: title ?? '', poster: null } : null, [metaId, type, title]);
+    const episodeDownload = useEpisodeDownload({ show, video: video ?? null, tiers: smartPlay.tiers, enabled: hasQualities && video !== undefined && video !== null });
     const [allStreamsOpen, setAllStreamsOpen] = useState(false);
     const [selectedAddon, setSelectedAddon] = useState(ALL_ADDONS_KEY);
     const effectiveSelectedAddon = groups.some(({ addon }) => addon.transportUrl === selectedAddon) ? selectedAddon : ALL_ADDONS_KEY;
@@ -188,6 +191,7 @@ const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, v
                                                 onPlay={smartPlay.play}
                                                 onPlayLeader={smartPlay.playLeader}
                                                 onCancel={smartPlay.cancel}
+                                                episodeDownload={show !== null && video ? episodeDownload : null}
                                             />
                                             <Button
                                                 className={styles['all-streams']}

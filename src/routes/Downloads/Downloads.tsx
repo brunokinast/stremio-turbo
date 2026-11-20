@@ -10,7 +10,9 @@ import { useTranslation } from 'react-i18next';
 import classnames from 'classnames';
 import Icon from '@stremio/stremio-icons/react';
 import { Button, Checkbox, Chips, Image, MainNavBars, ModalDialog, MultiselectMenu } from 'stremio/components';
-import { useDownloads } from 'stremio/smartPlay/downloads';
+import { isStalled, useDownloads } from 'stremio/smartPlay/downloads';
+import { retryElsewhere } from 'stremio/smartPlay/manualDownload';
+import { useProfile } from 'stremio/common';
 import type { Download } from 'stremio/smartPlay/downloads';
 import { cancelAhead } from 'stremio/smartPlay/next';
 import { isLowDisk } from 'stremio/smartPlay/DiskCheck';
@@ -57,6 +59,21 @@ const qualityText = (item: Item) => [item.quality.resolution, item.quality.hdr, 
 const Downloads = () => {
     const { t } = useTranslation();
     const { downloads, disk, remove, pause, resume, baseUrl } = useDownloads(POLL);
+    const profile = useProfile();
+    // Stalled files whose other-source race is running.
+    const [retrying, setRetrying] = useState<Set<string>>(() => new Set());
+    const retry = useCallback((record: Download) => {
+        const key = `${record.infoHash}:${record.fileIdx}`;
+        if (baseUrl === null || retrying.has(key)) {
+            return;
+        }
+        setRetrying((previous) => new Set(previous).add(key));
+        retryElsewhere(baseUrl, profile.addons, record).finally(() => setRetrying((previous) => {
+            const next = new Set(previous);
+            next.delete(key);
+            return next;
+        }));
+    }, [baseUrl, profile.addons, retrying]);
     const [filter, setFilter] = useState<Filter>('all');
     const [sort, setSort] = useState<Sort>('size');
     const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -161,6 +178,10 @@ const Downloads = () => {
             // Complete is the normal case: nothing to say unless it plays.
             return what !== null ? line([what]) : null;
         }
+        if (isStalled(record)) {
+            const key = `${record.infoHash}:${record.fileIdx}`;
+            return line([what, percent, retrying.has(key) ? t('SMART_PLAY_DOWNLOADS_RETRYING') : t('SMART_PLAY_DOWNLOADS_STALLED')], false, t('SMART_PLAY_DOWNLOADS_STALLED_HINT'));
+        }
         switch (record.state) {
             case 'downloading': {
                 const left = record.rate > 0 && item.total !== null ? Math.ceil((item.total - record.bytesCompleted) / record.rate / 60) : null;
@@ -212,6 +233,14 @@ const Downloads = () => {
                             </Button>
                             :
                             null
+                }
+                {
+                    isStalled(record) && record.meta?.videoId !== undefined ?
+                        <Button className={classnames(styles['action'], { [styles['disabled']]: retrying.has(`${record.infoHash}:${record.fileIdx}`) })} title={t('SMART_PLAY_DOWNLOADS_TRY_ANOTHER')} onClick={() => retry(record)}>
+                            <Icon className={styles['action-icon']} name={'reset'} />
+                        </Button>
+                        :
+                        null
                 }
                 <Button className={classnames(styles['action'], styles['danger'], { [styles['disabled']]: playing })} title={playing ? t('SMART_PLAY_DOWNLOADS_PLAYING_NO_DELETE') : t('SMART_PLAY_DOWNLOADS_DELETE')} onClick={() => !playing && ask([item])}>
                     <Icon className={styles['action-icon']} name={'bin'} />

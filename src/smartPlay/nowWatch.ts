@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { groupByQuality, rankTiers } from './groupByQuality';
 import { RateMeter } from './supply';
 import { getLastQuality, getQuality } from './qualityMemory';
-import { listDownloads, removeDownload } from './downloads';
+import { isAutomatic, listDownloads, removeDownload } from './downloads';
 import type { Download } from './downloads';
 import { qualitySteps } from './candidates';
 import { withDisk } from './withDisk';
@@ -31,8 +31,6 @@ const WATCH_AFTER = 60;
 const END_MARGIN = 180;
 // How long track re-selection waits for the new file's track list.
 const TRACKS_WAIT = 15000;
-// Origins smart play gives a record by itself.
-const AUTOMATIC = ['picker', 'play', 'next'];
 
 type Track = { id: string, lang?: string | null, label?: string | null };
 
@@ -178,7 +176,7 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             played.current = 0;
             // The old record goes once mpv has closed it (a record deleted while
             // read keeps its data), unless it's complete or the user chose it.
-            if (old.state !== 'complete' && (old.origins ?? []).every((origin) => AUTOMATIC.includes(origin))) {
+            if (old.state !== 'complete' && isAutomatic(old)) {
                 setTimeout(() => removeDownload(base, current.infoHash, current.fileIdx), 5000);
             }
             notify.now({ quality: result.step.label, gb: (source.onDisk ?? source.size ?? 0) / 1e9, ratio: result.ratio, oldRatio: ratio });

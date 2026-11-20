@@ -78,7 +78,7 @@ const useLiveSeeders = (tiers: Tier[], baseUrl: string | null) => {
     }, [baseUrl, torrentsKey]);
 
     const ranked: RankedTier[] = useMemo(() => rankTiers(tiers, live), [tiers, live]);
-    return { tiers: ranked, settled: pending === 0 };
+    return { tiers: ranked, settled: pending === 0, live };
 };
 
 export default useLiveSeeders;

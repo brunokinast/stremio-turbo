@@ -10,6 +10,7 @@ import type { RankedSource, RankedTier } from './groupByQuality';
 import type { Candidate } from './picker';
 import type { Match } from './candidates';
 import type { Picking } from './useSmartPlay';
+import type { EpisodeDownloadState } from './useEpisodeDownload';
 import styles from './QualityRows.less';
 
 type Props = {
@@ -25,11 +26,74 @@ type Props = {
     onPlay: (tierKey: string) => void,
     onPlayLeader: () => void,
     onCancel: () => void,
+    // Manual downloads (plan 12): the episode's record or race, and the
+    // actions; absent where downloads aren't offered.
+    episodeDownload?: EpisodeDownloadState | null,
 };
 
-const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleased, canMarkWatched, onPlay, onPlayLeader, onCancel }: Props) => {
+const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleased, canMarkWatched, onPlay, onPlayLeader, onCancel, episodeDownload = null }: Props) => {
     const { t } = useTranslation();
     const [expanded, setExpanded] = useState<string | null>(null);
+
+    // A quality row's download control, in a column of its own on every row
+    // (so the play buttons stay aligned): ⬇ races this tier and keeps the
+    // fastest; while this episode's own race runs, ✕ cancels it. A tier on
+    // disk, or an episode already downloading, leaves it empty.
+    const renderDownload = (tier: RankedTier) => {
+        if (episodeDownload === null) {
+            return null;
+        }
+        const { record, racing } = episodeDownload;
+        if (tier.disk !== null || record !== null || (racing !== null && (racing.quality !== tier.label || racing.kind !== 'episode'))) {
+            return <div className={styles['download-cell']} />;
+        }
+        if (racing !== null) {
+            return (
+                <Button className={classNames(styles['download'], styles['choosing'])} title={t('SMART_PLAY_MANUAL_CANCEL')} onClick={episodeDownload.cancel}>
+                    <Icon className={styles['icon']} name={'close'} />
+                </Button>
+            );
+        }
+        return (
+            <Button className={styles['download']} title={t('SMART_PLAY_MANUAL_DOWNLOAD_HINT', { quality: tier.label })} onClick={() => episodeDownload.download(tier.key)}>
+                <Icon className={styles['icon']} name={'download'} />
+            </Button>
+        );
+    };
+
+    // What the row says in place of its live count while this episode is
+    // being chosen or downloaded from it.
+    const downloadStatus = (tier: RankedTier) => {
+        if (episodeDownload === null || tier.disk !== null) {
+            return null;
+        }
+        const { record, racing } = episodeDownload;
+        if (record !== null && tier.sources.some((source) => source.infoHash === record.infoHash && source.fileIdx === record.fileIdx)) {
+            const percent = Math.floor(100 * record.bytesCompleted / Math.max(1, record.size));
+            return (
+                <span className={styles['download-status']} title={t('SMART_PLAY_MANUAL_RECORD_HINT')}>
+                    <Icon className={styles['download-status-icon']} name={'download'} />
+                    {record.state === 'paused' ? t('SMART_PLAY_DOWNLOAD_PAUSED') : t('SMART_PLAY_DOWNLOAD_PERCENT', { percent })}
+                </span>
+            );
+        }
+        if (racing !== null && racing.quality === tier.label) {
+            return <span className={classNames(styles['download-status'], styles['checking'])}>{t('SMART_PLAY_MANUAL_CHOOSING')}</span>;
+        }
+        return null;
+    };
+
+    // A source card's ⬇: keeps exactly that source (no race).
+    const renderSourceDownload = (tier: RankedTier, source: RankedSource) => {
+        if (episodeDownload === null || source.onDisk !== null || source.fileIdx === null || episodeDownload.record !== null || episodeDownload.racing !== null) {
+            return null;
+        }
+        return (
+            <Button className={styles['source-download']} title={t('SMART_PLAY_MANUAL_SOURCE_HINT')} onClick={() => episodeDownload.downloadSource(source, tier.key)}>
+                <Icon className={styles['icon']} name={'download'} />
+            </Button>
+        );
+    };
 
     // Live count: a dot coloured by health (pulsing while counts are still
     // coming in) and the number; the tooltip spells it out.
@@ -161,7 +225,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                                         :
                                         null
                                 }
-                                {tier.disk !== null && tier.disk.onDisk !== null ? renderOnDisk(tier.disk.onDisk) : renderSeeders(tier.best)}
+                                {tier.disk !== null && tier.disk.onDisk !== null ? renderOnDisk(tier.disk.onDisk) : downloadStatus(tier) ?? renderSeeders(tier.best)}
                                 <div className={styles['play-icon']} aria-hidden={'true'}>
                                     <Icon className={styles['icon']} name={'play'} />
                                 </div>
@@ -172,6 +236,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                                     :
                                     null
                             }
+                            {renderDownload(tier)}
                             <Button
                                 className={styles['expand']}
                                 title={t('SMART_PLAY_SOURCES')}
@@ -195,6 +260,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                                                     videoReleased={videoReleased}
                                                     canMarkWatched={canMarkWatched}
                                                 />
+                                                {renderSourceDownload(tier, source)}
                                             </div>
                                         ))
                                     }

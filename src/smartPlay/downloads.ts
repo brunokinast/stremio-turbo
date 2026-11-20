@@ -51,6 +51,10 @@ type Download = {
     // A player has the file open.
     streaming?: boolean,
     peers?: number,
+    // Its rank among its torrent's kept files, and whether it downloads
+    // first (High priority) of them.
+    order?: number,
+    first?: boolean,
 };
 
 type DiskInfo = { free: number, total: number, used: number };
@@ -60,6 +64,9 @@ type DownloadRequest = {
     origin?: string,
     meta?: DownloadMeta,
     startFraction?: number,
+    // Ranks a kept file among its torrent's kept files (earliest episode
+    // first): season * 1000 + episode.
+    order?: number,
 };
 
 // The server's records, or null when it doesn't support them.
@@ -139,6 +146,36 @@ const store = {
 
 const notify = () => store.listeners.forEach((_interval, listener) => listener());
 
+// A kept file that hasn't moved for this long is stalled (the Downloads
+// screen offers another source).
+const STALL_AFTER = 10 * 60 * 1000;
+// Per kept, incomplete, unpaused file: its bytes and when they last grew.
+const movement = new Map<string, { bytes: number, at: number }>();
+
+const trackMovement = (downloads: Download[] | null) => {
+    const now = Date.now();
+    const seen = new Set<string>();
+    (downloads ?? []).forEach((d) => {
+        if (d.kind !== 'kept' || d.state === 'complete' || d.state === 'paused') {
+            return;
+        }
+        const key = `${d.infoHash}:${d.fileIdx}`;
+        seen.add(key);
+        const last = movement.get(key);
+        if (last === undefined || d.bytesCompleted > last.bytes) {
+            movement.set(key, { bytes: d.bytesCompleted, at: now });
+        }
+    });
+    Array.from(movement.keys()).filter((key) => !seen.has(key)).forEach((key) => movement.delete(key));
+};
+
+// A kept file still to download that hasn't gained a byte in STALL_AFTER
+// (as far as this session has watched it).
+const isStalled = (d: Download) => {
+    const last = d.kind === 'kept' && d.state !== 'complete' && d.state !== 'paused' ? movement.get(`${d.infoHash}:${d.fileIdx}`) : undefined;
+    return last !== undefined && Date.now() - last.at >= STALL_AFTER;
+};
+
 const refreshStore = async () => {
     const baseUrl = store.baseUrl;
     if (baseUrl === null) {
@@ -146,6 +183,7 @@ const refreshStore = async () => {
     }
     const [downloads, disk] = await Promise.all([listDownloads(baseUrl), getDisk(baseUrl)]);
     if (baseUrl === store.baseUrl) {
+        trackMovement(downloads);
         store.snapshot = { downloads, disk };
         notify();
     }
@@ -265,6 +303,12 @@ const isComplete = (d: Download) => d.state === 'complete' || (d.kind === 'unkep
 // unkept. Resumable.
 const isStopped = (d: Download) => !isComplete(d) && (d.state === 'paused' || (d.kind === 'unkept' && d.info === undefined && d.fileIdx >= 0));
 
+// Origins smart play gives a record by itself. A record with any other
+// origin (the user's own download, "manual" or "resume") is never replaced or
+// deleted by smart play.
+const AUTOMATIC_ORIGINS = ['picker', 'play', 'next'];
+const isAutomatic = (d: Pick<Download, 'origins'>) => (d.origins ?? []).every((origin) => AUTOMATIC_ORIGINS.includes(origin));
+
 // How many files are downloading now (the nav tab's badge).
 const useActiveDownloads = (): number => {
     const { downloads } = useDownloads(10000);
@@ -272,4 +316,4 @@ const useActiveDownloads = (): number => {
 };
 
 export type { Download, DownloadKind, DownloadMeta, DownloadRequest, DownloadState, DiskInfo };
-export { listDownloads, getDisk, addDownload, markWatched, setDownloadMeta, setPaused, removeDownload, isLive, isComplete, isStopped, useDownloads, useActiveDownloads };
+export { refreshStore as refreshDownloads, listDownloads, getDisk, addDownload, markWatched, setDownloadMeta, setPaused, removeDownload, isLive, isComplete, isStopped, isAutomatic, isStalled, useDownloads, useActiveDownloads };

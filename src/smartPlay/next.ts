@@ -13,7 +13,7 @@ import type { StreamGroup } from 'stremio/routes/Details/Streams/useStreamsByAdd
 import { groupByQuality, rankTiers } from './groupByQuality';
 import { RateMeter } from './supply';
 import { getLastQuality, getQuality } from './qualityMemory';
-import { addDownload, listDownloads, markWatched, removeDownload } from './downloads';
+import { addDownload, isAutomatic, listDownloads, markWatched, removeDownload } from './downloads';
 import type { Download } from './downloads';
 import { qualitySteps } from './candidates';
 import { withDisk } from './withDisk';
@@ -368,7 +368,9 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
                 fillRef.current(video, downloads, null);
                 return;
             }
-            if (record.state === 'complete' || record.state === 'paused') {
+            // On disk, paused, or the user's own download (never replaced):
+            // nothing to watch.
+            if (record.state === 'complete' || record.state === 'paused' || !isAutomatic(record)) {
                 watched.current = null;
                 return;
             }

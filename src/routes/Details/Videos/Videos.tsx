@@ -17,7 +17,7 @@ import useScrollMemory from './useScrollMemory';
 import useSeasons from 'stremio/common/useSeasons';
 import type { ScrollMemory } from './useScrollMemory';
 import styles from './Videos.less';
-import { useEpisodeDownloads } from 'stremio/smartPlay';
+import { useEpisodeDownloads, SeasonDownload } from 'stremio/smartPlay';
 
 export type { ScrollMemory };
 
@@ -121,6 +121,16 @@ const Videos = ({
             hidden={hidden}
         >
             <Search className={styles['search']} value={search} placeholder={t('SEARCH_VIDEOS')} onChange={setSearch} />
+            {
+                selectedSeason !== null && selectedSeason > 0 ?
+                    <SeasonDownload
+                        show={{ id: metaItem.id, type: metaItem.type, name: metaItem.name, poster: metaItem.poster ?? null }}
+                        season={selectedSeason}
+                        videos={videos}
+                    />
+                    :
+                    null
+            }
             {
                 showNotifications ?
                     <Toggle className={styles['notifications']} checked={!libraryItem.state.noNotif} onClick={onToggleNotifications}>
