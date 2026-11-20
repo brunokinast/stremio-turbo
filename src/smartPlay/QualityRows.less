@@ -239,8 +239,83 @@
     text-overflow: ellipsis;
 }
 
+.steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+}
+
+.step {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+
+    &.too-slow {
+        opacity: 0.6;
+    }
+
+    &.healthy .step-result {
+        color: @healthy;
+    }
+}
+
+.step-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.step-label {
+    font-weight: 600;
+    color: var(--primary-foreground-color);
+}
+
+.match {
+    padding: 0.0625rem 0.375rem;
+    border-radius: 0.25rem;
+    background-color: @overlay-hover;
+    font-size: 0.75rem;
+    color: @text-secondary;
+}
+
+.step-result {
+    margin-left: auto;
+    white-space: nowrap;
+    color: @text-secondary;
+}
+
+.racer {
+    &.leader .racer-status {
+        color: var(--primary-foreground-color);
+        font-weight: 600;
+    }
+}
+
+.racer-size {
+    min-width: 3.5rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.racing-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.racing-lead {
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    background-color: var(--primary-accent-color);
+    font-weight: 600;
+    color: var(--primary-foreground-color);
+
+    &:hover,
+    &:focus-visible {
+        filter: brightness(1.1);
+    }
+}
+
 .racing-cancel {
-    align-self: flex-start;
     padding: 0.5rem 1rem;
     border-radius: var(--border-radius);
     background-color: @overlay-hover;

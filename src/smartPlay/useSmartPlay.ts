@@ -1,6 +1,11 @@
-// Streams-list side of smart play: groups sources by quality, ranks them by
-// live seeders, and plays a quality: its copy on disk when it has one, else
-// by racing its best sources.
+// Streams-list side of smart play (plan 11, the Now slot): groups sources by
+// quality, ranks them by live seeders, and picks the source to play with the
+// shared picker (picker.ts): a copy on disk plays directly; otherwise the
+// quality's top sources are tested start-only and the healthiest healthy one
+// plays, stepping down the quality order when none keeps up.
+//
+// The pick for the likely quality starts in the background when the page
+// opens, so Play is usually instant; leaving the page deletes its tests.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -12,16 +17,16 @@ import useToast from 'stremio/common/Toast/useToast';
 import type { StreamGroup } from 'stremio/routes/Details/Streams/useStreamsByAddon';
 import { fallbackTier, groupByQuality, offersQuality } from './groupByQuality';
 import useLiveSeeders from './useLiveSeeders';
-import race from './race';
-import type { RacerProgress } from './race';
-import { preload, stats } from './serverApi';
-import { neededRate, parseRuntime, RateMeter } from './supply';
+import { parseRuntime, RateMeter } from './supply';
 import { getLastQuality, getQuality, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
-import { claim } from './warmup';
-import { downloadedSource } from './ahead';
-import { isComplete, listDownloads, useDownloads } from './downloads';
+import { addDownload, isComplete, removeDownload, useDownloads } from './downloads';
 import type { Download } from './downloads';
+import { qualitySteps } from './candidates';
+import { pick } from './picker';
+import type { PickResult, Progress } from './picker';
+import { need } from './health';
+import { remember } from './rateMemory';
 import type { RankedSource, RankedTier } from './groupByQuality';
 
 type Options = {
@@ -36,23 +41,29 @@ type Options = {
     enabled: boolean,
 };
 
-type Racing = {
+// What the loader shows while a pick the user waits on runs.
+type Picking = {
     tierKey: string,
     label: string,
-    weak: boolean,
-    racers: RacerProgress[],
+    progress: Progress | null,
 };
 
-// Sources of the likely quality opened ahead of a click, and how long the
-// ranking must hold still first (live counts can still reorder it).
-const PRELOAD_SOURCES = 3;
-const PRELOAD_DEBOUNCE = 2000;
+// The running or finished pick, keyed by the quality it started from.
+type Run = {
+    key: string,
+    controller: AbortController,
+    progress: Progress | null,
+    result: PickResult | null,
+    done: Promise<PickResult | null>,
+};
 
-// How often the preloaded sources' download is sampled while on the page.
-const DWELL_POLL = 2000;
-
+// How long the ranking must hold still before the background pick starts
+// (live counts can still reorder it).
+const PICK_DEBOUNCE = 2000;
 // How often the records are read for the on-disk marks.
 const DISK_POLL = 5000;
+// The background winner's test record is renewed while the page stays open.
+const RENEW = 30000;
 
 // Marks each source whose file is all on disk, and each tier's best such
 // source (the largest). A source without a file index matches the record
@@ -77,6 +88,9 @@ const withDisk = (tiers: RankedTier[], records: Download[] | null, videoId: stri
     });
 };
 
+const gb = (bytes: number | null) => bytes !== null ? (bytes / 1e9).toFixed(1) : '?';
+const times = (ratio: number | null) => ratio === null ? '?' : ratio === Infinity ? '∞' : ratio.toFixed(1);
+
 const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, runtime, enabled }: Options) => {
     const core = useCore();
     const navigate = useNavigate();
@@ -88,18 +102,16 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
     // poller): they play from disk, so they show "On disk" and play directly.
     const { downloads: records } = useDownloads(DISK_POLL, enabled && videoId !== null);
     const tiers = useMemo(() => withDisk(liveTiers, records, videoId), [liveTiers, records, videoId]);
+    const recordsRef = useRef(records);
+    recordsRef.current = records;
     const { autoplay } = useSmartPlayState();
     const { t } = useTranslation();
     const toast = useToast();
-    const [racing, setRacing] = useState<Racing | null>(null);
-    const raceController = useRef<AbortController | null>(null);
-    // A play started from this page: the preload no longer applies (it would
-    // re-add the sources the race just removed, as autoplay can race before
-    // the preload's debounce runs).
+    const [picking, setPicking] = useState<Picking | null>(null);
+    const meter = useRef(new RateMeter());
+    // A play started from this page: the background pick no longer applies.
     const playStarted = useRef(false);
-    useEffect(() => {
-        playStarted.current = false;
-    }, [metaId, videoId]);
+    const run = useRef<Run | null>(null);
 
     const remembered = metaId !== null ? getQuality(metaId) : null;
 
@@ -109,13 +121,12 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         :
         0;
 
-    // Preload: open the likely quality's best sources before any click, so
-    // their peers, metadata and the pieces at the start position are ready
-    // when the race starts. The likely quality is the show's remembered one,
-    // or the last played anywhere, or else the closest offered (fallbackTier):
-    // without a match nothing was preloaded and a first play took 12.5 s
-    // instead of under 1 s (streaming-research findings/17).
-    const preloaded = useRef(new Set<string>());
+    // The episode's runtime in seconds: the show's last played video's
+    // duration, else its metadata's runtime.
+    const runtimeSeconds = libraryItem !== null && libraryItem.state.duration > 0 ? libraryItem.state.duration / 1000 : parseRuntime(runtime);
+
+    // The likely quality: the show's remembered one, or the last played
+    // anywhere, or else the closest offered (fallbackTier).
     const likelyKey = remembered ?? getLastQuality();
     const likelyTier = tiers.find((tier) => tier.key === likelyKey) ?? fallbackTier(tiers, likelyKey);
 
@@ -137,167 +148,165 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         // likelyTier changes identity on every count update; fallbackKey captures it.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fallbackKey, videoId]);
-    const preloadSources = useMemo(() => likelyTier !== undefined && (likelyTier.best !== null || settled) ? likelyTier.sources.slice(0, PRELOAD_SOURCES) : [], [likelyTier, settled]);
-    const preloadKey = preloadSources.map(({ infoHash }) => infoHash).join(',');
 
-    // The episode's runtime in seconds: the show's last played video's
-    // duration, else its metadata's runtime. With file sizes it gives each
-    // source's bitrate, which a source's rate must cover (supply.ts).
-    const runtimeSeconds = libraryItem !== null && libraryItem.state.duration > 0 ? libraryItem.state.duration / 1000 : parseRuntime(runtime);
+    const meta = useMemo(() => metaId !== null && videoId !== null ? { metaId, videoId } : undefined, [metaId, videoId]);
 
-    // Download rates of the preloaded sources, sampled while on the page: the
-    // race decides from them when the user presses Play.
-    const meter = useRef(new RateMeter());
-    useEffect(() => {
-        if (baseUrl === null || preloadSources.length === 0) {
-            return;
+    const startPick = useCallback((tierKey: string): Run | null => {
+        if (baseUrl === null) {
+            return null;
         }
-        const timer = setInterval(() => {
-            preloadSources.forEach(({ infoHash }) => {
-                stats(baseUrl, infoHash).then((s) => {
-                    if (s !== null) {
-                        meter.current.add(infoHash, Date.now(), s.downloaded);
-                    }
-                });
-            });
-        }, DWELL_POLL);
-        return () => clearInterval(timer);
-        // preloadKey captures the source set.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [baseUrl, preloadKey]);
+        const steps = qualitySteps(tiers, tierKey);
+        if (steps.length === 0) {
+            return null;
+        }
+        run.current?.controller.abort();
+        const controller = new AbortController();
+        const current: Run = { key: tierKey, controller, progress: null, result: null, done: Promise.resolve(null) };
+        current.done = pick({
+            baseUrl,
+            steps,
+            startFraction,
+            runtime: runtimeSeconds,
+            records: recordsRef.current,
+            meta,
+            meter: meter.current,
+            signal: controller.signal,
+            keep: () => current.progress?.leader?.source ?? null,
+            onProgress: (progress) => {
+                current.progress = progress;
+                setPicking((p) => p !== null && p.tierKey === tierKey ? { ...p, progress } : p);
+            },
+            onStepDown: (from, best, to) => {
+                toast.show({ type: 'info', title: t('SMART_PLAY_STEP_DOWN', { from: from.label, best: times(best), to: to.label }), timeout: 6000 });
+            },
+        }).then((result) => {
+            current.result = result;
+            return result;
+        }, () => null);
+        run.current = current;
+        return current;
+    }, [baseUrl, tiers, startFraction, runtimeSeconds, meta, toast, t]);
+
+    // Background pick for the likely quality once the ranking holds still.
+    const likelyReady = likelyTier !== undefined && (likelyTier.best !== null || settled || likelyTier.disk !== null);
+    const likelyTierKey = likelyTier?.key ?? null;
     useEffect(() => {
-        if (baseUrl === null || preloadSources.length === 0) {
+        if (!enabled || baseUrl === null || !likelyReady || likelyTierKey === null || playStarted.current) {
             return;
         }
         const timer = setTimeout(() => {
-            if (playStarted.current) {
-                return;
+            if (!playStarted.current && (run.current === null || run.current.key !== likelyTierKey)) {
+                startPick(likelyTierKey);
             }
-            // Keyed by start position too: a resume point known later moves
-            // the server's primed pieces there.
-            preloadSources
-                .filter(({ infoHash }) => !preloaded.current.has(`${infoHash}@${startFraction}`))
-                .forEach(({ infoHash, fileIdx, trackers }) => {
-                    preloaded.current.add(`${infoHash}@${startFraction}`);
-                    preload(baseUrl, infoHash, fileIdx, trackers, startFraction);
-                });
-        }, PRELOAD_DEBOUNCE);
+        }, PICK_DEBOUNCE);
         return () => clearTimeout(timer);
-        // preloadKey captures the source set; preloadSources changes identity on every count update.
+        // startPick changes identity with every count update; the key and start point decide.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [baseUrl, preloadKey, startFraction]);
+    }, [enabled, baseUrl, likelyReady, likelyTierKey, startFraction]);
 
-    const cancel = useCallback(() => {
-        raceController.current?.abort();
-        raceController.current = null;
+    // The background winner stays primed while the page is open (its test
+    // record is renewed); leaving the page deletes it and cancels the pick.
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const result = run.current?.result;
+            if (baseUrl !== null && result && !playStarted.current && result.source.onDisk === null && result.source.fileIdx !== null) {
+                addDownload(baseUrl, result.source.infoHash, result.source.fileIdx, result.source.trackers, { kind: 'temporary', origin: 'picker', startFraction, meta }).catch(() => undefined);
+            }
+        }, RENEW);
+        return () => clearInterval(timer);
+    }, [baseUrl, startFraction, meta]);
+    useEffect(() => {
         playStarted.current = false;
-        setRacing(null);
-    }, []);
+        return () => {
+            const current = run.current;
+            run.current = null;
+            current?.controller.abort();
+            const result = current?.result;
+            if (!playStarted.current && baseUrl !== null && result && result.source.onDisk === null && result.source.fileIdx !== null) {
+                removeDownload(baseUrl, result.source.infoHash, result.source.fileIdx);
+            }
+        };
+        // Per episode.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [metaId, videoId]);
 
-    // The copy of this episode downloaded ahead (ahead.ts), when it is still
-    // on the server and among the listed sources: it was chosen to finish
-    // before playback could catch it, so it plays directly, without a race.
-    const downloadedCopy = useCallback(async (): Promise<RankedSource | null> => {
-        const known = metaId !== null && videoId !== null ? downloadedSource(metaId, videoId) : null;
-        if (known === null || baseUrl === null) {
-            return null;
-        }
-        const source = tiers.flatMap((tier) => tier.sources).find((s) => s.infoHash === known.infoHash && s.fileIdx === known.fileIdx);
-        if (source === undefined) {
-            return null;
-        }
-        const downloads = await listDownloads(baseUrl);
-        return downloads !== null && downloads.some((d) => d.infoHash === known.infoHash && d.fileIdx === known.fileIdx) ? source : null;
-    }, [metaId, videoId, baseUrl, tiers]);
-
-    const playDirect = useCallback((source: RankedSource) => {
+    const playSource = useCallback((source: RankedSource, tierKey: string | null, rememberQuality: boolean, result: PickResult | null) => {
         if (typeof source.stream.deepLinks?.player !== 'string') {
             return;
         }
-        const size = source.onDisk ?? source.size;
-        toast.show({ type: 'info', title: t('SMART_PLAY_DOWNLOADED_COPY', { size: size !== null ? (size / 1e9).toFixed(1) : '?' }), timeout: 6000 });
-        core.transport.analytics({ event: 'StreamClicked', args: { stream: source.stream } });
-        claim(source.infoHash);
-        setState({ handoff: null });
-        navigate(toPath(source.stream.deepLinks.player));
-    }, [core.transport, navigate, toast, t]);
-
-    // remember: an explicit choice becomes the show's quality; a fallback
-    // chosen for the user (autoplay) doesn't replace it.
-    const raceTier = useCallback((tierKey: string, remember = true) => {
-        const tier = tiers.find((tier) => tier.key === tierKey);
-        if (baseUrl === null || metaId === null || videoId === null || tier === undefined || tier.sources.length === 0) {
-            return;
-        }
-        if (remember) {
+        playStarted.current = true;
+        if (rememberQuality && metaId !== null && tierKey !== null) {
             setQuality(metaId, tierKey);
         }
-        raceController.current?.abort();
-        playStarted.current = true;
-        const controller = new AbortController();
-        raceController.current = controller;
-        setRacing({ tierKey, label: tier.label, weak: tier.weak, racers: [] });
-        const onProgress = (racers: RacerProgress[]) => {
-            setRacing((current) => current !== null && current.tierKey === tierKey ? { ...current, racers } : current);
-        };
-        race({ baseUrl, sources: tier.sources, startFraction, runtime: runtimeSeconds, meter: meter.current, signal: controller.signal, onProgress })
-            .then(({ source: winner, passed }) => {
-                if (controller.signal.aborted || typeof winner.stream.deepLinks?.player !== 'string') {
-                    return;
-                }
-                // A larger file passed over is a choice made for the user: say so.
-                const largest = passed.reduce<typeof passed[number] | null>((top, item) => top === null || item.needed > top.needed ? item : top, null);
-                if (largest !== null) {
-                    const gb = (bytes: number | null) => bytes !== null ? (bytes / 1e9).toFixed(1) : '?';
-                    toast.show({
-                        type: 'info',
-                        title: t(largest.remembered ? 'SMART_PLAY_PASSED_SLOW_EARLIER' : 'SMART_PLAY_PASSED_SLOW', {
-                            size: gb(winner.size),
-                            passedSize: gb(largest.source.size),
-                            rate: (largest.rate / 1e6).toFixed(1),
-                            needed: (largest.needed / 1e6).toFixed(1),
-                        }),
-                        timeout: 8000,
-                    });
-                }
-                core.transport.analytics({ event: 'StreamClicked', args: { stream: winner.stream } });
-                setRacing(null);
-                raceController.current = null;
-                const rate = meter.current.rate(winner.infoHash);
-                const needed = neededRate(winner, runtimeSeconds);
-                claim(winner.infoHash);
-                setState({ handoff: rate !== null && needed !== null ? { infoHash: winner.infoHash, rate, needed } : null });
-                navigate(toPath(winner.stream.deepLinks.player));
-            })
-            .catch(() => undefined);
-    }, [tiers, baseUrl, metaId, videoId, startFraction, runtimeSeconds, core.transport, navigate, toast, t]);
+        const size = source.onDisk ?? source.size;
+        if (source.onDisk !== null) {
+            toast.show({ type: 'info', title: t('SMART_PLAY_DOWNLOADED_COPY', { size: gb(size) }), timeout: 6000 });
+        } else if (result !== null && result.weak) {
+            toast.show({ type: 'info', title: t('SMART_PLAY_NONE_HEALTHY', { size: gb(size), ratio: times(result.ratio) }), timeout: 8000 });
+        } else if (result !== null) {
+            toast.show({ type: 'info', title: t('SMART_PLAY_READY', { size: gb(size), quality: result.step.label, ratio: times(result.ratio) }), timeout: 6000 });
+        }
+        // The rate measured feeds the 24 h memory and the player's start hold.
+        const rate = meter.current.rate(source.infoHash);
+        const needed = need({ size: source.size, completed: 0, runtime: runtimeSeconds, startFraction });
+        if (rate !== null && needed !== null && needed > 0) {
+            remember(source.infoHash, rate / needed);
+        }
+        core.transport.analytics({ event: 'StreamClicked', args: { stream: source.stream } });
+        setState({ handoff: source.onDisk === null && rate !== null && needed !== null && needed > 0 ? { infoHash: source.infoHash, rate, needed } : null });
+        setPicking(null);
+        navigate(toPath(source.stream.deepLinks.player));
+    }, [metaId, toast, t, runtimeSeconds, startFraction, core.transport, navigate]);
 
-    // Plays a quality: its copy that is all on disk when it has one (no race:
-    // it starts at once and downloads nothing; the toast says so); else the
-    // copy downloaded ahead (any quality for autoplay, which follows the copy
-    // chosen for the user; only the clicked quality's otherwise); else the race.
-    const play = useCallback((tierKey: string, remember = true, auto = false) => {
-        playStarted.current = true;
-        const tier = tiers.find((tier) => tier.key === tierKey);
-        const direct = (source: RankedSource) => {
-            if (remember && metaId !== null) {
-                setQuality(metaId, tierKey);
-            }
-            playDirect(source);
-        };
-        if (tier?.disk) {
-            direct(tier.disk);
+    const cancel = useCallback(() => {
+        run.current?.controller.abort();
+        run.current = null;
+        playStarted.current = false;
+        setPicking(null);
+    }, []);
+
+    // Plays the healthiest source the picker found so far, without waiting.
+    const playLeader = useCallback(() => {
+        const current = run.current;
+        const leader = current?.progress?.leader?.source ?? null;
+        if (current === null || leader === null) {
             return;
         }
-        downloadedCopy().then((copy) => {
-            const inTier = copy !== null && tier?.sources.some((s) => s.infoHash === copy.infoHash && s.fileIdx === copy.fileIdx) === true;
-            if (copy !== null && (auto || inTier)) {
-                direct(copy);
-            } else {
-                raceTier(tierKey, remember);
+        current.controller.abort();
+        playSource(leader, current.key, true, null);
+    }, [playSource]);
+
+    // Plays a quality: its copy on disk directly; else the pick for it (the
+    // background one when it started from this quality, waiting on it with
+    // the loader while it runs).
+    const play = useCallback((tierKey: string, rememberQuality = true) => {
+        const tier = tiers.find((tier) => tier.key === tierKey);
+        if (tier === undefined || tier.sources.length === 0) {
+            return;
+        }
+        if (tier.disk) {
+            playSource(tier.disk, tierKey, rememberQuality, null);
+            return;
+        }
+        playStarted.current = true;
+        const current = run.current !== null && run.current.key === tierKey ? run.current : startPick(tierKey);
+        if (current === null) {
+            playStarted.current = false;
+            return;
+        }
+        // A step down plays without replacing the remembered quality.
+        const finish = (result: PickResult) => playSource(result.source, result.step.key, rememberQuality && result.step.match === 'exact', result);
+        if (current.result !== null) {
+            finish(current.result);
+            return;
+        }
+        setPicking({ tierKey, label: tier.label, progress: current.progress });
+        current.done.then((result) => {
+            if (result !== null && run.current === current && !current.controller.signal.aborted) {
+                finish(result);
             }
         });
-    }, [downloadedCopy, playDirect, raceTier, tiers, metaId]);
+    }, [tiers, startPick, playSource]);
 
     // Resume / next episode asked to autoplay this video: once the remembered
     // quality has a live count (or nothing more is coming), play it. If the
@@ -308,23 +317,21 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
             return;
         }
         const tier = remembered !== null ? tiers.find((tier) => tier.key === remembered) : undefined;
-        if (tier !== undefined && (tier.best !== null || (settled && !streamsLoading))) {
+        if (tier !== undefined && (tier.best !== null || tier.disk !== null || (settled && !streamsLoading))) {
             setState({ autoplay: null });
-            play(tier.key, true, true);
+            play(tier.key, true);
         } else if (tier === undefined && !streamsLoading) {
             const fallback = remembered !== null ? fallbackTier(tiers, remembered) : undefined;
             if (fallback !== undefined && (fallback.best !== null || settled)) {
                 setState({ autoplay: null });
-                play(fallback.key, false, true);
+                play(fallback.key, false);
             } else if (fallback === undefined || settled) {
                 setState({ autoplay: null });
             }
         }
     }, [autoplay, metaId, videoId, remembered, tiers, settled, streamsLoading, play]);
 
-    useEffect(() => () => raceController.current?.abort(), []);
-
-    return { tiers, settled, racing, remembered, play, cancel };
+    return { tiers, settled, picking, remembered, play, playLeader, cancel };
 };
 
 // Asks the streams list of a video to autoplay its remembered quality.
@@ -343,5 +350,6 @@ const offersRememberedQuality = (metaId: string, videoId: string, streams: MetaD
     return quality !== null && offersQuality(streams, videoId, quality);
 };
 
+export type { Picking };
 export { requestAutoplay, hasRememberedQuality, offersRememberedQuality };
 export default useSmartPlay;

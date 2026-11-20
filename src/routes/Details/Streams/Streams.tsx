@@ -181,11 +181,12 @@ const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, v
                                                 tiers={smartPlay.tiers}
                                                 settled={smartPlay.settled}
                                                 remembered={smartPlay.remembered}
-                                                racing={smartPlay.racing}
+                                                picking={smartPlay.picking}
                                                 videoId={video?.id}
                                                 videoReleased={video?.released}
                                                 canMarkWatched={canMarkWatched}
                                                 onPlay={smartPlay.play}
+                                                onPlayLeader={smartPlay.playLeader}
                                                 onCancel={smartPlay.cancel}
                                             />
                                             <Button

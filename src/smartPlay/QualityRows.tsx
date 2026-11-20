@@ -7,7 +7,9 @@ import ProgressBar from 'stremio/components/ProgressBar';
 import StreamCard from 'stremio/routes/Details/Streams/Stream';
 import { LISTED_SEEDERS, WEAK_SEEDERS } from './groupByQuality';
 import type { RankedSource, RankedTier } from './groupByQuality';
-import type { RacerProgress } from './race';
+import type { Candidate } from './picker';
+import type { Match } from './candidates';
+import type { Picking } from './useSmartPlay';
 import styles from './QualityRows.less';
 
 type Props = {
@@ -15,15 +17,17 @@ type Props = {
     // Every live count has come in; until then figures may still grow.
     settled: boolean,
     remembered: string | null,
-    racing: { tierKey: string, label: string, weak: boolean, racers: RacerProgress[] } | null,
+    // The pick the user waits on (the loader), or null.
+    picking: Picking | null,
     videoId?: string | null,
     videoReleased?: string | null,
     canMarkWatched: boolean,
     onPlay: (tierKey: string) => void,
+    onPlayLeader: () => void,
     onCancel: () => void,
 };
 
-const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoReleased, canMarkWatched, onPlay, onCancel }: Props) => {
+const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleased, canMarkWatched, onPlay, onPlayLeader, onCancel }: Props) => {
     const { t } = useTranslation();
     const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -73,43 +77,72 @@ const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoRelease
         );
     }, [renderSeeders, renderOnDisk]);
 
-    const racerStatus = (racer: RacerProgress) => {
-        switch (racer.phase) {
-            case 'metadata':
-                return t('SMART_PLAY_RACER_METADATA');
-            case 'connecting':
-                return t('SMART_PLAY_RACER_CONNECTING', { count: racer.peers });
-            default: {
-                const speed = (racer.speed / 1048576).toFixed(1);
-                return racer.keepsUp === true ? t('SMART_PLAY_RACER_KEEPS_UP', { speed }) :
-                    racer.keepsUp === false ? t('SMART_PLAY_RACER_TOO_SLOW', { speed }) :
-                        t('SMART_PLAY_RACER_DOWNLOADING', { speed });
-            }
+    const times = (ratio: number | null) => ratio === null ? '–' : ratio === Infinity ? '∞' : `${ratio.toFixed(1)}×`;
+    const matchLabel = (match: Match) => t(match === 'exact' ? 'SMART_PLAY_MATCH_EXACT' : match === 'same' ? 'SMART_PLAY_MATCH_SAME' : 'SMART_PLAY_MATCH_LOWER');
+
+    // One candidate of the step being tested: size, live seeders, and how many
+    // times its need it downloads (or what it's waiting for).
+    const candidateStatus = (candidate: Candidate) => {
+        if (candidate.need === 0) {
+            return t('SMART_PLAY_DOWNLOAD_ON_DISK');
         }
+        if (candidate.ratio === null) {
+            return t('SMART_PLAY_RACER_CONNECTING_SHORT');
+        }
+        return candidate.live ? t('SMART_PLAY_CANDIDATE_HEALTH', { ratio: times(candidate.ratio) }) : t('SMART_PLAY_CANDIDATE_REMEMBERED', { ratio: times(candidate.ratio) });
     };
 
-    if (racing !== null) {
+    if (picking !== null) {
+        const progress = picking.progress;
+        const steps = progress?.steps ?? [];
         return (
             <div className={styles['racing']} role={'status'}>
-                <div className={styles['racing-label']}>{t('SMART_PLAY_FINDING', { quality: racing.label })}</div>
-                {
-                    racing.weak ?
-                        <div className={styles['racing-warning']}>{t('SMART_PLAY_WEAK_WARNING', { quality: racing.label })}</div>
-                        :
-                        null
-                }
+                <div className={styles['racing-label']}>{t('SMART_PLAY_FINDING', { quality: picking.label })}</div>
                 <div className={styles['racing-line']} />
-                <div className={styles['racers']}>
+                <div className={styles['steps']}>
                     {
-                        racing.racers.map((racer) => (
-                            <div key={racer.infoHash} className={styles['racer']}>
-                                {renderSeeders(racer.seeders)}
-                                <span className={styles['racer-status']}>{racerStatus(racer)}</span>
+                        steps.map(({ step, result, best }, index) => (
+                            <div key={step.key + index} className={classNames(styles['step'], styles[result])}>
+                                <div className={styles['step-head']}>
+                                    <span className={styles['step-label']}>{step.label}</span>
+                                    <span className={styles['match']} title={t('SMART_PLAY_MATCH_HINT')}>{matchLabel(step.match)}</span>
+                                    <span className={styles['step-result']}>
+                                        {
+                                            result === 'testing' ? t('SMART_PLAY_STEP_TESTING') :
+                                                result === 'healthy' ? t('SMART_PLAY_STEP_HEALTHY', { ratio: times(best) }) :
+                                                    t('SMART_PLAY_STEP_TOO_SLOW', { ratio: times(best) })
+                                        }
+                                    </span>
+                                </div>
+                                {
+                                    result === 'testing' && progress !== null ?
+                                        <div className={styles['racers']}>
+                                            {
+                                                progress.candidates.map((candidate) => (
+                                                    <div key={`${candidate.source.infoHash}:${candidate.source.fileIdx}`} className={classNames(styles['racer'], { [styles['leader']]: progress.leader === candidate })}>
+                                                        <span className={styles['racer-size']}>{candidate.source.size !== null ? `${(candidate.source.size / 1e9).toFixed(1)} GB` : '?'}</span>
+                                                        {candidate.need === 0 ? null : renderSeeders(candidate.source.seeders)}
+                                                        <span className={styles['racer-status']}>{candidateStatus(candidate)}</span>
+                                                    </div>
+                                                ))
+                                            }
+                                        </div>
+                                        :
+                                        null
+                                }
                             </div>
                         ))
                     }
                 </div>
-                <Button className={styles['racing-cancel']} onClick={onCancel}>{t('SMART_PLAY_CANCEL')}</Button>
+                <div className={styles['racing-buttons']}>
+                    {
+                        progress?.leader ?
+                            <Button className={styles['racing-lead']} onClick={onPlayLeader}>{t('SMART_PLAY_PLAY_LEADER')}</Button>
+                            :
+                            null
+                    }
+                    <Button className={styles['racing-cancel']} onClick={onCancel}>{t('SMART_PLAY_CANCEL')}</Button>
+                </div>
             </div>
         );
     }

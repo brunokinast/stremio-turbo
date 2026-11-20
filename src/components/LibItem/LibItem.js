@@ -9,6 +9,7 @@ const { useCore } = require('stremio/core');
 const { default: getMetaDetailsHref } = require('stremio/common/getMetaDetailsHref');
 const MetaItem = require('stremio/components/MetaItem');
 const { t } = require('i18next');
+const { requestAutoplay } = require('stremio/smartPlay/useSmartPlay');
 
 const LibItem = ({ _id, removable, notifications, watched, detailsVideosFirst, ...props }) => {
     const navigate = useNavigate();
@@ -122,12 +123,19 @@ const LibItem = ({ _id, removable, notifications, watched, detailsVideosFirst, .
         }
     }, [_id, detailsHref, navigate, navigateWithOrigin, playerHref, props.optionOnSelect, watched]);
 
+    // Smart play: ▶ goes the Resume way, through the episode's streams page,
+    // which plays its copy on disk or the healthiest source of the
+    // remembered quality; without one, the item's last stream as before.
+    const streamsHref = props.deepLinks && typeof props.deepLinks.metaDetailsStreams === 'string' ? props.deepLinks.metaDetailsStreams : null;
     const onPlayClick = React.useCallback((event) => {
         event.preventDefault();
-        if (typeof playerHref === 'string') {
+        const match = typeof streamsHref === 'string' ? /^#\/detail\/[^/]+\/([^/]+)\/([^/?]+)/.exec(streamsHref) : null;
+        if (match !== null && requestAutoplay(decodeURIComponent(match[1]), decodeURIComponent(match[2]))) {
+            navigate(toPath(streamsHref));
+        } else if (typeof playerHref === 'string') {
             navigate(toPath(playerHref));
         }
-    }, [navigate, playerHref]);
+    }, [navigate, playerHref, streamsHref]);
 
     return (
         <MetaItem
