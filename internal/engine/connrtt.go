@@ -15,10 +15,14 @@ import (
 // trip, which sizes its request queue (ClientConfig.RequestQueueRTTs). uTP
 // measures it on every packet; for TCP the kernel's smoothed RTT is read where
 // the platform exposes it (tcpRTT).
+//
+// anacrolix calls it under its client lock, so it must not take the uTP
+// socket lock: the socket reader holds that lock while it calls the firewall
+// callback, which takes the client lock (Stats() here deadlocked the client).
 func connRTT(c net.Conn) (time.Duration, bool) {
 	switch c := c.(type) {
 	case *purego.Conn:
-		rtt := c.Stats().RTT
+		rtt := c.RTT()
 		return rtt, rtt > 0
 	case *net.TCPConn:
 		return tcpRTT(c)
