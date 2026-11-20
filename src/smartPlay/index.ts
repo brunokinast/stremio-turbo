@@ -4,6 +4,7 @@ import QualityRows from './QualityRows';
 import useSmartPlay, { requestAutoplay, hasRememberedQuality, offersRememberedQuality } from './useSmartPlay';
 import useStartBuffer, { START_BUFFER_MS } from './startBuffer';
 import { useNextSlot, useAheadToggle } from './next';
+import { useNowWatch } from './nowWatch';
 import useEpisodeDownloads from './episodeDownloads';
 import PortCheck from './PortCheck';
 import DiskCheck from './DiskCheck';
@@ -13,4 +14,4 @@ import type { Download as EpisodeDownload } from './episodeDownloads';
 const START_BUFFER_SECONDS = START_BUFFER_MS / 1000;
 
 export type { EpisodeDownload };
-export { PortCheck, DiskCheck, useNamePlaying, useEpisodeDownloads, QualityRows, useSmartPlay, useStartBuffer, useNextSlot, useAheadToggle, START_BUFFER_SECONDS, requestAutoplay, hasRememberedQuality, offersRememberedQuality };
+export { PortCheck, DiskCheck, useNamePlaying, useEpisodeDownloads, QualityRows, useSmartPlay, useStartBuffer, useNextSlot, useNowWatch, useAheadToggle, START_BUFFER_SECONDS, requestAutoplay, hasRememberedQuality, offersRememberedQuality };

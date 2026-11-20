@@ -391,4 +391,4 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
     }, []);
 };
 
-export { cancelAhead, downloadedSource, isAheadEnabled, useAheadToggle, useNextSlot };
+export { cancelAhead, downloadedSource, fetchStreams, isAheadEnabled, useAheadToggle, useNextSlot };

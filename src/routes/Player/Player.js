@@ -34,7 +34,7 @@ const { default: useCastDevice } = require('./useCastDevice');
 const { default: useKeyboardSeek } = require('./useKeyboardSeek');
 const { default: usePlaybackSpeedHold } = require('./usePlaybackSpeedHold');
 const { default: useStatistics } = require('./useStatistics');
-const { requestAutoplay, useStartBuffer, useNextSlot, useNamePlaying, START_BUFFER_SECONDS } = require('stremio/smartPlay');
+const { requestAutoplay, useStartBuffer, useNextSlot, useNowWatch, useNamePlaying, START_BUFFER_SECONDS } = require('stremio/smartPlay');
 const useVideo = require('./useVideo');
 const { default: useAudio } = require('./useAudio');
 const { default: useSubtitles } = require('./useSubtitles');
@@ -120,6 +120,20 @@ const Player = () => {
         time: video.state.time,
         duration: video.state.duration,
         paused: video.state.paused,
+    });
+    // Smart play: the source playing is replaced mid-episode when it falls behind.
+    useNowWatch({
+        baseUrl: streamingServer.selected?.transportUrl ?? null,
+        addons: profile.addons,
+        meta: metaItemContent,
+        videoId: player.selected?.streamRequest?.path?.id ?? null,
+        playingInfoHash: typeof player.selected?.stream?.infoHash === 'string' ? player.selected.stream.infoHash.toLowerCase() : null,
+        playingFileIdx: typeof player.selected?.stream?.fileIdx === 'number' ? player.selected.stream.fileIdx : null,
+        time: video.state.time,
+        duration: video.state.duration,
+        paused: video.state.paused,
+        video,
+        shell: platform.shell,
     });
     useNamePlaying({
         baseUrl: streamingServer.selected?.transportUrl ?? null,

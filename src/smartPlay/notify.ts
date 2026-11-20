@@ -29,7 +29,11 @@ const useNotify = () => {
                                 t('SMART_PLAY_AHEAD_FULL', { episode: event.episode, reason: event.reason });
         toast.show({ type: event.kind === 'failed' ? 'error' : 'info', title, timeout: 8000 });
     }, [t, toast]);
-    return useMemo(() => ({ next }), [next]);
+    // A mid-episode switch (nowWatch.ts).
+    const now = useCallback((event: { quality: string, gb: number, ratio: number | null, oldRatio: number | null }) => {
+        toast.show({ type: 'info', title: t('SMART_PLAY_SWITCHED', { quality: event.quality, size: event.gb.toFixed(1), ratio: times(event.ratio), oldRatio: times(event.oldRatio) }), timeout: 10000 });
+    }, [t, toast]);
+    return useMemo(() => ({ next, now }), [next, now]);
 };
 
 export type { NextEvent };

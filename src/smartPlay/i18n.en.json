@@ -107,5 +107,6 @@
     "SMART_PLAY_STEP_DOWN": "{{from}} can't keep up (best {{best}}×): trying {{to}}",
     "SMART_PLAY_NONE_HEALTHY": "No source keeps up: playing the fastest ({{size}} GB, {{ratio}}× its need)",
     "SMART_PLAY_READY": "Ready: {{size}} GB {{quality}} ({{ratio}}× its need)",
-    "SMART_PLAY_AHEAD_WEAK": "Downloading {{episode}} in {{quality}} ({{size}} GB): no source keeps up, this is the fastest ({{ratio}}× the speed it needs)"
+    "SMART_PLAY_AHEAD_WEAK": "Downloading {{episode}} in {{quality}} ({{size}} GB): no source keeps up, this is the fastest ({{ratio}}× the speed it needs)",
+    "SMART_PLAY_SWITCHED": "Switched to {{size}} GB {{quality}} at the same point: the source playing fell behind ({{oldRatio}}× the speed it needs; the new one {{ratio}}×)"
 }
