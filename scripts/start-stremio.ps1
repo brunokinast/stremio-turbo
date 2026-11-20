@@ -34,6 +34,13 @@ function Set-ExitWhenDone([bool]$On) {
         -ContentType 'application/json' -Body (@{ on = $On } | ConvertTo-Json) | Out-Null
 }
 
+# This launcher is now the one in charge of the server. Recorded before the old shell is stopped:
+# the launcher that started it wakes when it exits, and must see it no longer owns the server
+# (otherwise it stops the server this one is about to adopt).
+New-Item -ItemType Directory -Force $dataDir | Out-Null
+$ownerFile = Join-Path $dataDir 'launcher.pid'
+Set-Content -Path $ownerFile -Value $PID
+
 # The shell is single instance and hides to tray: it must be gone first. Our own Rivulet,
 # left running to finish downloads, is adopted; any other server is stopped.
 Get-Process stremio-shell-ng, stremio-runtime -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -47,11 +54,6 @@ foreach ($p in @(Get-Process rivulet-engine -ErrorAction SilentlyContinue)) {
 Start-Sleep -Seconds 1
 
 New-Item -ItemType Directory -Force $dataDir | Out-Null
-
-# This launcher is now the one in charge of the server: an earlier one, woken when its shell was
-# stopped above, must not stop (or drain) the server this one adopts.
-$ownerFile = Join-Path $dataDir 'launcher.pid'
-Set-Content -Path $ownerFile -Value $PID
 
 # Rivulet configuration (docs/CONFIGURATION.md in its repo).
 $env:BIND_ADDRESS = '127.0.0.1'                 # API is unauthenticated: loopback only

@@ -28,6 +28,9 @@ type Tier = {
 type RankedSource = Source & {
     // Live seeders from the server, or null while unknown.
     seeders: number | null,
+    // The size of its file when all of it is on disk (it plays from disk),
+    // else null. Filled by useSmartPlay from the server's records.
+    onDisk: number | null,
 };
 
 type RankedTier = {
@@ -38,6 +41,8 @@ type RankedTier = {
     weak: boolean,
     // Watch progress (0–1) of the source last played from this tier, from core.
     progress: number | null,
+    // Its best source that is all on disk (the largest), or null.
+    disk: RankedSource | null,
 };
 
 const SIZE_UNITS: Record<string, number> = { KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 };
@@ -113,7 +118,7 @@ const rankTiers = (tiers: Tier[], live: Map<string, ScrapeResult>): RankedTier[]
         const sources = tier.sources
             .map((source): RankedSource => {
                 const result = live.get(source.infoHash);
-                return { ...source, seeders: result !== undefined && isKnown(result) ? result.seeders : null };
+                return { ...source, seeders: result !== undefined && isKnown(result) ? result.seeders : null, onDisk: null };
             })
             .sort((a, b) => {
                 if (a.seeders !== null || b.seeders !== null) {
@@ -130,6 +135,7 @@ const rankTiers = (tiers: Tier[], live: Map<string, ScrapeResult>): RankedTier[]
             best,
             weak: best !== null && best < WEAK_SEEDERS,
             progress,
+            disk: null,
         };
     });
 };

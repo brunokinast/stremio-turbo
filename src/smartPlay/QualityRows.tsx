@@ -6,7 +6,7 @@ import Button from 'stremio/components/Button';
 import ProgressBar from 'stremio/components/ProgressBar';
 import StreamCard from 'stremio/routes/Details/Streams/Stream';
 import { LISTED_SEEDERS, WEAK_SEEDERS } from './groupByQuality';
-import type { RankedTier } from './groupByQuality';
+import type { RankedSource, RankedTier } from './groupByQuality';
 import type { RacerProgress } from './race';
 import styles from './QualityRows.less';
 
@@ -44,21 +44,34 @@ const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoRelease
         );
     }, [settled, t]);
 
+    // A file all on disk: it plays from there, so swarm figures don't matter
+    // and it shows in place of them.
+    const renderOnDisk = useCallback((size: number) => (
+        <span className={styles['on-disk']} title={t('SMART_PLAY_ON_DISK_HINT', { size: (size / 1e9).toFixed(1) })}>
+            <Icon className={styles['on-disk-icon']} name={'download'} />
+            {t('SMART_PLAY_DOWNLOAD_ON_DISK')}
+        </span>
+    ), [t]);
+
     // A source card's description with the addon's (often stale) "👤 n"
-    // replaced by our live count, once known.
-    const renderDescription = useCallback((description: string, seeders: number | null) => {
-        const match = seeders !== null ? LISTED_SEEDERS.exec(description) : null;
-        if (match === null) {
+    // replaced by our live count once known, or by "On disk".
+    const renderDescription = useCallback((description: string, source: RankedSource) => {
+        const live = source.onDisk !== null ? renderOnDisk(source.onDisk) : source.seeders !== null ? renderSeeders(source.seeders) : null;
+        if (live === null) {
             return description;
+        }
+        const match = LISTED_SEEDERS.exec(description);
+        if (match === null) {
+            return source.onDisk !== null ? <React.Fragment><span className={styles['inline-seeders']}>{live}</span>{` ${description}`}</React.Fragment> : description;
         }
         return (
             <React.Fragment>
                 {description.slice(0, match.index)}
-                <span className={styles['inline-seeders']}>{renderSeeders(seeders)}</span>
+                <span className={styles['inline-seeders']}>{live}</span>
                 {description.slice(match.index + match[0].length)}
             </React.Fragment>
         );
-    }, [renderSeeders]);
+    }, [renderSeeders, renderOnDisk]);
 
     const racerStatus = (racer: RacerProgress) => {
         switch (racer.phase) {
@@ -115,7 +128,7 @@ const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoRelease
                                         :
                                         null
                                 }
-                                {renderSeeders(tier.best)}
+                                {tier.disk !== null && tier.disk.onDisk !== null ? renderOnDisk(tier.disk.onDisk) : renderSeeders(tier.best)}
                                 <div className={styles['play-icon']} aria-hidden={'true'}>
                                     <Icon className={styles['icon']} name={'play'} />
                                 </div>
@@ -143,7 +156,7 @@ const QualityRows = ({ tiers, settled, remembered, racing, videoId, videoRelease
                                             <div key={`${source.infoHash}:${source.fileIdx}`} className={styles['source']}>
                                                 <StreamCard
                                                     stream={source.stream}
-                                                    renderDescription={(description) => renderDescription(description, source.seeders)}
+                                                    renderDescription={(description) => renderDescription(description, source)}
                                                     addonName={source.addonName}
                                                     videoId={videoId}
                                                     videoReleased={videoReleased}

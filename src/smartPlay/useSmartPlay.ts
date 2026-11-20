@@ -1,5 +1,6 @@
 // Streams-list side of smart play: groups sources by quality, ranks them by
-// live seeders, and plays a quality by racing its best sources.
+// live seeders, and plays a quality: its copy on disk when it has one, else
+// by racing its best sources.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -19,8 +20,9 @@ import { getLastQuality, getQuality, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
 import { claim } from './warmup';
 import { downloadedSource } from './ahead';
-import { listDownloads } from './downloads';
-import type { RankedSource } from './groupByQuality';
+import { isComplete, listDownloads, useDownloads } from './downloads';
+import type { Download } from './downloads';
+import type { RankedSource, RankedTier } from './groupByQuality';
 
 type Options = {
     groups: StreamGroup[],
@@ -49,13 +51,43 @@ const PRELOAD_DEBOUNCE = 2000;
 // How often the preloaded sources' download is sampled while on the page.
 const DWELL_POLL = 2000;
 
+// How often the records are read for the on-disk marks.
+const DISK_POLL = 5000;
+
+// Marks each source whose file is all on disk, and each tier's best such
+// source (the largest). A source without a file index matches the record
+// named for this episode.
+const withDisk = (tiers: RankedTier[], records: Download[] | null, videoId: string | null): RankedTier[] => {
+    const complete = (records ?? []).filter(isComplete);
+    if (complete.length === 0) {
+        return tiers;
+    }
+    const byFile = new Map(complete.map((d) => [`${d.infoHash}:${d.fileIdx}`, d]));
+    const sizeOnDisk = (source: RankedSource) => {
+        const record = source.fileIdx !== null ?
+            byFile.get(`${source.infoHash}:${source.fileIdx}`)
+            :
+            complete.find((d) => d.infoHash === source.infoHash && d.meta?.videoId === videoId);
+        return record !== undefined ? record.size : null;
+    };
+    return tiers.map((tier) => {
+        const sources = tier.sources.map((source) => ({ ...source, onDisk: sizeOnDisk(source) }));
+        const disk = sources.reduce<RankedSource | null>((best, source) => source.onDisk !== null && (best === null || source.onDisk > best.onDisk!) ? source : best, null);
+        return { ...tier, sources, disk };
+    });
+};
+
 const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, runtime, enabled }: Options) => {
     const core = useCore();
     const navigate = useNavigate();
     // The URL the player streams from locally (baseUrl is the LAN address used for casting).
     const baseUrl = useStreamingServer().selected?.transportUrl ?? null;
     const grouped = useMemo(() => enabled && videoId !== null ? groupByQuality(groups, videoId) : [], [enabled, groups, videoId]);
-    const { tiers, settled } = useLiveSeeders(grouped, baseUrl);
+    const { tiers: liveTiers, settled } = useLiveSeeders(grouped, baseUrl);
+    // Which sources are all on disk, from the server's records (the shared
+    // poller): they play from disk, so they show "On disk" and play directly.
+    const { downloads: records } = useDownloads(DISK_POLL, enabled && videoId !== null);
+    const tiers = useMemo(() => withDisk(liveTiers, records, videoId), [liveTiers, records, videoId]);
     const { autoplay } = useSmartPlayState();
     const { t } = useTranslation();
     const toast = useToast();
@@ -182,7 +214,8 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         if (typeof source.stream.deepLinks?.player !== 'string') {
             return;
         }
-        toast.show({ type: 'info', title: t('SMART_PLAY_DOWNLOADED_COPY', { size: source.size !== null ? (source.size / 1e9).toFixed(1) : '?' }), timeout: 6000 });
+        const size = source.onDisk ?? source.size;
+        toast.show({ type: 'info', title: t('SMART_PLAY_DOWNLOADED_COPY', { size: size !== null ? (size / 1e9).toFixed(1) : '?' }), timeout: 6000 });
         core.transport.analytics({ event: 'StreamClicked', args: { stream: source.stream } });
         claim(source.infoHash);
         setState({ handoff: null });
@@ -239,18 +272,27 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
             .catch(() => undefined);
     }, [tiers, baseUrl, metaId, videoId, startFraction, runtimeSeconds, core.transport, navigate, toast, t]);
 
-    // Plays a quality: its downloaded copy when there is one (any quality
-    // for autoplay, which follows the copy chosen for the user; only the
-    // clicked quality's otherwise), else the race.
+    // Plays a quality: its copy that is all on disk when it has one (no race:
+    // it starts at once and downloads nothing; the toast says so); else the
+    // copy downloaded ahead (any quality for autoplay, which follows the copy
+    // chosen for the user; only the clicked quality's otherwise); else the race.
     const play = useCallback((tierKey: string, remember = true, auto = false) => {
         playStarted.current = true;
+        const tier = tiers.find((tier) => tier.key === tierKey);
+        const direct = (source: RankedSource) => {
+            if (remember && metaId !== null) {
+                setQuality(metaId, tierKey);
+            }
+            playDirect(source);
+        };
+        if (tier?.disk) {
+            direct(tier.disk);
+            return;
+        }
         downloadedCopy().then((copy) => {
-            const inTier = copy !== null && tiers.find((tier) => tier.key === tierKey)?.sources.includes(copy) === true;
+            const inTier = copy !== null && tier?.sources.some((s) => s.infoHash === copy.infoHash && s.fileIdx === copy.fileIdx) === true;
             if (copy !== null && (auto || inTier)) {
-                if (remember && metaId !== null) {
-                    setQuality(metaId, tierKey);
-                }
-                playDirect(copy);
+                direct(copy);
             } else {
                 raceTier(tierKey, remember);
             }

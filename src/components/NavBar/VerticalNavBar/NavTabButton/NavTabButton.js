@@ -8,7 +8,7 @@ const { Image } = require('stremio/components');
 const styles = require('./styles');
 const { Link } = require('react-router-dom');
 
-const NavTabButton = ({ className, logo, icon, label, href, selected, onClick }) => {
+const NavTabButton = ({ className, logo, icon, iconOutline = true, badge, label, href, selected, onClick }) => {
     const renderLogoFallback = React.useCallback(() => (
         typeof icon === 'string' && icon.length > 0 ?
             <Icon className={styles['icon']} name={icon} />
@@ -36,9 +36,15 @@ const NavTabButton = ({ className, logo, icon, label, href, selected, onClick })
                     />
                     :
                     typeof icon === 'string' && icon.length > 0 ?
-                        <Icon className={styles['icon']} name={selected ? icon : `${icon}-outline`} />
+                        <Icon className={styles['icon']} name={selected || !iconOutline ? icon : `${icon}-outline`} />
                         :
                         null
+            }
+            {
+                typeof badge === 'number' && badge > 0 ?
+                    <div className={styles['badge']}>{badge}</div>
+                    :
+                    null
             }
             {
                 typeof label === 'string' && label.length > 0 ?
@@ -54,6 +60,9 @@ NavTabButton.propTypes = {
     className: PropTypes.string,
     logo: PropTypes.string,
     icon: PropTypes.string,
+    // false: the icon has no -outline variant (shown as is when not selected).
+    iconOutline: PropTypes.bool,
+    badge: PropTypes.number,
     label: PropTypes.string,
     href: PropTypes.string,
     selected: PropTypes.bool,

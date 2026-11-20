@@ -4,6 +4,7 @@
 @import (reference) '~stremio/common/screen-sizes.less';
 
 .nav-tab-button-container {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -85,4 +86,21 @@
             scale: 0.9;
         }
     }
+}
+
+// Fork: a count on a tab (active downloads).
+.nav-tab-button-container .badge {
+    position: absolute;
+    top: 0.6rem;
+    right: 1.1rem;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.3rem;
+    border-radius: 0.55rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.1rem;
+    text-align: center;
+    color: var(--primary-background-color, #0c0b11);
+    background-color: var(--primary-accent-color);
 }

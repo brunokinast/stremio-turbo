@@ -21,6 +21,8 @@ const VerticalNavBar = React.memo(React.forwardRef(({ className, selected, tabs 
                             href={tab.href}
                             logo={tab.logo}
                             icon={tab.icon}
+                            iconOutline={tab.iconOutline}
+                            badge={tab.badge}
                             label={t(tab.label)}
                             onClick={tab.onClick}
                         />
@@ -42,6 +44,8 @@ VerticalNavBar.propTypes = {
         label: PropTypes.string,
         logo: PropTypes.string,
         icon: PropTypes.string,
+        iconOutline: PropTypes.bool,
+        badge: PropTypes.number,
         href: PropTypes.string,
         onClick: PropTypes.func
     }))

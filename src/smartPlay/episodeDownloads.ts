@@ -1,60 +1,45 @@
-// Episode list: which episodes of a show were downloaded ahead (ahead.ts) and
-// how far each download is, polled from the server while the list is shown.
+// Episode list: which of a show's episodes have a file on disk, and how far
+// each is, from the server's record (the shared poller). A record names its
+// episode when the client said which one it is; older next-episode downloads
+// are found through the download-ahead memory (ahead.ts).
 
-import { useCallback, useEffect, useState } from 'react';
-import useStreamingServer from 'stremio/common/useStreamingServer';
+import { useCallback, useMemo } from 'react';
 import { downloadedSource } from './ahead';
-import { listDownloads, removeDownload } from './downloads';
+import { useDownloads } from './downloads';
 import type { Download } from './downloads';
 
 const POLL = 5000;
 
-// videoId -> its download, for the show's episodes downloaded ahead.
+// videoId -> its file on disk.
 const useEpisodeDownloads = (metaId: string | null, videoIds: string[], enabled: boolean) => {
-    const baseUrl = useStreamingServer().selected?.transportUrl ?? null;
-    const [downloads, setDownloads] = useState<Map<string, Download>>(() => new Map());
+    const { downloads: records, remove: removeRecords } = useDownloads(POLL, enabled && metaId !== null);
     const idsKey = videoIds.join(',');
 
-    const refresh = useCallback(() => {
-        if (baseUrl === null || metaId === null) {
-            return;
+    const downloads = useMemo(() => {
+        const map = new Map<string, Download>();
+        if (metaId === null || records === null) {
+            return map;
         }
-        const sources = videoIds
-            .map((videoId) => ({ videoId, source: downloadedSource(metaId, videoId) }))
-            .filter(({ source }) => source !== null);
-        if (sources.length === 0) {
-            setDownloads((current) => current.size === 0 ? current : new Map());
-            return;
-        }
-        listDownloads(baseUrl).then((list) => {
-            const next = new Map<string, Download>();
-            sources.forEach(({ videoId, source }) => {
-                const entry = list?.find((d) => d.infoHash === source!.infoHash && d.fileIdx === source!.fileIdx);
-                if (entry !== undefined) {
-                    next.set(videoId, entry);
-                }
-            });
-            setDownloads(next);
+        const kept = records.filter((d) => d.kind === 'kept');
+        videoIds.forEach((videoId) => {
+            const named = kept.find((d) => d.meta?.metaId === metaId && d.meta?.videoId === videoId);
+            const source = named === undefined ? downloadedSource(metaId, videoId) : null;
+            const entry = named ?? (source !== null ? kept.find((d) => d.infoHash === source.infoHash && d.fileIdx === source.fileIdx) : undefined);
+            if (entry !== undefined) {
+                map.set(videoId, entry);
+            }
         });
+        return map;
         // idsKey stands for videoIds.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [baseUrl, metaId, idsKey]);
-
-    useEffect(() => {
-        if (!enabled) {
-            return;
-        }
-        refresh();
-        const timer = setInterval(refresh, POLL);
-        return () => clearInterval(timer);
-    }, [enabled, refresh]);
+    }, [records, metaId, idsKey]);
 
     const remove = useCallback((videoId: string) => {
         const entry = downloads.get(videoId);
-        if (baseUrl !== null && entry !== undefined) {
-            removeDownload(baseUrl, entry.infoHash, entry.fileIdx).then(refresh);
+        if (entry !== undefined) {
+            removeRecords([entry]);
         }
-    }, [baseUrl, downloads, refresh]);
+    }, [downloads, removeRecords]);
 
     return { downloads, remove };
 };

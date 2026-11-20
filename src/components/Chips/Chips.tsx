@@ -13,7 +13,7 @@ type Option = {
 type Props = {
     options: Option[],
     selected: string[],
-    onSelect: (value: string) => {},
+    onSelect: (value: string) => void,
 };
 
 const Chips = memo(({ options, selected, onSelect }: Props) => {

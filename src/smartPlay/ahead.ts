@@ -88,6 +88,9 @@ type AheadEntry = {
     trial?: boolean,
     // Sources found too slow for this episode, not chosen again.
     slow?: string[],
+    // The user cancelled this episode's download (Downloads screen): it isn't
+    // started again by itself.
+    cancelled?: boolean,
 };
 
 const memoryKey = (metaId: string, videoId: string) => `${metaId} ${videoId}`;
@@ -115,6 +118,13 @@ const rememberAhead = (metaId: string, videoId: string, entry: Omit<AheadEntry, 
 // The source an episode was downloaded ahead from, if any.
 const aheadSource = (metaId: string, videoId: string): AheadEntry | null => {
     return loadMemory()[memoryKey(metaId, videoId)] ?? null;
+};
+
+// Marks an episode's download cancelled by the user, so it isn't started
+// again by itself.
+const cancelAhead = (metaId: string, videoId: string) => {
+    const known = aheadSource(metaId, videoId);
+    rememberAhead(metaId, videoId, { infoHash: '', fileIdx: -1, slow: known?.slow, cancelled: true });
 };
 
 // The downloaded source of an episode (not a placeholder holding only slow sources).
@@ -248,7 +258,7 @@ const measure = async (baseUrl: string, sources: RankedSource[], meter: RateMete
 type PlanContext = {
     baseUrl: string,
     addons: Addon[],
-    meta: { id: string, type: string, videos: Video[] },
+    meta: { id: string, type: string, videos: Video[], name?: string, poster?: string | null },
     videoId: string,
     // The torrent being played.
     playingInfoHash: string | null,
@@ -327,6 +337,9 @@ const plan = async (ctx: PlanContext): Promise<PlanResult> => {
         const video = upcoming[k];
         // Time until this episode has finished playing.
         const windowSeconds = ctx.left + (k + 1) * ctx.runtime;
+        if (aheadSource(ctx.meta.id, video.id)?.cancelled === true) {
+            continue;
+        }
         const known = downloadedSource(ctx.meta.id, video.id);
         const entry: Download | undefined = known !== null ? downloads.find((d) => d.infoHash === known.infoHash && d.fileIdx === known.fileIdx) : undefined;
         let replaced: { gb: number, rate: number, needed: number } | null = null;
@@ -400,7 +413,19 @@ const plan = async (ctx: PlanContext): Promise<PlanResult> => {
             const { source } = fit;
             let added: Download;
             try {
-                added = await addDownload(ctx.baseUrl, source.infoHash, source.fileIdx!, source.trackers.length > 0 ? source.trackers : [`dht:${source.infoHash}`]);
+                added = await addDownload(ctx.baseUrl, source.infoHash, source.fileIdx!, source.trackers.length > 0 ? source.trackers : [`dht:${source.infoHash}`], {
+                    origin: 'next',
+                    meta: {
+                        metaId: ctx.meta.id,
+                        videoId: video.id,
+                        type: ctx.meta.type,
+                        name: ctx.meta.name,
+                        poster: ctx.meta.poster ?? undefined,
+                        season: video.season ?? undefined,
+                        episode: video.episode ?? undefined,
+                        title: video.title ?? undefined,
+                    },
+                });
             } catch (e) {
                 closeMeasured(null);
                 return { kind: 'full', video, reason: e instanceof Error ? e.message : String(e) };
@@ -447,7 +472,7 @@ const runPlan = (ctx: PlanContext, notify: Notify, done?: (result: PlanResult) =
 type HookOptions = {
     baseUrl: string | null,
     addons: Addon[],
-    meta: { id: string, type: string, videos: Video[], runtime?: string | null } | null,
+    meta: { id: string, type: string, videos: Video[], runtime?: string | null, name?: string, poster?: string | null } | null,
     videoId: string | null,
     playingInfoHash: string | null,
     playingFileIdx: number | null,
@@ -533,4 +558,4 @@ const useDownloadAhead = ({ baseUrl, addons, meta, videoId, playingInfoHash, pla
 };
 
 export type { AheadChoice, PlanResult };
-export { fitsWindow, aheadGroups, chooseFitting, downloadedSource, isAheadEnabled, useAheadToggle, useDownloadAhead, AHEAD_MARGIN };
+export { fitsWindow, aheadGroups, chooseFitting, cancelAhead, downloadedSource, isAheadEnabled, useAheadToggle, useDownloadAhead, AHEAD_MARGIN };

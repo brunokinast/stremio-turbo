@@ -93,6 +93,22 @@
     white-space: nowrap;
 }
 
+// A file all on disk, in place of the live count.
+.on-disk {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.875rem;
+    color: var(--primary-foreground-color);
+    white-space: nowrap;
+
+    .on-disk-icon {
+        width: 1rem;
+        height: 1rem;
+        color: var(--primary-accent-color);
+    }
+}
+
 // Live count inside a source card's description line.
 .inline-seeders {
     display: inline-flex;
@@ -102,6 +118,10 @@
         gap: 0.375rem;
         font-size: inherit;
         color: inherit;
+    }
+
+    .on-disk {
+        font-size: inherit;
     }
 }
 
