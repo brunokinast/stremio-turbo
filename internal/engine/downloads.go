@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -215,6 +214,8 @@ func (d *downloads) background(ih string, idx int) bool {
 var (
 	ErrDownloadsNeedDisk = types.ErrDownloadsNeedDisk
 	ErrNoDownload        = types.ErrNoDownload
+	ErrDownloadPath      = types.ErrDownloadPath
+	ErrDownloadBusy      = types.ErrDownloadBusy
 )
 
 // AddDownload records file idx of infoHash, adding the torrent if needed.
@@ -450,14 +451,17 @@ func (e *engine) isWantedLocked(idx int) bool {
 func (m *manager) Downloads() []types.Download {
 	m.dl.mu.Lock()
 	keys := make([]downloadKey, 0, len(m.dl.entries))
-	for k := range m.dl.entries {
-		keys = append(keys, k)
+	for k, en := range m.dl.entries {
+		if en.kind() != types.DownloadLeftover { // a folder marker: its files are listed as unkept
+			keys = append(keys, k)
+		}
 	}
 	m.dl.mu.Unlock()
 	out := make([]types.Download, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, m.downloadView(k))
 	}
+	out = append(out, m.unkeptViews()...)
 	sort.Slice(out, func(i, j int) bool { return out[i].AddedAt.Before(out[j].AddedAt) })
 	return out
 }
@@ -470,12 +474,13 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 	m.mu.RUnlock()
 	var done, size int64
 	var name string
-	known := false
+	known, streaming, peers := false, false, 0
 	if loaded && e.hasInfo() {
-		if files := e.t.Files(); k.idx < len(files) {
+		if files := e.t.Files(); k.idx >= 0 && k.idx < len(files) {
 			f := files[k.idx]
 			done, size, name, known = f.BytesCompleted(), f.Length(), f.DisplayPath(), true
 		}
+		streaming, peers = e.isReading(k.idx), e.t.Stats().ActivePeers
 	}
 	m.dl.mu.Lock()
 	defer m.dl.mu.Unlock()
@@ -484,7 +489,7 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 		return types.Download{InfoHash: k.ih, FileIdx: k.idx}
 	}
 	if en.kind() == types.DownloadLeftover {
-		return m.leftoverViewLocked(en)
+		return types.Download{InfoHash: k.ih, FileIdx: k.idx, Kind: types.DownloadLeftover}
 	}
 	now := time.Now()
 	if known {
@@ -532,12 +537,23 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 		InfoHash: en.InfoHash, FileIdx: en.FileIdx, Kind: en.kind(), Origins: append([]string(nil), en.Origins...),
 		Name: en.Name, Size: en.Size, BytesCompleted: done, BytesOnDisk: m.fileOnDisk(en),
 		Rate: rate, State: state, Watched: en.Watched, AddedAt: en.AddedAt, LastPlayed: en.LastPlayed,
+		Streaming: streaming,
+	}
+	if loaded {
+		d.Peers = peers
 	}
 	if en.Meta != nil {
 		meta := *en.Meta
 		d.Meta = &meta
 	}
 	return d
+}
+
+// isReading reports whether a reader has file idx open.
+func (e *engine) isReading(idx int) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.reading[idx] > 0
 }
 
 // fileOnDisk returns the allocated bytes of a recorded file (its final name
@@ -553,43 +569,6 @@ func (m *manager) fileOnDisk(en *downloadEntry) int64 {
 		}
 	}
 	return 0
-}
-
-// leftoverViewLocked is a leftover's public form: its folder's files and the
-// bytes they occupy. m.dl.mu held.
-func (m *manager) leftoverViewLocked(en *downloadEntry) types.Download {
-	onDisk, files := folderUsage(filepath.Join(m.cfg.CacheRoot, en.InfoHash))
-	if len(files) > 0 {
-		en.Files = files
-	}
-	return types.Download{
-		InfoHash: en.InfoHash, FileIdx: leftoverIdx, Kind: types.DownloadLeftover, Origins: []string{"leftover"},
-		Name: en.Name, Size: onDisk, BytesCompleted: onDisk, BytesOnDisk: onDisk,
-		State: types.DownloadIdle, AddedAt: en.AddedAt, Files: append([]string(nil), en.Files...),
-	}
-}
-
-// folderUsage returns the allocated bytes of every file under dir and their
-// paths relative to it (a torrent's partial files keep their .part suffix).
-func folderUsage(dir string) (int64, []string) {
-	var total int64
-	var files []string
-	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		total += allocatedSize(p, info)
-		if rel, err := filepath.Rel(dir, p); err == nil {
-			files = append(files, filepath.ToSlash(rel))
-		}
-		return nil
-	})
-	sort.Strings(files)
-	return total, files
 }
 
 // UpdateDownload pauses/resumes a download or marks it watched.
@@ -700,6 +679,7 @@ func (m *manager) RemoveTorrentData(infoHash string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
+	m.forgetMetainfo(ih)
 	logging.For("engine").Info("removed torrent data on request", "info_hash", ih)
 	return nil
 }
@@ -791,6 +771,12 @@ func (m *manager) deleteDownload(k downloadKey) bool {
 	m.dl.saveLocked()
 	m.dl.mu.Unlock()
 	others := m.dl.hasTorrent(k.ih)
+	// Unkept files beside it stay (deleted only on request): the folder
+	// keeps them under a marker instead of going whole.
+	if !others && m.folderHasOtherData(k.ih, gone.Path) {
+		m.markFolder(k.ih)
+		others = true
+	}
 	m.mu.Lock()
 	e, loaded := m.engines[k.ih]
 	if loaded {
@@ -815,6 +801,7 @@ func (m *manager) deleteDownload(k downloadKey) bool {
 	if !others {
 		m.waitPurge(k.ih)
 		_ = os.RemoveAll(filepath.Join(m.cfg.CacheRoot, k.ih))
+		m.forgetMetainfo(k.ih)
 		return true
 	}
 	m.deleteFileData(gone)

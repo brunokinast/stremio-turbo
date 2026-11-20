@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/rivulet-kodi/rivulet-engine/internal/types"
 )
@@ -184,10 +186,11 @@ func TestTemporaryLapsedAfterRestart(t *testing.T) {
 	}
 }
 
-// TestLeftoverFolders: a cache folder with no record is listed as a leftover
-// with its files and size, and deleted by info hash; a recorded torrent's
-// folder isn't a leftover, and recording a leftover's torrent adopts it.
-func TestLeftoverFolders(t *testing.T) {
+// TestUnrecordedFolder: a cache folder with no record gets a marker (never
+// listed); its files are unkept rows ("pending" without a file list), count
+// toward the disk used, and deleting the last one removes the folder and the
+// marker; recording its torrent drops the marker.
+func TestUnrecordedFolder(t *testing.T) {
 	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
 	if _, err := m.AddDownload(e.infoHash, fileIndex(t, e, "Show.S01E01.mkv"), types.AddOptions{}, types.DownloadRequest{}); err != nil {
 		t.Fatal(err)
@@ -200,43 +203,51 @@ func TestLeftoverFolders(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(old, "Show", "Show.S01E05.mkv.part"), make([]byte, 64<<10), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(m.cfg.CacheRoot, "downloads"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 
 	m.scanLeftovers()
-	left, ok := recordOf(t, m, scanIhOld, leftoverIdx)
-	if !ok || left.Kind != types.DownloadLeftover || left.BytesOnDisk <= 0 || len(left.Files) != 1 || left.Files[0] != "Show/Show.S01E05.mkv.part" || left.Name != "Show" {
-		t.Fatalf("leftover = %+v (found %v)", left, ok)
+	if _, ok := m.dl.entries[downloadKey{scanIhOld, leftoverIdx}]; !ok {
+		t.Fatal("no marker for the unrecorded folder")
 	}
-	if _, ok := recordOf(t, m, e.infoHash, leftoverIdx); ok {
-		t.Fatal("a recorded torrent's folder listed as a leftover")
+	var rows []types.Download
+	for _, d := range m.Downloads() {
+		if d.Kind == types.DownloadLeftover {
+			t.Fatalf("a marker listed: %+v", d)
+		}
+		if d.InfoHash == scanIhOld {
+			rows = append(rows, d)
+		}
 	}
-	if disk := m.Disk(); disk.Used < left.BytesOnDisk {
-		t.Fatalf("disk used %d < leftover %d", disk.Used, left.BytesOnDisk)
+	// 64 KiB is under the tiny-file floor, but it's all the folder holds.
+	if len(rows) != 1 || rows[0].Kind != types.DownloadUnkept || rows[0].Path != "Show/Show.S01E05.mkv.part" ||
+		rows[0].Info != types.DownloadInfoPending || rows[0].Size != 0 || rows[0].BytesOnDisk <= 0 {
+		t.Fatalf("unkept rows = %+v", rows)
+	}
+	if disk := m.Disk(); disk.Used < rows[0].BytesOnDisk {
+		t.Fatalf("disk used %d < unkept %d", disk.Used, rows[0].BytesOnDisk)
+	}
+	m.metaFetch.setMissing(scanIhOld, true)
+	if d := m.unkeptViews(); len(d) != 1 || d[0].Info != types.DownloadInfoMissing {
+		t.Fatalf("after a failed fetch: %+v", d)
 	}
 
-	if err := m.RemoveDownload(scanIhOld, leftoverIdx); err != nil {
+	if err := m.RemoveUnkept(scanIhOld, rows[0].Path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
-		t.Fatalf("leftover folder kept: %v", err)
+		t.Fatalf("emptied folder kept: %v", err)
 	}
-	if _, ok := recordOf(t, m, scanIhOld, leftoverIdx); ok {
-		t.Fatal("leftover record kept after delete")
+	if _, ok := m.dl.entries[downloadKey{scanIhOld, leftoverIdx}]; ok {
+		t.Fatal("marker kept after its folder emptied")
 	}
 
-	// A leftover whose torrent is recorded again is adopted.
+	// A marked folder whose torrent is recorded again loses its marker.
 	if err := os.MkdirAll(old, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	m.scanLeftovers()
-	if _, ok := recordOf(t, m, scanIhOld, leftoverIdx); !ok {
-		t.Fatal("leftover not found again")
-	}
 	m.notePlayed(scanIhOld, 2)
-	if _, ok := recordOf(t, m, scanIhOld, leftoverIdx); ok {
-		t.Fatal("leftover kept after its torrent was recorded")
+	if _, ok := m.dl.entries[downloadKey{scanIhOld, leftoverIdx}]; ok {
+		t.Fatal("marker kept after its torrent was recorded")
 	}
 }
 
@@ -275,5 +286,185 @@ func TestPatchMeta(t *testing.T) {
 	d, _ := recordOf(t, m, e.infoHash, e1)
 	if d.Meta == nil || *d.Meta != meta {
 		t.Fatalf("meta = %+v", d.Meta)
+	}
+}
+
+// unkeptOf returns the unkept row at path.
+func unkeptOf(m *manager, ih, path string) (types.Download, bool) {
+	for _, d := range m.Downloads() {
+		if d.Kind == types.DownloadUnkept && d.InfoHash == ih && d.Path == path {
+			return d, true
+		}
+	}
+	return types.Download{}, false
+}
+
+// TestUnkeptFiles: an unrecorded file in a recorded torrent's folder is an
+// unkept row (tiny files aren't) with its real index and size, loaded or not
+// (the saved file list), and its progress: a .part file from the piece
+// database, a file with its final name and full size complete. Recorded files
+// and paths outside the folder can't be deleted as unkept. Resuming it
+// records it as kept.
+func TestUnkeptFiles(t *testing.T) {
+	const pieceLen = 256 << 10
+	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, pieceLen))
+	e1 := fileIndex(t, e, "Show.S01E01.mkv")
+	e2 := fileIndex(t, e, "Show.S01E02.mkv")
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{Meta: &types.DownloadMeta{MetaID: "tt1", Name: "Show", Season: 1, Episode: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := recordOf(t, m, e.infoHash, e1); !ok { // fills the record's path
+		t.Fatal("no record")
+	}
+	m.saveMetainfo(e.infoHash, e.t)
+	pack := filepath.Join(m.cfg.CacheRoot, e.infoHash, "pack")
+	if err := os.MkdirAll(pack, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	part := filepath.Join(pack, "Show.S01E02.mkv.part")
+	if err := os.WriteFile(part, make([]byte, 2<<20), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pack, "info.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	size := e.t.Files()[e2].Length()
+
+	var unkept []types.Download
+	for _, d := range m.Downloads() {
+		if d.Kind == types.DownloadUnkept {
+			unkept = append(unkept, d)
+		}
+	}
+	if len(unkept) != 1 {
+		t.Fatalf("unkept = %+v", unkept)
+	}
+	p := unkept[0]
+	if p.Path != "pack/Show.S01E02.mkv.part" || p.FileIdx != e2 || p.Size != size || p.BytesOnDisk < 2<<20 || p.Info != "" ||
+		p.Meta == nil || p.Meta.MetaID != "tt1" || p.Meta.Episode != 0 {
+		t.Fatalf("unkept = %+v meta %+v", p, p.Meta)
+	}
+	if disk := m.Disk(); disk.Used < p.BytesOnDisk {
+		t.Fatalf("disk used %d < unkept %d", disk.Used, p.BytesOnDisk)
+	}
+
+	// Unloaded: size from the saved list, progress from the piece database.
+	_, begin, _ := e.fileLayout(e2)
+	m.mu.Lock()
+	m.unloadLocked(e.infoHash, e)
+	m.mu.Unlock()
+	ih := metainfo.NewHashFromHex(e.infoHash)
+	for i := begin; i < begin+3; i++ {
+		if err := m.completion.Set(metainfo.PieceKey{InfoHash: ih, Index: i}, g.Some(true)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, ok := unkeptOf(m, e.infoHash, "pack/Show.S01E02.mkv.part")
+	if !ok || p.FileIdx != e2 || p.Size != size || p.BytesCompleted != 3*pieceLen {
+		t.Fatalf("unloaded .part = %+v (found %v); want %d done", p, ok, 3*pieceLen)
+	}
+	// Its final name at full size: complete, as anacrolix's part-file storage takes it.
+	final := filepath.Join(pack, "Show.S01E02.mkv")
+	if err := os.Rename(part, final); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(final, size); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok = unkeptOf(m, e.infoHash, "pack/Show.S01E02.mkv"); !ok || p.BytesCompleted != size {
+		t.Fatalf("final-name file = %+v (found %v); want complete", p, ok)
+	}
+
+	for _, bad := range []string{"pack/Show.S01E01.mkv", "../" + e.infoHash, "pack/missing.mkv", "pack"} {
+		if err := m.RemoveUnkept(e.infoHash, bad); err != ErrDownloadPath {
+			t.Fatalf("RemoveUnkept(%q) = %v, want ErrDownloadPath", bad, err)
+		}
+	}
+
+	// Resume = record it as kept (the saved list gives the index at once).
+	if _, err := m.AddDownload(e.infoHash, e2, types.AddOptions{}, types.DownloadRequest{Origin: "resume"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := recordOf(t, m, e.infoHash, e2); !ok || d.Kind != types.DownloadKept || len(d.Origins) != 1 || d.Origins[0] != "resume" {
+		t.Fatalf("resumed = %+v (found %v)", d, ok)
+	}
+	if _, ok := unkeptOf(m, e.infoHash, "pack/Show.S01E02.mkv"); ok {
+		t.Fatal("resumed file still listed as unkept")
+	}
+}
+
+// TestUnkeptDelete: deleting one unkept file leaves the rest; deleting a
+// torrent's last record keeps the unkept files beside it under a marker, and
+// deleting the last of those removes the folder, marker and saved list.
+func TestUnkeptDelete(t *testing.T) {
+	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
+	e1 := fileIndex(t, e, "Show.S01E01.mkv")
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := recordOf(t, m, e.infoHash, e1); !ok {
+		t.Fatal("no record")
+	}
+	m.saveMetainfo(e.infoHash, e.t)
+	pack := filepath.Join(m.cfg.CacheRoot, e.infoHash, "pack")
+	_ = os.MkdirAll(pack, 0o700)
+	for _, name := range []string{"Show.S01E01.mkv.part", "Show.S01E02.mkv.part", "Extra.mkv"} {
+		if err := os.WriteFile(filepath.Join(pack, name), make([]byte, 2<<20), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.RemoveUnkept(e.infoHash, "pack/Extra.mkv"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := unkeptOf(m, e.infoHash, "pack/Show.S01E02.mkv.part"); !ok {
+		t.Fatal("the other unkept file went too")
+	}
+
+	if err := m.RemoveDownload(e.infoHash, e1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(pack, "Show.S01E01.mkv.part")); !os.IsNotExist(err) {
+		t.Fatalf("deleted record's file kept: %v", err)
+	}
+	if _, ok := unkeptOf(m, e.infoHash, "pack/Show.S01E02.mkv.part"); !ok {
+		t.Fatal("unkept file deleted with the last record")
+	}
+	if _, ok := m.dl.entries[downloadKey{e.infoHash, leftoverIdx}]; !ok {
+		t.Fatal("no marker for the folder's unkept data")
+	}
+
+	if err := m.RemoveUnkept(e.infoHash, "pack/Show.S01E02.mkv.part"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(m.cfg.CacheRoot, e.infoHash)); !os.IsNotExist(err) {
+		t.Fatalf("emptied folder kept: %v", err)
+	}
+	if _, err := os.Stat(m.metainfoPath(e.infoHash)); !os.IsNotExist(err) {
+		t.Fatalf("saved list kept: %v", err)
+	}
+	if _, ok := m.dl.entries[downloadKey{e.infoHash, leftoverIdx}]; ok {
+		t.Fatal("marker kept")
+	}
+}
+
+// TestRecordWithoutPath: a record whose path isn't stored yet still hides its
+// file from the unkept rows (its index's path from the file list).
+func TestRecordWithoutPath(t *testing.T) {
+	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
+	e1 := fileIndex(t, e, "Show.S01E01.mkv")
+	m.saveMetainfo(e.infoHash, e.t)
+	m.mu.Lock()
+	m.unloadLocked(e.infoHash, e)
+	m.mu.Unlock()
+	m.dl.mu.Lock()
+	m.dl.entries[downloadKey{e.infoHash, e1}] = &downloadEntry{InfoHash: e.infoHash, FileIdx: e1, Kind: types.DownloadKept, AddedAt: time.Now()}
+	m.dl.mu.Unlock()
+	pack := filepath.Join(m.cfg.CacheRoot, e.infoHash, "pack")
+	_ = os.MkdirAll(pack, 0o700)
+	if err := os.WriteFile(filepath.Join(pack, "Show.S01E01.mkv.part"), make([]byte, 2<<20), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rows := m.unkeptViews(); len(rows) != 0 {
+		t.Fatalf("recorded file listed as unkept: %+v", rows)
 	}
 }

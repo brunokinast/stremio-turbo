@@ -3303,7 +3303,7 @@
             }
           }
         },
-        "description": "Kept, temporary and leftover records, oldest first. A file a player streams is recorded as kept (origin play); the server deletes kept files and leftovers only on request."
+        "description": "Kept and temporary records and unkept files, oldest first. A file a player streams is recorded as kept (origin play); the server deletes kept and unkept files only on request."
       },
       "post": {
         "operationId": "addDownload",
@@ -3489,7 +3489,7 @@
               "type": "integer",
               "minimum": -1
             },
-            "description": "File index; -1 deletes a leftover"
+            "description": "File index; -1 deletes every file of the torrent"
           }
         ],
         "requestBody": {
@@ -3580,7 +3580,7 @@
               "type": "integer",
               "minimum": -1
             },
-            "description": "File index; -1 deletes a leftover"
+            "description": "File index; -1 deletes every file of the torrent"
           }
         ],
         "responses": {
@@ -10623,8 +10623,8 @@
     "/downloads/{infoHash}": {
       "delete": {
         "operationId": "removeTorrentData",
-        "summary": "Delete every record of a torrent and its cache folder",
-        "description": "Deletes a leftover, or every file of a torrent. A torrent being read keeps its data until it's idle.",
+        "summary": "Delete every record of a torrent and its cache folder, or one partial file",
+        "description": "Deletes every file of a torrent. A torrent being read keeps its data until it's idle. With `path`, deletes only that unkept file (as listed by GET /downloads), and refuses while the torrent is being read; a folder left empty goes whole.",
         "tags": [
           "Downloads"
         ],
@@ -10637,6 +10637,15 @@
               "type": "string",
               "pattern": "^[0-9a-fA-F]{40}$"
             }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "description": "A partial's path relative to the torrent's folder (the record's `path`)",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10648,6 +10657,26 @@
           },
           "404": {
             "description": "Nothing recorded or on disk for this torrent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "path is not an unrecorded file in the folder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The torrent is being read (path given)",
             "content": {
               "application/json": {
                 "schema": {
@@ -11239,30 +11268,30 @@
           "fileIdx": {
             "type": "integer",
             "minimum": -1,
-            "description": "File index in the torrent; -1 for a leftover (the whole cache folder)"
+            "description": "File index in the torrent; -1 for an unkept file whose torrent's file list isn't known"
           },
           "kind": {
             "type": "string",
             "enum": [
               "kept",
               "temporary",
-              "leftover"
+              "unkept"
             ],
-            "description": "kept: downloaded whole, deleted only on request (a played file becomes kept). temporary: primed for a measurement, deleted when its lease lapses. leftover: a cache folder found with no record"
+            "description": "kept: downloaded whole, deleted only on request (a played file becomes kept). temporary: primed for a measurement, deleted when its lease lapses. unkept: a file with data on disk and no record (listed, not stored; identified by path), deleted only on request"
           },
           "origins": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Why the file is on disk, as the clients said (e.g. picker, next, play, manual-card; leftover)"
+            "description": "Why the file is on disk, as the clients said (e.g. picker, next, play, manual-card, resume)"
           },
           "meta": {
             "$ref": "#/components/schemas/DownloadMeta"
           },
           "name": {
             "type": "string",
-            "description": "File path inside the torrent once metadata is known; a leftover's single top-level entry"
+            "description": "File path inside the torrent once metadata is known"
           },
           "size": {
             "type": "integer",
@@ -11301,12 +11330,25 @@
             "format": "date-time",
             "description": "When a player last opened the file"
           },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "A leftover folder's files, relative paths"
+          "path": {
+            "type": "string",
+            "description": "An unkept file's path relative to its torrent's folder"
+          },
+          "info": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "missing"
+            ],
+            "description": "Set on an unkept file whose torrent's file list isn't known (size is then 0): pending while it's fetched from the swarm, missing when nobody answered (retried at the next start)"
+          },
+          "streaming": {
+            "type": "boolean",
+            "description": "A reader has the file open (it's playing)"
+          },
+          "peers": {
+            "type": "integer",
+            "description": "The torrent's connected peers while it's loaded"
           }
         }
       },
@@ -14464,6 +14506,10 @@
           "title": {
             "type": "string",
             "description": "The episode's title"
+          },
+          "runtime": {
+            "type": "integer",
+            "description": "The episode's length in seconds"
           }
         }
       },

@@ -68,6 +68,14 @@ func (f *fakeDownloadsEM) RemoveTorrentData(ih string) error {
 	return nil
 }
 
+func (f *fakeDownloadsEM) RemoveUnkept(ih, path string) error {
+	if path == "busy.mkv" {
+		return types.ErrDownloadBusy
+	}
+	f.removed = append(f.removed, ih+":"+path)
+	return nil
+}
+
 func (f *fakeDownloadsEM) Disk() types.DiskInfo { return types.DiskInfo{Free: 7, Total: 9, Used: 1} }
 
 func (f *fakeDownloadsEM) RemoveDownload(ih string, idx int) error {
@@ -159,6 +167,12 @@ func TestDownloadsAPIRecord(t *testing.T) {
 	}
 	if rec := doDL(t, h, http.MethodDelete, "/downloads/"+strings.ToUpper(dlIH), "", true); rec.Code != http.StatusNoContent || len(em.removed) != 1 || em.removed[0] != dlIH {
 		t.Fatalf("DELETE torrent = %d, removed %v", rec.Code, em.removed)
+	}
+	if rec := doDL(t, h, http.MethodDelete, "/downloads/"+dlIH+"?path=pack%2FE02.mkv.part", "", true); rec.Code != http.StatusNoContent || len(em.removed) != 2 || em.removed[1] != dlIH+":pack/E02.mkv.part" {
+		t.Fatalf("DELETE partial = %d, removed %v", rec.Code, em.removed)
+	}
+	if rec := doDL(t, h, http.MethodDelete, "/downloads/"+dlIH+"?path=busy.mkv", "", true); rec.Code != http.StatusConflict {
+		t.Fatalf("DELETE busy partial = %d; want 409", rec.Code)
 	}
 	if rec := doDL(t, h, http.MethodGet, "/downloads/disk", "", true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"free":7`) {
 		t.Fatalf("GET disk = %d %s", rec.Code, rec.Body)

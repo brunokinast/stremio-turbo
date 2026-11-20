@@ -289,6 +289,14 @@ type manager struct {
 	// completion is the disk storage's piece-completion database (nil with the
 	// in-RAM cache); deleting one downloaded file marks its pieces incomplete.
 	completion storage.PieceCompletion
+
+	// Saved metadata of unloaded torrents, parsed (metainfo_store.go), and
+	// the progress of their unkept files (downloads.go, unkeptViews).
+	layoutMu sync.Mutex
+	layouts  map[string]layoutCacheEntry
+	progress map[progressKey]progressEntry
+	// The fetch of metadata for data that has none (metainfo_fetch.go).
+	metaFetch metaFetchState
 	// peerHints holds peers recent scrapes found, for torrents opened later.
 	peerHints peerHints
 }
@@ -539,8 +547,10 @@ func New(cfg types.Config) (types.EngineManager, error) {
 		memStore.refetch = m.refetchPiece
 	}
 	m.keepDHTNodes(cfg.DHTNodesFile)
-	m.scanLeftovers()    // cache folders with no record (earlier runs) become leftovers
+	m.scanLeftovers()    // cache folders with no record (earlier runs) get a marker
 	go m.tickDownloads() // resume downloads left incomplete by the last run; drop lapsed temporaries
+	// Data without a saved file list gets one from the swarm (metainfo_fetch.go).
+	go m.fetchMetainfo(m.metainfoTodo())
 	return m, nil
 }
 
@@ -653,6 +663,18 @@ func (m *manager) EnsureEngine(infoHash string, opts types.AddOptions) (types.En
 			err error
 		)
 
+		if opts.MetaInfo == nil {
+			// The metadata saved when this torrent was loaded before: no
+			// wait for the swarm to send it (metainfo_store.go). One that
+			// doesn't parse or match is dropped.
+			if raw := m.savedMetainfo(ih); raw != nil {
+				if mi, err := metainfo.Load(bytes.NewReader(raw)); err == nil && mi.HashInfoBytes().HexString() == ih {
+					opts.MetaInfo = raw
+				} else {
+					m.forgetMetainfo(ih)
+				}
+			}
+		}
 		if opts.MetaInfo != nil {
 			// Raw .torrent bytes provided — parse and add.
 			mi, miErr := metainfo.Load(bytes.NewReader(opts.MetaInfo))
@@ -700,6 +722,7 @@ func (m *manager) EnsureEngine(infoHash string, opts types.AddOptions) (types.En
 			select {
 			case <-t.GotInfo():
 				m.trace.once(ih, "metadata", "", time.Now())
+				m.saveMetainfo(ih, t)
 			case <-t.Closed():
 			}
 		}()
@@ -747,6 +770,7 @@ func (m *manager) beginPurge(ih string, e *engine) func() {
 	m.purging[ih] = done
 	return func() {
 		_ = os.RemoveAll(e.path)
+		m.forgetMetainfo(ih)
 		m.mu.Lock()
 		delete(m.purging, ih)
 		m.mu.Unlock()

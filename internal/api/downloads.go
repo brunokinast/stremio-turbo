@@ -28,7 +28,8 @@ type addDownloadBody struct {
 
 // handleDownloads serves the record of every file on disk: /downloads (list,
 // add), /downloads/disk (space), /downloads/:infoHash (delete a torrent's
-// data) and /downloads/:infoHash/:fileIdx (change, delete one file).
+// data, or with ?path= one partial file) and /downloads/:infoHash/:fileIdx
+// (change, delete one file).
 func (s *server) handleDownloads(w http.ResponseWriter, r *http.Request) {
 	dl, ok := s.em.(types.Downloader)
 	if !ok {
@@ -72,7 +73,11 @@ func (s *server) handleDownloads(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "downloads write requires a browser origin, a loopback peer, or api_password"})
 			return
 		}
-		if err := dl.RemoveTorrentData(strings.ToLower(seg[0])); err != nil {
+		remove := func() error { return dl.RemoveTorrentData(strings.ToLower(seg[0])) }
+		if path := r.URL.Query().Get("path"); path != "" {
+			remove = func() error { return dl.RemoveUnkept(strings.ToLower(seg[0]), path) }
+		}
+		if err := remove(); err != nil {
 			writeDownloadErr(w, err)
 			return
 		}
@@ -171,9 +176,9 @@ func writeDownloadErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, types.ErrNoDownload):
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
-	case errors.Is(err, types.ErrDownloadKind):
+	case errors.Is(err, types.ErrDownloadKind), errors.Is(err, types.ErrDownloadPath):
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-	case errors.Is(err, types.ErrDownloadsNeedDisk):
+	case errors.Is(err, types.ErrDownloadsNeedDisk), errors.Is(err, types.ErrDownloadBusy):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error()})
 	case errors.Is(err, types.ErrTooManyEngines), errors.Is(err, types.ErrDownloadNoMetadata):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})

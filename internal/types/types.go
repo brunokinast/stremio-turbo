@@ -645,6 +645,9 @@ type Downloader interface {
 	// RemoveTorrentData forgets every record of a torrent and deletes its
 	// cache folder (a leftover, or a whole show's group).
 	RemoveTorrentData(infoHash string) error
+	// RemoveUnkept deletes one unkept file (data on disk with no record)
+	// from a torrent's folder, by its path relative to that folder.
+	RemoveUnkept(infoHash, path string) error
 	// Disk reports the cache volume's space and what the records use.
 	Disk() DiskInfo
 	// SetExitWhenDone makes the process exit once no kept file is left to
@@ -660,7 +663,21 @@ type DownloadKind string
 const (
 	DownloadKept      DownloadKind = "kept"      // downloaded whole; deleted only on request
 	DownloadTemporary DownloadKind = "temporary" // primed for a measurement; deleted when its lease lapses
-	DownloadLeftover  DownloadKind = "leftover"  // a cache folder found with no record (fileIdx -1)
+	// A cache folder found with no record: stored only, as a marker that
+	// keeps the janitor off its data; never listed (its files are unkept).
+	DownloadLeftover DownloadKind = "leftover"
+	// A file with data on disk and no record of its own (an episode that was
+	// streamed and never kept, a folder from an earlier run). Listed, not
+	// stored: found on each listing. Identified by Path; fileIdx is its index
+	// when the torrent's file list is known, else -1 (see Download.Info).
+	DownloadUnkept DownloadKind = "unkept"
+)
+
+// An unkept file's Info while its torrent's file list isn't known (so its
+// size and progress aren't either).
+const (
+	DownloadInfoPending = "pending" // being fetched from the swarm
+	DownloadInfoMissing = "missing" // nobody answered; retried at the next start
 )
 
 // DownloadMeta names the episode a file was added for (the client's ids).
@@ -675,6 +692,8 @@ type DownloadMeta struct {
 	Season  int    `json:"season,omitempty"`
 	Episode int    `json:"episode,omitempty"`
 	Title   string `json:"title,omitempty"`
+	// Runtime is the episode's length in seconds (a client shows bitrate).
+	Runtime int `json:"runtime,omitempty"`
 }
 
 // DownloadRequest is what a client asks for when adding a file (POST
@@ -704,6 +723,14 @@ var ErrDownloadsNeedDisk = errors.New("downloads need the disk piece cache")
 // ErrDownloadKind is returned for an unknown DownloadRequest.Kind (a client
 // can add kept or temporary files only).
 var ErrDownloadKind = errors.New(`kind must be "kept" or "temporary"`)
+
+// ErrDownloadBusy is returned when a file can't be deleted because its
+// torrent is being read.
+var ErrDownloadBusy = errors.New("the torrent is being read; stop playback first")
+
+// ErrDownloadPath is returned for a partial path that isn't an unrecorded
+// file inside the torrent's folder.
+var ErrDownloadPath = errors.New("path is not an unrecorded file in the torrent's folder")
 
 // ErrDownloadNoMetadata is returned when a new download's torrent metadata
 // (needed for the file's size) did not arrive in time; retry later.
@@ -739,8 +766,15 @@ type Download struct {
 	Watched     bool          `json:"watched"`
 	AddedAt     time.Time     `json:"addedAt"`
 	LastPlayed  *time.Time    `json:"lastPlayed,omitempty"`
-	// Files lists a leftover folder's files (relative paths).
-	Files []string `json:"files,omitempty"`
+	// Path is an unkept file's path relative to its torrent's folder.
+	Path string `json:"path,omitempty"`
+	// Info is set on an unkept file whose torrent's file list isn't known:
+	// DownloadInfoPending or DownloadInfoMissing (Size is then 0).
+	Info string `json:"info,omitempty"`
+	// Streaming is true while a reader has the file open (it's playing).
+	Streaming bool `json:"streaming,omitempty"`
+	// Peers is the torrent's connected peers while it's loaded.
+	Peers int `json:"peers,omitempty"`
 }
 
 // DownloadPatch changes a download (PATCH /downloads/:infoHash/:fileIdx); nil fields are kept.
