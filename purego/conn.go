@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -214,6 +215,8 @@ type Conn struct {
 	rttVar  uint32
 	rto     uint32
 	rttHist delayHist
+	// rttNow mirrors rtt for RTT(), which reads it without the socket lock.
+	rttNow atomic.Uint32
 	// The current timeout, which backs off on repeated loss, and when it expires.
 	retransmitTimeout uint32
 	rtoTimeout        uint64
@@ -716,6 +719,7 @@ func (c *Conn) ackPacket(seq uint16) int {
 			c.rttHist.addSample(ertt, c.s.currentMS)
 		}
 		c.rto = max(c.rtt+c.rttVar*4, 1000)
+		c.rttNow.Store(c.rtt)
 	}
 	c.retransmitTimeout = c.rto
 	c.rtoTimeout = c.s.currentMS + uint64(c.rto)

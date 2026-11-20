@@ -62,6 +62,14 @@ type ConnStats struct {
 	LastRcvWindow, ReadBuffered int
 }
 
+// RTT is the smoothed round-trip time (0 before the first sample). Unlike Stats it doesn't take
+// the socket lock, so it's safe to call while holding a lock the socket's callbacks take: the
+// socket reader holds the socket lock while it asks the firewall callback, which in anacrolix
+// takes the client lock, so reading Stats under the client lock deadlocks.
+func (c *Conn) RTT() time.Duration {
+	return time.Duration(c.rttNow.Load()) * time.Millisecond
+}
+
 // Stats returns a snapshot of the connection's counters and congestion state.
 func (c *Conn) Stats() ConnStats {
 	c.s.mu.Lock()
