@@ -61,6 +61,7 @@ $env:HTTP_PORT = '11470'
 $env:HTTPS_PORT = '0'
 $env:BT_LISTEN_PORT = "$peerPort"               # accept incoming peers
 $env:APP_PATH = $dataDir
+$env:RIVULET_PPROF = '127.0.0.1:6060'           # goroutine dumps if the server hangs (loopback only)
 $env:RIVULET_ALLOWED_ORIGINS = 'http://127.0.0.1:8080,https://brunokinast.github.io'
 $env:PATH = "$stremioDir;$env:PATH"             # ffmpeg/ffprobe shipped with Stremio
 
