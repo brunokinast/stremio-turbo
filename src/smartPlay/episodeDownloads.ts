@@ -4,7 +4,7 @@
 // are found through the download-ahead memory (ahead.ts).
 
 import { useCallback, useMemo } from 'react';
-import { downloadedSource } from './ahead';
+import { downloadedSource } from './next';
 import { useDownloads } from './downloads';
 import type { Download } from './downloads';
 

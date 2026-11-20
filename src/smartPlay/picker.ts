@@ -60,6 +60,10 @@ type PickOptions = {
     onStepDown?: (from: Step, best: number | null, to: Step) => void,
     // On cancel, the source not to delete (the leader the caller plays).
     keep?: () => RankedSource | null,
+    // Sources taken on trust, as if on disk: another file of the torrent
+    // being played, which the server holds back while it plays, so a test
+    // can't measure it (the watch checks its real progress later).
+    trusted?: (source: RankedSource) => boolean,
 };
 
 const completedOf = (records: Download[] | null, source: RankedSource) => {
@@ -75,7 +79,7 @@ const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, r
     }, { once: true });
 });
 
-const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, meter, signal, onProgress, onStepDown, keep }: PickOptions): Promise<PickResult> => {
+const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, meter, signal, onProgress, onStepDown, keep, trusted }: PickOptions): Promise<PickResult> => {
     if (steps.length === 0) {
         throw new Error('no sources');
     }
@@ -106,7 +110,7 @@ const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, met
                     }
                 })));
                 const candidates = tested.map((source): Candidate => {
-                    const needed = source.onDisk !== null ? 0 : need({ size: source.size, completed: completedOf(records, source), runtime, startFraction });
+                    const needed = source.onDisk !== null || trusted?.(source) === true ? 0 : need({ size: source.size, completed: completedOf(records, source), runtime, startFraction });
                     const live = meter.rate(source.infoHash);
                     const known = live !== null ? { rate: live } : knownRate(meter, source, runtime);
                     const rate = known?.rate ?? null;

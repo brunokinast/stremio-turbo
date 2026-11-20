@@ -12,7 +12,7 @@ import Icon from '@stremio/stremio-icons/react';
 import { Button, Checkbox, Chips, Image, MainNavBars, ModalDialog, MultiselectMenu } from 'stremio/components';
 import { useDownloads } from 'stremio/smartPlay/downloads';
 import type { Download } from 'stremio/smartPlay/downloads';
-import { cancelAhead } from 'stremio/smartPlay/ahead';
+import { cancelAhead } from 'stremio/smartPlay/next';
 import { isLowDisk } from 'stremio/smartPlay/DiskCheck';
 import { groupDownloads, isBetter, recordKey } from './groups';
 import useShowInfo from './useShowInfo';

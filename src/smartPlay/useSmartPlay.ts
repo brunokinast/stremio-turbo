@@ -20,14 +20,14 @@ import useLiveSeeders from './useLiveSeeders';
 import { parseRuntime, RateMeter } from './supply';
 import { getLastQuality, getQuality, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
-import { addDownload, isComplete, removeDownload, useDownloads } from './downloads';
-import type { Download } from './downloads';
+import { addDownload, removeDownload, useDownloads } from './downloads';
 import { qualitySteps } from './candidates';
+import { withDisk } from './withDisk';
 import { pick } from './picker';
 import type { PickResult, Progress } from './picker';
 import { need } from './health';
 import { remember } from './rateMemory';
-import type { RankedSource, RankedTier } from './groupByQuality';
+import type { RankedSource } from './groupByQuality';
 
 type Options = {
     groups: StreamGroup[],
@@ -64,29 +64,6 @@ const PICK_DEBOUNCE = 2000;
 const DISK_POLL = 5000;
 // The background winner's test record is renewed while the page stays open.
 const RENEW = 30000;
-
-// Marks each source whose file is all on disk, and each tier's best such
-// source (the largest). A source without a file index matches the record
-// named for this episode.
-const withDisk = (tiers: RankedTier[], records: Download[] | null, videoId: string | null): RankedTier[] => {
-    const complete = (records ?? []).filter(isComplete);
-    if (complete.length === 0) {
-        return tiers;
-    }
-    const byFile = new Map(complete.map((d) => [`${d.infoHash}:${d.fileIdx}`, d]));
-    const sizeOnDisk = (source: RankedSource) => {
-        const record = source.fileIdx !== null ?
-            byFile.get(`${source.infoHash}:${source.fileIdx}`)
-            :
-            complete.find((d) => d.infoHash === source.infoHash && d.meta?.videoId === videoId);
-        return record !== undefined ? record.size : null;
-    };
-    return tiers.map((tier) => {
-        const sources = tier.sources.map((source) => ({ ...source, onDisk: sizeOnDisk(source) }));
-        const disk = sources.reduce<RankedSource | null>((best, source) => source.onDisk !== null && (best === null || source.onDisk > best.onDisk!) ? source : best, null);
-        return { ...tier, sources, disk };
-    });
-};
 
 const gb = (bytes: number | null) => bytes !== null ? (bytes / 1e9).toFixed(1) : '?';
 const times = (ratio: number | null) => ratio === null ? '?' : ratio === Infinity ? '∞' : ratio.toFixed(1);
