@@ -105,6 +105,8 @@ type engine struct {
 	streams     sync.Map         // *pinnedReader -> struct{}: open stream readers, for the trace's blocked-piece samples
 	prefetched  map[int]struct{} // source file idx -> next-file boundary already prefetched (once each)
 	background  map[int]struct{} // file indices downloaded whole in the background (downloads.go); never demoted
+	first       int              // background file idx at High priority (downloads.go, setFirst); -1 none
+	firstSet    bool             // first is meaningful (the zero value is file 0)
 	held        map[int]struct{} // file indices of temporary records (downloads.go): primed, never demoted
 	// onPlay is told when a player (not a probe) opens a file (manager.notePlayed).
 	onPlay           func(ih string, idx int)

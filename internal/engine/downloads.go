@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -83,6 +84,8 @@ type downloadEntry struct {
 	Watched  bool      `json:"watched,omitempty"`
 	Complete bool      `json:"complete,omitempty"`
 	AddedAt  time.Time `json:"addedAt"`
+	// Order ranks the file among its torrent's kept files (DownloadRequest.Order).
+	Order int `json:"order,omitempty"`
 	// Filled once the torrent's metadata is known: the display name, size,
 	// path on disk (relative to the torrent's cache dir) and the pieces that
 	// lie wholly inside the file, so one file of a season pack can be deleted
@@ -274,6 +277,9 @@ func (m *manager) AddDownload(infoHash string, idx int, opts types.AddOptions, r
 	}
 	if req.Origin != "" {
 		en.Origins = mergeStrings(en.Origins, []string{req.Origin})
+	}
+	if req.Order != 0 {
+		en.Order = req.Order
 	}
 	if req.Meta != nil && (req.Meta.MetaID != "" || req.Meta.VideoID != "") {
 		meta := *req.Meta
@@ -474,13 +480,14 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 	m.mu.RUnlock()
 	var done, size int64
 	var name string
-	known, streaming, peers := false, false, 0
+	known, streaming, peers, first := false, false, 0, false
 	if loaded && e.hasInfo() {
 		if files := e.t.Files(); k.idx >= 0 && k.idx < len(files) {
 			f := files[k.idx]
 			done, size, name, known = f.BytesCompleted(), f.Length(), f.DisplayPath(), true
 		}
 		streaming, peers = e.isReading(k.idx), e.t.Stats().ActivePeers
+		first = e.isFirst(k.idx)
 	}
 	m.dl.mu.Lock()
 	defer m.dl.mu.Unlock()
@@ -537,7 +544,7 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 		InfoHash: en.InfoHash, FileIdx: en.FileIdx, Kind: en.kind(), Origins: append([]string(nil), en.Origins...),
 		Name: en.Name, Size: en.Size, BytesCompleted: done, BytesOnDisk: m.fileOnDisk(en),
 		Rate: rate, State: state, Watched: en.Watched, AddedAt: en.AddedAt, LastPlayed: en.LastPlayed,
-		Streaming: streaming,
+		Streaming: streaming, Order: en.Order, First: first && !en.Complete && !en.Paused,
 	}
 	if loaded {
 		d.Peers = peers
@@ -911,6 +918,7 @@ func (m *manager) tickDownloads() {
 		incomplete []int
 	}
 	byTorrent := map[string]*torrentState{}
+	ranks := map[downloadKey]fileRank{}
 	for k, en := range m.dl.entries {
 		if en.kind() != types.DownloadKept {
 			continue
@@ -923,6 +931,7 @@ func (m *manager) tickDownloads() {
 		st.trackers = mergeStrings(st.trackers, en.Trackers)
 		if !en.Complete && !en.Paused {
 			st.incomplete = append(st.incomplete, k.idx)
+			ranks[k] = fileRank{idx: k.idx, order: en.Order, added: en.AddedAt}
 		}
 	}
 	m.dl.mu.Unlock()
@@ -947,6 +956,15 @@ func (m *manager) tickDownloads() {
 			for _, idx := range st.incomplete {
 				m.startDownload(ih, idx)
 			}
+			if e, ok := m.loadedEngine(ih); ok && e.hasInfo() {
+				rs := make([]fileRank, 0, len(st.incomplete))
+				for _, idx := range st.incomplete {
+					r := ranks[downloadKey{ih, idx}]
+					r.reading = e.isReading(idx)
+					rs = append(rs, r)
+				}
+				e.setFirst(firstFile(rs))
+			}
 			// Refresh completion so finished files are noticed.
 			for _, idx := range st.incomplete {
 				m.downloadView(downloadKey{ih, idx})
@@ -957,6 +975,86 @@ func (m *manager) tickDownloads() {
 			m.unloadIfDone(ih, e)
 		}
 	}
+}
+
+// fileRank is what decides which of a torrent's incomplete kept files
+// downloads first.
+type fileRank struct {
+	idx     int
+	order   int
+	added   time.Time
+	reading bool
+}
+
+// firstFile picks the file of a torrent that downloads first: one being
+// played, else the lowest order (0, unranked, after every ranked one), else
+// the oldest record. -1 for none.
+func firstFile(rs []fileRank) int {
+	best := -1
+	var b fileRank
+	less := func(x, y fileRank) bool {
+		if x.reading != y.reading {
+			return x.reading
+		}
+		xo, yo := x.order, y.order
+		if xo == 0 {
+			xo = math.MaxInt
+		}
+		if yo == 0 {
+			yo = math.MaxInt
+		}
+		if xo != yo {
+			return xo < yo
+		}
+		if !x.added.Equal(y.added) {
+			return x.added.Before(y.added)
+		}
+		return x.idx < y.idx
+	}
+	for _, r := range rs {
+		if best < 0 || less(r, b) {
+			best, b = r.idx, r
+		}
+	}
+	return best
+}
+
+// setFirst gives background file idx High priority, so peers that have its
+// pieces send those first and the other background files take what's left
+// (a player's readahead still outranks it); the previous first file goes back
+// to Normal. -1 clears it.
+func (e *engine) setFirst(idx int) {
+	files := e.t.Files()
+	e.mu.Lock()
+	prev, had := e.first, e.firstSet
+	_, prevBackground := e.background[prev]
+	_, bg := e.background[idx]
+	if idx >= 0 && !bg {
+		idx = -1
+	}
+	e.first, e.firstSet = idx, idx >= 0
+	e.mu.Unlock()
+	if had && prev != idx && prevBackground && prev >= 0 && prev < len(files) {
+		files[prev].SetPriority(torrent.PiecePriorityNormal)
+	}
+	if idx >= 0 && idx < len(files) {
+		files[idx].SetPriority(torrent.PiecePriorityHigh)
+	}
+}
+
+// isFirst reports whether file idx is its torrent's first file (setFirst).
+func (e *engine) isFirst(idx int) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.firstSet && e.first == idx
+}
+
+// loadedEngine returns ih's engine if it's loaded.
+func (m *manager) loadedEngine(ih string) (*engine, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	e, ok := m.engines[ih]
+	return e, ok
 }
 
 // expireTemporary deletes temporary files whose lease lapsed, unless a reader

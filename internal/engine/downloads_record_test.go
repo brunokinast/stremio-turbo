@@ -468,3 +468,58 @@ func TestRecordWithoutPath(t *testing.T) {
 		t.Fatalf("recorded file listed as unkept: %+v", rows)
 	}
 }
+
+// TestFirstFileOrder: of a torrent's incomplete kept files, the lowest order
+// is at High priority and the rest at Normal; pausing it moves High to the
+// next one.
+func TestFirstFileOrder(t *testing.T) {
+	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
+	e1, e2 := fileIndex(t, e, "Show.S01E01.mkv"), fileIndex(t, e, "Show.S01E02.mkv")
+	for _, f := range []struct{ idx, order int }{{e2, 1002}, {e1, 1001}} {
+		if _, err := m.AddDownload(e.infoHash, f.idx, types.AddOptions{}, types.DownloadRequest{Origin: "manual", Order: f.order}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.tickDownloads()
+	files := e.t.Files()
+	if got := files[e1].Priority(); got != torrent.PiecePriorityHigh {
+		t.Fatalf("E1 priority %v, want High", got)
+	}
+	if got := files[e2].Priority(); got != torrent.PiecePriorityNormal {
+		t.Fatalf("E2 priority %v, want Normal", got)
+	}
+	if d, _ := recordOf(t, m, e.infoHash, e1); !d.First || d.Order != 1001 {
+		t.Fatalf("E1 view: %+v", d)
+	}
+	paused := true
+	if _, err := m.UpdateDownload(e.infoHash, e1, types.DownloadPatch{Paused: &paused}); err != nil {
+		t.Fatal(err)
+	}
+	m.tickDownloads()
+	if got := files[e2].Priority(); got != torrent.PiecePriorityHigh {
+		t.Fatalf("after pausing E1, E2 priority %v, want High", got)
+	}
+	if d, _ := recordOf(t, m, e.infoHash, e1); d.First {
+		t.Fatalf("paused E1 still first: %+v", d)
+	}
+}
+
+func TestFirstFileRule(t *testing.T) {
+	t0 := time.Now()
+	cases := []struct {
+		name string
+		rs   []fileRank
+		want int
+	}{
+		{"none", nil, -1},
+		{"lowest order", []fileRank{{idx: 3, order: 1003}, {idx: 1, order: 1001}, {idx: 2, order: 1002}}, 1},
+		{"unranked after ranked", []fileRank{{idx: 5, added: t0}, {idx: 4, order: 2001, added: t0.Add(time.Hour)}}, 4},
+		{"oldest when unranked", []fileRank{{idx: 5, added: t0.Add(time.Minute)}, {idx: 6, added: t0}}, 6},
+		{"playing first", []fileRank{{idx: 1, order: 1001}, {idx: 7, reading: true}}, 7},
+	}
+	for _, c := range cases {
+		if got := firstFile(c.rs); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}

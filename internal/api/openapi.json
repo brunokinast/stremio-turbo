@@ -11243,6 +11243,10 @@
             "minimum": 0,
             "maximum": 1,
             "description": "Where playback would start (temporary files)"
+          },
+          "order": {
+            "type": "integer",
+            "description": "Ranks a kept file among its torrent's kept files: the incomplete one with the lowest order downloads first (High priority), the rest take what it can't use. 0 is unranked (after ranked ones, oldest first). Clients send season*1000 + episode"
           }
         }
       },
@@ -11349,6 +11353,14 @@
           "peers": {
             "type": "integer",
             "description": "The torrent's connected peers while it's loaded"
+          },
+          "order": {
+            "type": "integer",
+            "description": "The record's order (see DownloadRequest.order)"
+          },
+          "first": {
+            "type": "boolean",
+            "description": "This file downloads first among its torrent's kept files (High priority)"
           }
         }
       },

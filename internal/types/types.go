@@ -704,6 +704,11 @@ type DownloadRequest struct {
 	Origin        string        `json:"origin,omitempty"`
 	Meta          *DownloadMeta `json:"meta,omitempty"`
 	StartFraction float64       `json:"startFraction,omitempty"`
+	// Order ranks a kept file among its torrent's other kept files: the
+	// incomplete one with the lowest order downloads first (High priority),
+	// the rest take what it can't use. 0 is unranked (after ranked ones, by
+	// when they were added). Clients send season*1000 + episode.
+	Order int `json:"order,omitempty"`
 }
 
 // DiskInfo is GET /downloads/disk: the cache volume's free and total bytes,
@@ -775,6 +780,10 @@ type Download struct {
 	Streaming bool `json:"streaming,omitempty"`
 	// Peers is the torrent's connected peers while it's loaded.
 	Peers int `json:"peers,omitempty"`
+	// Order is the record's DownloadRequest.Order; First is true on the file
+	// of its torrent that downloads first.
+	Order int  `json:"order,omitempty"`
+	First bool `json:"first,omitempty"`
 }
 
 // DownloadPatch changes a download (PATCH /downloads/:infoHash/:fileIdx); nil fields are kept.
