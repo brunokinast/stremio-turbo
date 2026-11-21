@@ -1,0 +1,51 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// Smart play's toasts for decisions it makes on its own (each automatic
+// choice is said out loud), in one place.
+
+import { useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import useToast from 'stremio/common/Toast/useToast';
+import { times } from './format';
+
+type NextEvent =
+    | { kind: 'queued', episode: string, quality: string, gb: number, ratio: number | null, lower: boolean }
+    | { kind: 'on-disk', episode: string, quality: string, gb: number }
+    | { kind: 'weak', episode: string, quality: string, gb: number, ratio: number | null }
+    | { kind: 'replaced', episode: string, quality: string, gb: number, ratio: number | null, oldGb: number, oldRatio: number | null }
+    | { kind: 'none', episode: string }
+    | { kind: 'failed', episode: string, reason: string };
+
+const useNotify = () => {
+    const { t } = useTranslation();
+    const toast = useToast();
+    const next = useCallback((event: NextEvent) => {
+        const common = 'quality' in event ? { quality: event.quality, size: event.gb.toFixed(1) } : {};
+        const title =
+            event.kind === 'queued' ? t('SMART_PLAY_AHEAD_QUEUED', { episode: event.episode, ...common }) :
+                event.kind === 'on-disk' ? t('SMART_PLAY_AHEAD_ON_DISK', { episode: event.episode, ...common }) :
+                    event.kind === 'weak' ? t('SMART_PLAY_AHEAD_WEAK', { episode: event.episode, ...common, ratio: times(event.ratio) }) :
+                        event.kind === 'replaced' ? t('SMART_PLAY_AHEAD_REPLACED', { episode: event.episode, ...common }) :
+                            event.kind === 'none' ? t('SMART_PLAY_AHEAD_NONE', { episode: event.episode }) :
+                                t('SMART_PLAY_AHEAD_FULL', { episode: event.episode, reason: event.reason });
+        // The decision in the title; why, when there's more to say, below it.
+        const message =
+            event.kind === 'queued' ? t(event.lower ? 'SMART_PLAY_AHEAD_QUEUED_LOWER' : 'SMART_PLAY_AHEAD_QUEUED_WHY', { ratio: times(event.ratio) }) :
+                event.kind === 'replaced' ? t('SMART_PLAY_AHEAD_REPLACED_WHY', { ratio: times(event.ratio), passedSize: event.oldGb.toFixed(1), oldRatio: times(event.oldRatio) }) :
+                    undefined;
+        toast.show({ type: event.kind === 'failed' ? 'error' : 'info', title, message, timeout: 8000 });
+    }, [t, toast]);
+    // A mid-episode switch (nowWatch.ts).
+    const now = useCallback((event: { quality: string, gb: number, ratio: number | null, oldRatio: number | null }) => {
+        toast.show({
+            type: 'info',
+            title: t('SMART_PLAY_SWITCHED', { quality: event.quality, size: event.gb.toFixed(1) }),
+            message: t('SMART_PLAY_SWITCHED_WHY', { ratio: times(event.ratio), oldRatio: times(event.oldRatio) }),
+            timeout: 10000,
+        });
+    }, [t, toast]);
+    return useMemo(() => ({ next, now }), [next, now]);
+};
+
+export type { NextEvent };
+export { useNotify, times };

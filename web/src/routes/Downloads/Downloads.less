@@ -1,0 +1,784 @@
+// Copyright (C) 2017-2023 Smart code 203358507
+
+@import (reference) '~@stremio/stremio-colors/less/stremio-colors.less';
+@import (reference) '~stremio/common/screen-sizes.less';
+
+// Shared by show headers, season headers and rows so sizes and delete buttons
+// line up in one column.
+@size-col: 7.5rem;
+@slot-col: 4.75rem;
+// A season card's inset inside its show (and its border).
+@season-inset: 0.75rem;
+
+.downloads-container {
+    .downloads-content {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        color: var(--primary-foreground-color);
+    }
+}
+
+// ---- header -----------------------------------------------------------------
+
+.header {
+    flex: none;
+    padding: 1.5rem 2rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+
+    .heading {
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .page-title {
+        margin: 0;
+        font-size: 1.6rem;
+        font-weight: 600;
+    }
+
+    .summary {
+        font-size: 0.95rem;
+        opacity: 0.6;
+    }
+}
+
+.storage {
+    height: 0.4rem;
+    border-radius: 0.2rem;
+    display: flex;
+    overflow: hidden;
+    background-color: var(--overlay-color);
+}
+
+.storage-mine {
+    background-color: var(--primary-accent-color);
+}
+
+.storage-other {
+    background-color: color-mix(in srgb, var(--primary-foreground-color) 20%, transparent);
+}
+
+// What the bar's colours mean.
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    font-size: 0.75rem;
+    opacity: 0.7;
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+    }
+
+    .key {
+        width: 0.625rem;
+        height: 0.625rem;
+        border-radius: 0.125rem;
+        background-color: var(--overlay-color);
+    }
+}
+
+.banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: var(--border-radius);
+    background-color: color-mix(in srgb, var(--danger-accent-color) 18%, transparent);
+
+    .banner-icon {
+        flex: none;
+        width: 1.2rem;
+        height: 1.2rem;
+        color: var(--danger-accent-color);
+    }
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+
+    > :first-child {
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+
+    .quick {
+        margin-left: auto;
+    }
+
+    .quick {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .quick-action {
+        height: 3rem;
+        padding: 0 1rem;
+        border-radius: 1.5rem;
+        display: flex;
+        align-items: center;
+        font-size: 0.9rem;
+        white-space: nowrap;
+        border: thin solid var(--overlay-color);
+
+        &:hover,
+        &:focus-visible {
+            background-color: var(--overlay-color);
+        }
+    }
+
+    .sort {
+        flex: none;
+        width: 13rem;
+        display: flex;
+        background-color: var(--overlay-color);
+    }
+}
+
+// ---- list -------------------------------------------------------------------
+
+.list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.5rem 2rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.group {
+    flex: none;
+    border-radius: var(--border-radius);
+    background-color: var(--overlay-color);
+    overflow: hidden;
+}
+
+.group-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+
+    .group-toggle {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        text-align: left;
+    }
+
+    .poster {
+        flex: none;
+        width: 2.75rem;
+        height: 4rem;
+        border-radius: 0.4rem;
+        object-fit: cover;
+        background-color: var(--overlay-color);
+    }
+
+    .poster-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        .poster-glyph {
+            width: 1.4rem;
+            height: 1.4rem;
+            opacity: 0.5;
+        }
+    }
+
+    .group-text {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .group-name {
+        font-size: 1.1rem;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .group-meta {
+        margin-top: 0.25rem;
+        font-size: 0.85rem;
+        opacity: 0.6;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .dot {
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 50%;
+        background-color: var(--primary-accent-color);
+        animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    .group-size {
+        flex: none;
+        width: @size-col;
+        margin-left: auto;
+        text-align: right;
+        font-size: 1rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+
+}
+
+.check {
+    flex: none;
+}
+
+.rows {
+    border-top: thin solid color-mix(in srgb, var(--primary-foreground-color) 8%, transparent);
+}
+
+.list.with-bulk {
+    padding-bottom: 6rem;
+}
+
+// Seasons: inset cards inside the show's card (show > season > episode).
+.seasons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.25rem @season-inset @season-inset;
+}
+
+.season {
+    border-radius: calc(var(--border-radius) * 0.75);
+    background-color: color-mix(in srgb, var(--primary-foreground-color) 3.5%, transparent);
+    border: thin solid color-mix(in srgb, var(--primary-foreground-color) 6%, transparent);
+    overflow: hidden;
+
+    .season-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        // The card is inset: its right padding makes up for it.
+        padding: 0.5rem calc(1rem - @season-inset - 1px) 0.5rem 1rem;
+    }
+
+    .row {
+        padding-right: calc(1rem - @season-inset - 1px);
+    }
+
+    .season-toggle {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        text-align: left;
+    }
+
+    .season-name {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .season-meta {
+        font-size: 0.85rem;
+        opacity: 0.55;
+        white-space: nowrap;
+    }
+
+    .season-size {
+        flex: none;
+        width: @size-col;
+        margin-left: auto;
+        text-align: right;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .season-rows {
+        border-top: thin solid color-mix(in srgb, var(--primary-foreground-color) 6%, transparent);
+    }
+
+    .dot {
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 50%;
+        background-color: var(--primary-accent-color);
+        animation: pulse 1.6s ease-in-out infinite;
+    }
+}
+
+// The action column of a header: same width as the rows' actions, so the
+// delete buttons line up.
+.slot {
+    flex: none;
+    width: @slot-col;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.icon-delete {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.5;
+
+    .action-icon {
+        width: 1.1rem;
+        height: 1.1rem;
+        color: var(--primary-foreground-color);
+    }
+
+    &:hover,
+    &:focus-visible {
+        opacity: 1;
+        background-color: color-mix(in srgb, var(--danger-accent-color) 15%, transparent);
+
+        .action-icon {
+            color: var(--danger-accent-color);
+        }
+    }
+}
+
+// Every clickable header and row: the same hover, the whole area clickable.
+.hoverable {
+    cursor: pointer;
+    outline: none;
+    transition: background-color 0.1s;
+
+    &:hover,
+    &:focus-visible {
+        background-color: color-mix(in srgb, var(--primary-foreground-color) 5%, transparent);
+    }
+}
+
+.row.hoverable.selected:hover {
+    background-color: color-mix(in srgb, var(--primary-accent-color) 14%, transparent);
+}
+
+// Expand/collapse chevron of a show or season: down when open, right when
+// closed.
+.chevron {
+    flex: none;
+    width: 1.1rem;
+    height: 1.1rem;
+    opacity: 0.7;
+    transition: transform 0.15s;
+
+    &.closed {
+        transform: rotate(-90deg);
+    }
+}
+
+.row {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 13rem 21rem @size-col @slot-col;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 1rem;
+
+    &.selected {
+        background-color: color-mix(in srgb, var(--primary-accent-color) 10%, transparent);
+    }
+
+    .what {
+        min-width: 0;
+    }
+
+    .label {
+        display: flex;
+        align-items: baseline;
+        gap: 0.6rem;
+        min-width: 0;
+    }
+
+    .episode {
+        flex: none;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .title {
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0.8;
+    }
+
+    .copies {
+        flex: none;
+        font-size: 0.75rem;
+        padding: 0.1rem 0.45rem;
+        border-radius: 0.4rem;
+        white-space: nowrap;
+        background-color: var(--overlay-color);
+        opacity: 0.85;
+        cursor: help;
+
+        &.best {
+            color: var(--primary-accent-color);
+            background-color: color-mix(in srgb, var(--primary-accent-color) 15%, transparent);
+            opacity: 1;
+        }
+    }
+
+    .quality {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        min-width: 0;
+        font-size: 0.85rem;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+        cursor: default;
+
+        .quality-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .bitrate {
+            flex: none;
+            opacity: 0.5;
+        }
+    }
+
+    .watched {
+        flex: none;
+        font-size: 0.75rem;
+        padding: 0.1rem 0.45rem;
+        border-radius: 0.4rem;
+        background-color: var(--overlay-color);
+        opacity: 0.8;
+    }
+
+    .file {
+        margin-top: 0.2rem;
+        font-size: 0.78rem;
+        opacity: 0.45;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .state-cell {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .state {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.85rem;
+        opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+
+        &.complete {
+            opacity: 0.9;
+        }
+
+        &.active {
+            opacity: 1;
+            color: var(--primary-accent-color);
+        }
+    }
+
+    .state-icon {
+        width: 0.9rem;
+        height: 0.9rem;
+    }
+
+    // Grey: stopped. Accent: moving, with a sheen sweeping it while bytes
+    // arrive (the Windows copy-progress effect).
+    .bar {
+        height: 0.25rem;
+        border-radius: 0.125rem;
+        background-color: var(--overlay-color);
+        overflow: hidden;
+
+        .fill {
+            position: relative;
+            height: 100%;
+            border-radius: 0.125rem;
+            background-color: color-mix(in srgb, var(--primary-foreground-color) 40%, transparent);
+            overflow: hidden;
+            transition: width 0.6s ease-out;
+        }
+
+        &.moving .fill {
+            background-color: var(--primary-accent-color);
+        }
+
+        &.flowing .fill {
+            &::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                width: 3rem;
+                background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+                animation: sheen 1.6s ease-in-out infinite;
+            }
+        }
+    }
+
+    .size {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+
+        .of {
+            opacity: 0.45;
+            font-size: 0.85rem;
+        }
+    }
+
+    .actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.25rem;
+    }
+
+    .action {
+        width: 2.25rem;
+        height: 2.25rem;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.35;
+
+        .action-icon {
+            width: 1.1rem;
+            height: 1.1rem;
+            color: var(--primary-foreground-color);
+        }
+
+        &:hover,
+        &:focus-visible {
+            opacity: 1;
+            background-color: var(--overlay-color);
+        }
+
+        &.danger:hover {
+            background-color: color-mix(in srgb, var(--danger-accent-color) 15%, transparent);
+
+            .action-icon {
+                color: var(--danger-accent-color);
+            }
+        }
+
+        &.disabled {
+            opacity: 0.15 !important;
+            cursor: not-allowed;
+            background-color: transparent !important;
+        }
+    }
+
+    &:hover .action,
+    &:focus-within .action,
+    &.live .action {
+        opacity: 0.75;
+    }
+}
+
+.delete-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+}
+
+.empty {
+    margin: 4rem auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    opacity: 0.6;
+
+    .empty-icon {
+        width: 3rem;
+        height: 3rem;
+        opacity: 0.5;
+    }
+}
+
+// ---- selection bar and dialog ----------------------------------------------
+
+.bulk {
+    position: absolute;
+    left: 2rem;
+    right: 2rem;
+    bottom: 1.25rem;
+    height: 4rem;
+    padding: 0 0.75rem 0 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border-radius: var(--border-radius);
+    background-color: var(--modal-background-color);
+    border: thin solid color-mix(in srgb, var(--primary-foreground-color) 10%, transparent);
+    box-shadow: 0 0.75rem 2.5rem rgba(0, 0, 0, 0.5);
+    z-index: 2;
+    animation: bulk-in 0.18s ease-out;
+
+    .bulk-count {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+        min-width: 0;
+        white-space: nowrap;
+    }
+
+    .bulk-number {
+        font-weight: 600;
+    }
+
+    .bulk-size {
+        opacity: 0.6;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .bulk-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .bulk-clear,
+    .bulk-delete {
+        height: 2.75rem;
+        padding: 0 1.25rem;
+        border-radius: 1.375rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    .bulk-clear {
+        color: var(--primary-foreground-color);
+        opacity: 0.75;
+
+        &:hover,
+        &:focus-visible {
+            opacity: 1;
+            background-color: var(--overlay-color);
+        }
+    }
+
+    .bulk-delete {
+        font-weight: 600;
+        color: var(--primary-foreground-color);
+        background-color: var(--danger-accent-color);
+
+        &:hover,
+        &:focus-visible {
+            filter: brightness(1.1);
+        }
+    }
+}
+
+.modal-body {
+    opacity: 0.75;
+}
+
+.modal-delete {
+    background-color: var(--danger-accent-color) !important;
+}
+
+.modal-cancel {
+    background-color: var(--overlay-color) !important;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+@keyframes sheen {
+    0% { left: -3rem; }
+    100% { left: 100%; }
+}
+
+@keyframes bulk-in {
+    from { transform: translateY(1rem); opacity: 0; }
+    to { transform: none; opacity: 1; }
+}
+
+// ---- narrow windows ---------------------------------------------------------
+
+@media only screen and (max-width: @small) {
+    .row {
+        grid-template-columns: auto minmax(0, 1fr) 9rem 10rem @size-col @slot-col;
+
+        .bitrate {
+            display: none;
+        }
+    }
+}
+
+@media only screen and (max-width: @minimum) {
+    .header, .list {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .bulk {
+        left: 1rem;
+        right: 1rem;
+    }
+
+    // The state (progress, Stalled, Waiting) moves to a line of its own
+    // under the name; dense flow keeps size and actions on the first line.
+    .row {
+        grid-template-columns: auto minmax(0, 1fr) @size-col @slot-col;
+        grid-auto-flow: row dense;
+
+        .quality {
+            display: none;
+        }
+
+        .state-cell {
+            grid-column: 2 / -1;
+        }
+    }
+}
+
+.own {
+    display: contents;
+}
