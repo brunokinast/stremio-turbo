@@ -27,6 +27,7 @@ $script:ShellFilter = @(
 
 function Invoke-Git {
     param([Parameter(ValueFromRemainingArguments)] [string[]]$Args)
+    $PSNativeCommandUseErrorActionPreference = $false # exit codes are checked here
     & git -C $script:root @Args
     if ($LASTEXITCODE -ne 0) { throw "git $($Args -join ' ') failed ($LASTEXITCODE)" }
 }
@@ -34,6 +35,7 @@ function Invoke-Git {
 # Fetches an upstream and returns the commit to compare and merge: the remote
 # branch, or for the shell the head of the filtered copy (out/cache).
 function Get-UpstreamHead($u) {
+    $PSNativeCommandUseErrorActionPreference = $false # exit codes are checked here
     if (-not $u.Filtered) {
         $remotes = @(& git -C $script:root remote)
         if ($remotes -notcontains $u.Remote) {
@@ -70,6 +72,7 @@ function Get-UpstreamHead($u) {
 
 # How many upstream commits aren't merged yet (0 = up to date).
 function Get-UpstreamBehind($u, $head) {
+    $PSNativeCommandUseErrorActionPreference = $false # exit codes are checked here
     & git -C $script:root merge-base --is-ancestor $head.Commit HEAD
     if ($LASTEXITCODE -eq 0) { return 0 }
     return [int](Invoke-Git rev-list --count "HEAD..$($head.Commit)")
@@ -77,6 +80,7 @@ function Get-UpstreamBehind($u, $head) {
 
 # The latest @stremio/stremio-core-web on npm, and the one web/ uses.
 function Get-CoreWebVersions {
+    $PSNativeCommandUseErrorActionPreference = $false # exit codes are checked here
     $package = Get-Content (Join-Path $script:root 'web/package.json') -Raw | ConvertFrom-Json
     $used = $package.dependencies.'@stremio/stremio-core-web'
     $latest = (& npm view '@stremio/stremio-core-web' version).Trim()
