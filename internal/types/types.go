@@ -330,8 +330,6 @@ type Engine interface {
 	Peers() []PeerConn
 }
 
-// DialRecord is one entry of a torrent's connection log (GET
-// /debug/dials/:infoHash).
 // IncomingStats is GET /network-info's `incoming`: accepted incoming peer
 // connections since start (none after a while means the port is unreachable).
 type IncomingStats struct {
@@ -342,6 +340,20 @@ type IncomingStats struct {
 	ActiveSince *time.Time `json:"activeSince"`
 }
 
+// IncomingReporter is implemented by an engine manager that counts incoming
+// peer connections (GET /network-info's `incoming`).
+type IncomingReporter interface {
+	Incoming() IncomingStats
+}
+
+// TraceRequestTagger is implemented by a stream reader that records which
+// HTTP request reads it (the trace's per-request access log).
+type TraceRequestTagger interface {
+	SetTraceRequest(id uint64)
+}
+
+// DialRecord is one entry of a torrent's connection log (GET
+// /debug/dials/:infoHash).
 type DialRecord struct {
 	Address string `json:"address"`
 	// Source is how the peer was found (anacrolix code, e.g. "Hg" DHT, "Tr"
@@ -635,8 +647,8 @@ type EngineManager interface {
 // Downloader is implemented by engine managers that keep a record of every
 // file on disk: kept files (downloaded whole in the background, persisted, and
 // deleted only on request), temporary ones (a client measuring candidates:
-// primed, leased, deleted when the lease lapses) and leftovers (cache folders
-// found on disk with no record).
+// primed, leased, deleted when the lease lapses), and lists unkept files
+// (data on disk with no record of its own).
 type Downloader interface {
 	AddDownload(infoHash string, fileIdx int, opts AddOptions, req DownloadRequest) (Download, error)
 	Downloads() []Download
@@ -663,9 +675,6 @@ type DownloadKind string
 const (
 	DownloadKept      DownloadKind = "kept"      // downloaded whole; deleted only on request
 	DownloadTemporary DownloadKind = "temporary" // primed for a measurement; deleted when its lease lapses
-	// A cache folder found with no record: stored only, as a marker that
-	// keeps the janitor off its data; never listed (its files are unkept).
-	DownloadLeftover DownloadKind = "leftover"
 	// A file with data on disk and no record of its own (an episode that was
 	// streamed and never kept, a folder from an earlier run). Listed, not
 	// stored: found on each listing. Identified by Path; fileIdx is its index

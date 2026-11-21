@@ -92,7 +92,7 @@ func (m *manager) unkeptViews() []types.Download {
 			f = &folder{paths: map[string]bool{}}
 			folders[k.ih] = f
 		}
-		if en.kind() == types.DownloadLeftover {
+		if en.kind() == downloadLeftover {
 			continue
 		}
 		f.hasRecord = true
@@ -237,7 +237,7 @@ func (m *manager) RemoveUnkept(infoHash, path string) error {
 	base := strings.TrimSuffix(filepath.ToSlash(rel), ".part")
 	m.dl.mu.Lock()
 	for k, en := range m.dl.entries {
-		if k.ih == ih && en.kind() != types.DownloadLeftover && filepath.ToSlash(en.Path) == base {
+		if k.ih == ih && en.kind() != downloadLeftover && filepath.ToSlash(en.Path) == base {
 			m.dl.mu.Unlock()
 			return ErrDownloadPath
 		}
@@ -275,7 +275,7 @@ func (m *manager) hasRecords(ih string) bool {
 	m.dl.mu.Lock()
 	defer m.dl.mu.Unlock()
 	for k, en := range m.dl.entries {
-		if k.ih == ih && en.kind() != types.DownloadLeftover {
+		if k.ih == ih && en.kind() != downloadLeftover {
 			return true
 		}
 	}
@@ -317,7 +317,7 @@ func (m *manager) markFolder(ih string) {
 	if _, ok := m.dl.entries[key]; ok {
 		return
 	}
-	m.dl.entries[key] = &downloadEntry{InfoHash: ih, FileIdx: leftoverIdx, Kind: types.DownloadLeftover, AddedAt: time.Now()}
+	m.dl.entries[key] = &downloadEntry{InfoHash: ih, FileIdx: leftoverIdx, Kind: downloadLeftover, AddedAt: time.Now()}
 	m.dl.saveLocked()
 }
 

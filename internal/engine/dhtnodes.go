@@ -125,10 +125,8 @@ func saveDHTNodes(servers []*dht.Server, path string) (int, error) {
 		}
 	}
 	nodes = nodes[:min(len(nodes), dhtNodesMax)]
-	tmp := path + ".tmp"
-	if err := dht.WriteNodesToFile(nodes, tmp); err != nil {
-		_ = os.Remove(tmp)
+	if err := writeFileAtomic(path, func(tmp string) error { return dht.WriteNodesToFile(nodes, tmp) }); err != nil {
 		return 0, err
 	}
-	return len(nodes), os.Rename(tmp, path)
+	return len(nodes), nil
 }

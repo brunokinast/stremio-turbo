@@ -210,7 +210,7 @@ func TestUnrecordedFolder(t *testing.T) {
 	}
 	var rows []types.Download
 	for _, d := range m.Downloads() {
-		if d.Kind == types.DownloadLeftover {
+		if d.Kind == downloadLeftover {
 			t.Fatalf("a marker listed: %+v", d)
 		}
 		if d.InfoHash == scanIhOld {

@@ -844,7 +844,7 @@ func (s *server) handleRemoveAll(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) handleNetworkInfo(w http.ResponseWriter, _ *http.Request) {
 	body := map[string]any{"availableInterfaces": availableInterfaces()}
-	if in, ok := s.em.(interface{ Incoming() types.IncomingStats }); ok {
+	if in, ok := s.em.(types.IncomingReporter); ok {
 		body["incoming"] = in.Incoming()
 	}
 	writeJSON(w, http.StatusOK, body)
@@ -983,7 +983,7 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request, ih, idxSeg
 		return
 	}
 	defer func() { _ = rc.Close() }()
-	if t, ok := rc.(interface{ SetTraceRequest(uint64) }); ok {
+	if t, ok := rc.(types.TraceRequestTagger); ok {
 		t.SetTraceRequest(traceRequestID(r.Context()))
 	}
 

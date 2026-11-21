@@ -36,9 +36,10 @@ import (
 //     at the resume point are primed; it holds a lease the client renews, and
 //     is deleted once the lease lapses (also at startup), so a closed or
 //     crashed client leaves nothing behind. Playing it makes it kept.
-//   - leftover: a cache folder found at startup with no record (data from
-//     before the record existed, or of a server that was stopped). Listed so
-//     the user can delete it; never fetched.
+//   - unkept (listed, not stored): data on disk with no record of its own,
+//     such as an episode that was streamed and never kept, or a folder from
+//     an earlier run (stored only as a leftover marker that keeps the
+//     janitor off it). Listed so the user can delete it; never fetched.
 //
 // The janitor's idle and LRU passes (which delete a torrent's data) leave
 // torrents with records alone; they only reclaim torrents nobody recorded. The
@@ -149,7 +150,7 @@ func newDownloads(appPath string) *downloads {
 		return d
 	}
 	for _, en := range list {
-		if !isHexInfoHash(en.InfoHash) || (en.FileIdx < 0 && (en.FileIdx != leftoverIdx || en.Kind != types.DownloadLeftover)) {
+		if !isHexInfoHash(en.InfoHash) || (en.FileIdx < 0 && (en.FileIdx != leftoverIdx || en.Kind != downloadLeftover)) {
 			continue
 		}
 		en.InfoHash = strings.ToLower(en.InfoHash)
@@ -181,15 +182,11 @@ func (d *downloads) saveLocked() {
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].AddedAt.Before(list[j].AddedAt) })
 	raw, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		return
+	if err == nil {
+		err = writeFileAtomic(d.path, func(tmp string) error { return os.WriteFile(tmp, raw, 0o600) })
 	}
-	tmp := d.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err == nil {
-		err = os.Rename(tmp, d.path)
-		if err != nil {
-			logging.For("engine").Warn("saving downloads", "path", d.path, "err", err)
-		}
+	if err != nil {
+		logging.For("engine").Warn("saving downloads", "path", d.path, "err", err)
 	}
 }
 
@@ -396,6 +393,10 @@ func (m *manager) startDownload(ih string, idx int) {
 	}()
 }
 
+// downloadLeftover marks a cache folder found with no record: stored only,
+// to keep the janitor off its data; never listed (its files are unkept).
+const downloadLeftover types.DownloadKind = "leftover"
+
 // setBackground marks (or unmarks) a file as a background download: the whole
 // file at Normal priority, which a playing file's readahead window still
 // outranks. Unmarking leaves a file that is being played alone.
@@ -460,7 +461,7 @@ func (m *manager) Downloads() []types.Download {
 	m.dl.mu.Lock()
 	keys := make([]downloadKey, 0, len(m.dl.entries))
 	for k, en := range m.dl.entries {
-		if en.kind() != types.DownloadLeftover { // a folder marker: its files are listed as unkept
+		if en.kind() != downloadLeftover { // a folder marker: its files are listed as unkept
 			keys = append(keys, k)
 		}
 	}
@@ -497,8 +498,8 @@ func (m *manager) downloadView(k downloadKey) types.Download {
 	if !ok {
 		return types.Download{InfoHash: k.ih, FileIdx: k.idx}
 	}
-	if en.kind() == types.DownloadLeftover {
-		return types.Download{InfoHash: k.ih, FileIdx: k.idx, Kind: types.DownloadLeftover}
+	if en.kind() == downloadLeftover {
+		return types.Download{InfoHash: k.ih, FileIdx: k.idx, Kind: downloadLeftover}
 	}
 	now := time.Now()
 	if known {
@@ -732,7 +733,7 @@ func (m *manager) scanLeftovers() {
 	recorded := map[string]bool{}
 	changed := false
 	for k, en := range m.dl.entries {
-		if en.kind() == types.DownloadLeftover {
+		if en.kind() == downloadLeftover {
 			if _, ok := present[k.ih]; !ok {
 				delete(m.dl.entries, k)
 				changed = true
@@ -754,7 +755,7 @@ func (m *manager) scanLeftovers() {
 		if sub, err := os.ReadDir(filepath.Join(m.cfg.CacheRoot, d.Name())); err == nil && len(sub) == 1 {
 			name = strings.TrimSuffix(sub[0].Name(), ".part")
 		}
-		m.dl.entries[key] = &downloadEntry{InfoHash: ih, FileIdx: leftoverIdx, Kind: types.DownloadLeftover, Name: name, AddedAt: added}
+		m.dl.entries[key] = &downloadEntry{InfoHash: ih, FileIdx: leftoverIdx, Kind: downloadLeftover, Name: name, AddedAt: added}
 		changed = true
 		logging.For("engine").Info("found leftover cache folder", "info_hash", ih)
 	}

@@ -56,22 +56,19 @@ func (m *manager) saveMetainfo(ih string, t *torrent.Torrent) {
 		return
 	}
 	mi := t.Metainfo()
-	tmp, err := os.CreateTemp(m.cfg.CacheRoot, ih+".torrent.*.tmp")
+	err := writeFileAtomic(p, func(tmp string) error {
+		f, err := os.Create(tmp)
+		if err != nil {
+			return err
+		}
+		werr := mi.Write(f)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		return werr
+	})
 	if err != nil {
 		logging.For("engine").Warn("saving torrent metadata", "info_hash", ih, "err", err)
-		return
-	}
-	werr := mi.Write(tmp)
-	cerr := tmp.Close()
-	if werr == nil {
-		werr = cerr
-	}
-	if werr == nil {
-		werr = os.Rename(tmp.Name(), p)
-	}
-	if werr != nil {
-		_ = os.Remove(tmp.Name())
-		logging.For("engine").Warn("saving torrent metadata", "info_hash", ih, "err", werr)
 	}
 }
 
