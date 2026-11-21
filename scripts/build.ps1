@@ -69,6 +69,9 @@ if (-not $SkipWeb) {
     Push-Location (Join-Path $root 'web')
     try {
         corepack pnpm install --frozen-lockfile
+        # The UI is installed with the app: no offline cache, which would keep serving an
+        # earlier version's files after an update.
+        $env:SERVICE_WORKER_DISABLED = 'true'
         corepack pnpm run build
     } finally { Pop-Location }
 }

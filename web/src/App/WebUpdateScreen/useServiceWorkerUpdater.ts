@@ -87,9 +87,20 @@ const useServiceWorkerUpdater = () => {
     useEffect(() => {
         const serviceWorkerDisabled = process.env.SERVICE_WORKER_DISABLED as string | boolean | undefined;
         if (
+            (serviceWorkerDisabled === 'true' || serviceWorkerDisabled === true) &&
+            'serviceWorker' in navigator
+        ) {
+            // A build without offline caching (one installed with the app) must not keep
+            // running an earlier build's worker, which would serve that build's files.
+            navigator.serviceWorker.getRegistrations()
+                .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+                .then(() => caches.keys())
+                .then((keys) => Promise.all(keys.filter((key) => key.startsWith('workbox-precache')).map((key) => caches.delete(key))))
+                .catch((error) => console.error('Cannot remove the service worker', error));
+            return;
+        }
+        if (
             process.env.NODE_ENV !== 'production' ||
-            serviceWorkerDisabled === 'true' ||
-            serviceWorkerDisabled === true ||
             !('serviceWorker' in navigator)
         ) {
             return;
