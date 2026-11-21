@@ -55,14 +55,35 @@
     display: flex;
     overflow: hidden;
     background-color: var(--overlay-color);
+}
 
-    .storage-mine {
-        background-color: var(--primary-accent-color);
+.storage-mine {
+    background-color: var(--primary-accent-color);
+}
+
+.storage-other {
+    background-color: color-mix(in srgb, var(--primary-foreground-color) 20%, transparent);
+}
+
+// What the bar's colours mean.
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    font-size: 0.75rem;
+    opacity: 0.7;
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
     }
 
-    .storage-other {
-        background-color: var(--primary-foreground-color);
-        opacity: 0.2;
+    .key {
+        width: 0.625rem;
+        height: 0.625rem;
+        border-radius: 0.125rem;
+        background-color: var(--overlay-color);
     }
 }
 
@@ -114,7 +135,8 @@
         white-space: nowrap;
         border: thin solid var(--overlay-color);
 
-        &:hover {
+        &:hover,
+        &:focus-visible {
             background-color: var(--overlay-color);
         }
     }
@@ -329,7 +351,8 @@
         color: var(--primary-foreground-color);
     }
 
-    &:hover {
+    &:hover,
+    &:focus-visible {
         opacity: 1;
         background-color: color-mix(in srgb, var(--danger-accent-color) 15%, transparent);
 
@@ -563,7 +586,8 @@
             color: var(--primary-foreground-color);
         }
 
-        &:hover {
+        &:hover,
+        &:focus-visible {
             opacity: 1;
             background-color: var(--overlay-color);
         }
@@ -584,6 +608,7 @@
     }
 
     &:hover .action,
+    &:focus-within .action,
     &.live .action {
         opacity: 0.75;
     }
@@ -623,7 +648,7 @@
     justify-content: space-between;
     gap: 1rem;
     border-radius: var(--border-radius);
-    background-color: var(--modal-background-color, #1e1d27);
+    background-color: var(--modal-background-color);
     border: thin solid color-mix(in srgb, var(--primary-foreground-color) 10%, transparent);
     box-shadow: 0 0.75rem 2.5rem rgba(0, 0, 0, 0.5);
     z-index: 2;
@@ -669,7 +694,8 @@
         color: var(--primary-foreground-color);
         opacity: 0.75;
 
-        &:hover {
+        &:hover,
+        &:focus-visible {
             opacity: 1;
             background-color: var(--overlay-color);
         }
@@ -680,7 +706,8 @@
         color: var(--primary-foreground-color);
         background-color: var(--danger-accent-color);
 
-        &:hover {
+        &:hover,
+        &:focus-visible {
             filter: brightness(1.1);
         }
     }
@@ -736,11 +763,18 @@
         right: 1rem;
     }
 
+    // The state (progress, Stalled, Waiting) moves to a line of its own
+    // under the name; dense flow keeps size and actions on the first line.
     .row {
         grid-template-columns: auto minmax(0, 1fr) @size-col @slot-col;
+        grid-auto-flow: row dense;
 
-        .state-cell, .quality {
+        .quality {
             display: none;
+        }
+
+        .state-cell {
+            grid-column: 2 / -1;
         }
     }
 }

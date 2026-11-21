@@ -10,7 +10,6 @@ import StreamCard from 'stremio/routes/Details/Streams/Stream';
 import { LISTED_SEEDERS, WEAK_SEEDERS } from './groupByQuality';
 import type { RankedSource, RankedTier } from './groupByQuality';
 import type { Candidate } from './picker';
-import type { Match } from './candidates';
 import type { Picking } from './useSmartPlay';
 import type { EpisodeDownloadState } from './useEpisodeDownload';
 import styles from './QualityRows.less';
@@ -138,16 +137,15 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
     }, [renderSeeders, renderOnDisk]);
 
     const timesX = (ratio: number | null) => ratio === null ? UNKNOWN : `${times(ratio)}×`;
-    const matchLabel = (match: Match) => t(match === 'exact' ? 'SMART_PLAY_MATCH_EXACT' : match === 'same' ? 'SMART_PLAY_MATCH_SAME' : 'SMART_PLAY_MATCH_LOWER');
 
     // One candidate of the step being tested: size, live seeders, and how many
-    // times its need it downloads (or what it's waiting for).
+    // times the speed it needs it downloads (or what it's waiting for).
     const candidateStatus = (candidate: Candidate) => {
         if (candidate.need === 0) {
             return t('SMART_PLAY_DOWNLOAD_ON_DISK');
         }
         if (candidate.ratio === null) {
-            return t('SMART_PLAY_RACER_CONNECTING_SHORT');
+            return t('SMART_PLAY_DOWNLOADS_CONNECTING');
         }
         return candidate.live ? t('SMART_PLAY_CANDIDATE_HEALTH', { ratio: timesX(candidate.ratio) }) : t('SMART_PLAY_CANDIDATE_REMEMBERED', { ratio: timesX(candidate.ratio) });
     };
@@ -155,22 +153,29 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
     if (picking !== null) {
         const progress = picking.progress;
         const steps = progress?.steps ?? [];
+        const passed = steps.filter(({ result }) => result === 'too-slow');
+        const current = steps.filter(({ result }) => result !== 'too-slow');
         return (
             <div className={styles['racing']} role={'status'}>
                 <div className={styles['racing-label']}>{t('SMART_PLAY_FINDING', { quality: picking.label })}</div>
                 <div className={styles['racing-line']} />
                 <div className={styles['steps']}>
                     {
-                        steps.map(({ step, result, best }, index) => (
+                        passed.length > 0 ?
+                            <div className={styles['passed']}>
+                                {passed.map(({ step, best }) => `${step.label} · ${t('SMART_PLAY_STEP_TOO_SLOW', { ratio: timesX(best) })}`).join('  →  ')}
+                            </div>
+                            :
+                            null
+                    }
+                    {
+                        current.map(({ step, result, best }, index) => (
                             <div key={step.key + index} className={classNames(styles['step'], styles[result])}>
                                 <div className={styles['step-head']}>
                                     <span className={styles['step-label']}>{step.label}</span>
-                                    <span className={styles['match']} title={t('SMART_PLAY_MATCH_HINT')}>{matchLabel(step.match)}</span>
                                     <span className={styles['step-result']}>
                                         {
-                                            result === 'testing' ? t('SMART_PLAY_STEP_TESTING') :
-                                                result === 'healthy' ? t('SMART_PLAY_STEP_HEALTHY', { ratio: timesX(best) }) :
-                                                    t('SMART_PLAY_STEP_TOO_SLOW', { ratio: timesX(best) })
+                                            result === 'testing' ? t('SMART_PLAY_STEP_TESTING') : t('SMART_PLAY_STEP_HEALTHY', { ratio: timesX(best) })
                                         }
                                     </span>
                                 </div>

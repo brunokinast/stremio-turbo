@@ -174,7 +174,7 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
                                         renderSeeders(shown?.seeders ?? null)
                                         :
                                         ep.state === 'racing' ?
-                                            <span className={styles['racing']}>{best > 0 ? t('SMART_PLAY_SEASON_RATE', { rate: (best / 1e6).toFixed(1) }) : t('SMART_PLAY_SEASON_TESTING')}</span>
+                                            <span className={styles['racing']}>{best > 0 ? t('SMART_PLAY_SEASON_RATE', { rate: (best / 1e6).toFixed(1) }) : t('SMART_PLAY_STEP_TESTING')}</span>
                                             :
                                             ep.state === 'queued' ?
                                                 <span className={styles['queued']}>

@@ -14,7 +14,7 @@ import { gb } from './format';
 
 const ManualDownloadToasts = () => {
     const { t } = useTranslation();
-    const toast = useToast() as ReturnType<typeof useToast> & { show: (options: Record<string, unknown>) => void };
+    const toast = useToast();
     const jobs = useManualDownloads();
     const ref = useRef({ t, toast });
     ref.current = { t, toast };

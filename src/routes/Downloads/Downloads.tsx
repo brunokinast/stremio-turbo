@@ -37,7 +37,7 @@ type Pending = { mode: 'delete' | 'stop', items: Item[], bytes: number } | null;
 
 const Downloads = () => {
     const { t } = useTranslation();
-    const { downloads, disk, remove, pause, resume, baseUrl } = useDownloads(POLL);
+    const { downloads, disk, loaded, remove, pause, resume, baseUrl } = useDownloads(POLL);
     const profile = useProfile();
     // Stalled files whose other-source race is running.
     const [retrying, setRetrying] = useState<Set<string>>(() => new Set());
@@ -174,10 +174,17 @@ const Downloads = () => {
                     </div>
                     {
                         disk !== null && disk.total > 0 ?
-                            <div className={styles['storage']} title={t('SMART_PLAY_DOWNLOADS_STORAGE_HINT')}>
-                                <div className={styles['storage-mine']} style={{ width: `${(total / disk.total) * 100}%` }} />
-                                <div className={styles['storage-other']} style={{ width: `${(usedOther / disk.total) * 100}%` }} />
-                            </div>
+                            <React.Fragment>
+                                <div className={styles['storage']}>
+                                    <div className={styles['storage-mine']} style={{ width: `${(total / disk.total) * 100}%` }} />
+                                    <div className={styles['storage-other']} style={{ width: `${(usedOther / disk.total) * 100}%` }} />
+                                </div>
+                                <div className={styles['legend']}>
+                                    <span className={styles['legend-item']}><span className={classnames(styles['key'], styles['storage-mine'])} />{t('SMART_PLAY_DOWNLOADS_LEGEND_MINE', { size: gb(total) })}</span>
+                                    <span className={styles['legend-item']}><span className={classnames(styles['key'], styles['storage-other'])} />{t('SMART_PLAY_DOWNLOADS_LEGEND_OTHER', { size: gb(usedOther) })}</span>
+                                    <span className={styles['legend-item']}><span className={styles['key']} />{t('SMART_PLAY_DOWNLOADS_LEGEND_FREE', { size: gb(disk.free) })}</span>
+                                </div>
+                            </React.Fragment>
                             :
                             null
                     }
@@ -208,7 +215,7 @@ const Downloads = () => {
                 <div className={classnames(styles['list'], { [styles['with-bulk']]: selectedItems.length > 0 })}>
                     {
                         downloads === null ?
-                            <div className={styles['empty']}>{t('SMART_PLAY_DOWNLOADS_UNAVAILABLE')}</div>
+                            <div className={styles['empty']}>{loaded ? t('SMART_PLAY_DOWNLOADS_UNAVAILABLE') : t('SMART_PLAY_DOWNLOADS_LOADING')}</div>
                             :
                             groups.length === 0 ?
                                 <div className={styles['empty']}>
@@ -246,8 +253,8 @@ const Downloads = () => {
                             background={undefined}
                             title={pendingTitle}
                             buttons={[
-                                { className: styles['modal-cancel'], label: t('SMART_PLAY_CANCEL'), props: { onClick: () => setPending(null) } },
-                                { className: styles['modal-delete'], label: busy ? t('SMART_PLAY_DOWNLOADS_DELETING') : pending.mode === 'stop' ? t('SMART_PLAY_DOWNLOADS_STOP_AND_DELETE') : t('SMART_PLAY_DOWNLOADS_DELETE'), props: { 'data-autofocus': true, disabled: busy, onClick: confirm } },
+                                { className: styles['modal-cancel'], label: t('SMART_PLAY_CANCEL'), props: { 'data-autofocus': true, onClick: () => setPending(null) } },
+                                { className: styles['modal-delete'], label: busy ? t('SMART_PLAY_DOWNLOADS_DELETING') : pending.mode === 'stop' ? t('SMART_PLAY_DOWNLOADS_STOP_AND_DELETE') : t('SMART_PLAY_DOWNLOADS_DELETE'), props: { disabled: busy, onClick: confirm } },
                             ]}
                             onCloseRequest={() => !busy && setPending(null)}
                         >

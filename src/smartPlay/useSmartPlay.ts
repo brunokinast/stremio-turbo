@@ -20,7 +20,7 @@ import type { StreamGroup } from 'stremio/routes/Details/Streams/useStreamsByAdd
 import { fallbackTier, groupByQuality, offersQuality } from './groupByQuality';
 import useLiveSeeders from './useLiveSeeders';
 import { parseRuntime, RateMeter } from './supply';
-import { getLastQuality, getQuality, setQuality } from './qualityMemory';
+import { getLastQuality, getQuality, qualityLabel, setQuality } from './qualityMemory';
 import { setState, useSmartPlayState } from './session';
 import { addDownload, removeDownload, useDownloads } from './downloads';
 import { qualitySteps } from './candidates';
@@ -119,7 +119,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         warned.current = videoId;
         toast.show({
             type: 'info',
-            title: t('SMART_PLAY_QUALITY_CHANGED', { quality: likelyKey, fallback: likelyTier.label }),
+            title: t('SMART_PLAY_QUALITY_CHANGED', { quality: qualityLabel(likelyKey), fallback: likelyTier.label }),
             timeout: 8000,
         });
         // likelyTier changes identity on every count update; fallbackKey captures it.
@@ -213,15 +213,15 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         }
         playStarted.current = true;
         if (rememberQuality && metaId !== null && tierKey !== null) {
-            setQuality(metaId, tierKey);
+            setQuality(metaId, tierKey, tiers.find((tier) => tier.key === tierKey)?.label ?? null);
         }
+        // Said only when it differs from a plain play of the chosen quality
+        // (a step down was already said when it happened).
         const size = source.onDisk ?? source.size;
         if (source.onDisk !== null) {
             toast.show({ type: 'info', title: t('SMART_PLAY_DOWNLOADED_COPY', { size: gb(size) }), timeout: 6000 });
         } else if (result !== null && result.weak) {
-            toast.show({ type: 'info', title: t('SMART_PLAY_NONE_HEALTHY', { size: gb(size), ratio: times(result.ratio) }), timeout: 8000 });
-        } else if (result !== null) {
-            toast.show({ type: 'info', title: t('SMART_PLAY_READY', { size: gb(size), quality: result.step.label, ratio: times(result.ratio) }), timeout: 6000 });
+            toast.show({ type: 'info', title: t('SMART_PLAY_NONE_HEALTHY', { size: gb(size) }), message: t('SMART_PLAY_NONE_HEALTHY_WHY', { ratio: times(result.ratio) }), timeout: 8000 });
         }
         // The rate measured feeds the 24 h memory and the player's start hold.
         const rate = meter.current.rate(source.infoHash);
@@ -233,7 +233,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         setState({ handoff: source.onDisk === null && rate !== null && needed !== null && needed > 0 ? { infoHash: source.infoHash, rate, needed } : null });
         setPicking(null);
         navigate(toPath(source.stream.deepLinks.player));
-    }, [metaId, toast, t, runtimeSeconds, startFraction, core.transport, navigate]);
+    }, [metaId, tiers, toast, t, runtimeSeconds, startFraction, core.transport, navigate]);
 
     const cancel = useCallback(() => {
         run.current?.controller.abort();

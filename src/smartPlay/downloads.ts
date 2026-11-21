@@ -138,10 +138,12 @@ const removeDownload = (baseUrl: string, infoHash: string, fileIdx: number, path
 
 // ---- the shared poller ------------------------------------------------------
 
-type Snapshot = { downloads: Download[] | null, disk: DiskInfo | null };
+// loaded: the server has answered (or failed to) since baseUrl was set; until
+// then a null `downloads` means "not fetched yet", not "unreachable".
+type Snapshot = { downloads: Download[] | null, disk: DiskInfo | null, loaded: boolean };
 
 const store = {
-    snapshot: { downloads: null, disk: null } as Snapshot,
+    snapshot: { downloads: null, disk: null, loaded: false } as Snapshot,
     listeners: new Map<() => void, number>(),
     baseUrl: null as string | null,
     timer: null as ReturnType<typeof setTimeout> | null,
@@ -186,7 +188,7 @@ const refreshStore = async () => {
     const [downloads, disk] = await Promise.all([listDownloads(baseUrl), getDisk(baseUrl)]);
     if (baseUrl === store.baseUrl) {
         trackMovement(downloads);
-        store.snapshot = { downloads, disk };
+        store.snapshot = { downloads, disk, loaded: true };
         notify();
     }
 };
@@ -252,7 +254,7 @@ const useDownloads = (intervalMs: number, enabled = true) => {
         store.listeners.set(listener, intervalMs);
         if (store.baseUrl !== baseUrl) {
             store.baseUrl = baseUrl;
-            store.snapshot = { downloads: null, disk: null };
+            store.snapshot = { downloads: null, disk: null, loaded: false };
         }
         setSnapshot(store.snapshot);
         refreshStore().finally(schedule);
@@ -292,7 +294,7 @@ const useDownloads = (intervalMs: number, enabled = true) => {
         await refreshStore();
     }, [baseUrl]);
 
-    return { downloads: snapshot.downloads, disk: snapshot.disk, remove, pause, resume, baseUrl };
+    return { downloads: snapshot.downloads, disk: snapshot.disk, loaded: snapshot.loaded, remove, pause, resume, baseUrl };
 };
 
 // A file moving right now: downloading, queued to, or playing.

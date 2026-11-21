@@ -2,8 +2,7 @@
 
 @import (reference) '~stremio/routes/Details/variables.less';
 
-@healthy: #22c55e;
-@weak: #f59e0b;
+@import (reference) './colors.less';
 
 .quality-rows {
     display: flex;
@@ -36,7 +35,7 @@
     &:focus-visible {
         .play-icon {
             background-color: var(--secondary-accent-color);
-            color: #ffffff;
+            color: @on-accent;
         }
     }
 
@@ -325,10 +324,6 @@
     flex-direction: column;
     gap: 0.375rem;
 
-    &.too-slow {
-        opacity: 0.6;
-    }
-
     &.healthy .step-result {
         color: @healthy;
     }
@@ -346,11 +341,9 @@
     color: var(--primary-foreground-color);
 }
 
-.match {
-    padding: 0.0625rem 0.375rem;
-    border-radius: 0.25rem;
-    background-color: @overlay-hover;
-    font-size: 0.75rem;
+// Steps found too slow, on one line.
+.passed {
+    font-size: 0.8125rem;
     color: @text-secondary;
 }
 
