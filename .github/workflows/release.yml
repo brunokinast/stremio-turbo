@@ -1,0 +1,74 @@
+# Builds and publishes a release when a version tag is pushed
+# (scripts/release.ps1 creates it). Installed apps find it through
+# releases/latest/download/update.json and update themselves.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the upstream check compares histories
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: |
+            server/go.sum
+            deps/torrent/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install git-filter-repo
+
+      - name: Rust
+        run: rustup target add x86_64-pc-windows-msvc
+
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - uses: actions/cache@v4
+        with:
+          path: out/cache
+          key: build-cache-${{ hashFiles('scripts/binaries.json') }}
+
+      - name: Every upstream merged (the release rule)
+        run: pwsh scripts/check-upstreams.ps1
+
+      - name: Tests
+        run: pwsh -Command "Import-Module ./scripts/Upstreams.psm1; Invoke-AllTests"
+
+      - name: Build
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: pwsh scripts/build.ps1
+
+      - name: Check the version matches the tag
+        shell: pwsh
+        run: |
+          $v = (Get-Content out/update.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "built $v for tag $env:GITHUB_REF_NAME" }
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @("Includes the latest code of every original project:", "") + (pwsh scripts/check-upstreams.ps1 -Markdown)
+          $notes -join "`n" | Set-Content -Encoding utf8 out/notes.md
+          gh release create $env:GITHUB_REF_NAME --title "Stremio Turbo $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file out/notes.md `
+            (Get-Item out/StremioTurbo-*-x64.exe).FullName out/update.json out/descriptor.json out/descriptor.json.sig

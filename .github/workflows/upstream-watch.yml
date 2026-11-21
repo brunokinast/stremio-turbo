@@ -1,0 +1,44 @@
+# Daily: keeps one issue open while any original project has code we haven't
+# merged (or a newer Stremio core is out), and closes it once we're current.
+name: Upstream watch
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install git-filter-repo
+      - uses: actions/cache@v4
+        with:
+          path: out/cache/shell-upstream.git
+          key: shell-upstream-${{ github.run_id }}
+          restore-keys: shell-upstream-
+      - name: Check and update the issue
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $report = pwsh scripts/check-upstreams.ps1 -Markdown
+          $behind = $LASTEXITCODE -ne 0
+          $title = 'Upstream moved: sync before the next release'
+          $open = gh issue list --state open --search "in:title `"$title`"" --json number --jq '.[0].number'
+          if ($behind) {
+            $body = (@('Run `pwsh scripts/sync-upstreams.ps1`, then release.', '') + $report) -join "`n"
+            if ($open) { gh issue edit $open --body $body } else { gh issue create --title $title --body $body }
+          } elseif ($open) {
+            gh issue close $open --comment 'Every upstream is merged.'
+          }
