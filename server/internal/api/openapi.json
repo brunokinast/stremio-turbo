@@ -3464,6 +3464,61 @@
         }
       }
     },
+    "/downloads/owner": {
+      "post": {
+        "operationId": "setDownloadsOwner",
+        "summary": "Tie the server's lifetime to an app process",
+        "description": "When the process exits, exit-when-done turns on: the server exits at once when nothing is downloading or playing, or after the downloads finish. A new owner (the app started again while downloads finish) turns exit-when-done off; 0 clears the owner. The same can be set at start with RIVULET_OWNER_PID.",
+        "tags": [
+          "Downloads"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "pid"
+                ],
+                "properties": {
+                  "pid": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "pid"
+                  ],
+                  "properties": {
+                    "pid": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad body, or no such process"
+          },
+          "403": {
+            "description": "Write not allowed from this caller"
+          }
+        }
+      }
+    },
     "/downloads/{infoHash}/{fileIdx}": {
       "patch": {
         "operationId": "updateDownload",

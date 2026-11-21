@@ -505,11 +505,35 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	}
 
 	safeGo("http", func() {
+		ln, err := net.Listen("tcp", httpAddr)
+		if err != nil {
+			reportFatal(fmt.Errorf("http server error: %w", err))
+			return
+		}
 		logging.For("http").Info("listening", "version", version, "addr", baseLocal, "bind_addr", httpAddr, "app_path", appPath)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		// The line the Stremio shell waits for before loading the UI (server.js
+		// prints the same), written once the port accepts connections.
+		fmt.Fprintf(os.Stdout, "EngineFS server started at %s/\n", baseLocal)
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			reportFatal(fmt.Errorf("http server error: %w", err))
 		}
 	})
+	// RIVULET_OWNER_PID: the app process this server lives for (an app that
+	// bundles the server); see types.Downloader.SetOwner.
+	if v := getenv(lookup, "RIVULET_OWNER_PID", ""); v != "" {
+		pid, perr := strconv.Atoi(v)
+		dl, ok := em.(types.Downloader)
+		switch {
+		case perr != nil || pid <= 0:
+			logging.For("http").Warn("RIVULET_OWNER_PID is not a process id; ignored", "value", v)
+		case !ok:
+			logging.For("http").Warn("RIVULET_OWNER_PID needs the download registry; ignored")
+		default:
+			if err := dl.SetOwner(pid); err != nil {
+				logging.For("http").Warn("RIVULET_OWNER_PID: cannot watch the process; ignored", "pid", pid, "err", err)
+			}
+		}
+	}
 	// Resume persisted HLS preparation jobs now that the listener that feeds
 	// ffmpeg its input is starting (RIVULET_HLS_PREPARE + RIVULET_HLS_PERSIST).
 	if r, ok := prober.(interface{ ResumeHLSPrepare() }); ok {

@@ -670,6 +670,9 @@ type Downloader interface {
 	// fetch and no torrent is being read (the launcher leaves the server
 	// running after the player closes to finish downloads).
 	SetExitWhenDone(on bool)
+	// SetOwner ties the server's lifetime to an app process: when it exits,
+	// exit-when-done turns on. A new owner turns it off; 0 clears it.
+	SetOwner(pid int) error
 }
 
 // DownloadKind is what a record is kept for.

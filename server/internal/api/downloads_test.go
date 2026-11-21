@@ -5,6 +5,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -23,6 +24,7 @@ type fakeDownloadsEM struct {
 	removed      []string
 	entries      map[string]types.Download
 	exitWhenDone *bool
+	owner        *int
 }
 
 func dlKey(ih string, idx int) string { return ih + "/" + strconv.Itoa(idx) }
@@ -62,6 +64,13 @@ func (f *fakeDownloadsEM) UpdateDownload(ih string, idx int, p types.DownloadPat
 }
 
 func (f *fakeDownloadsEM) SetExitWhenDone(on bool) { f.exitWhenDone = &on }
+func (f *fakeDownloadsEM) SetOwner(pid int) error {
+	if pid == 999999 {
+		return errors.New("no such process")
+	}
+	f.owner = &pid
+	return nil
+}
 
 func (f *fakeDownloadsEM) RemoveTorrentData(ih string) error {
 	f.removed = append(f.removed, ih)
@@ -194,6 +203,22 @@ func TestExitWhenDoneAPI(t *testing.T) {
 	}
 	if rec := doDL(t, h, http.MethodGet, "/downloads/exit-when-done", "", true); rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET = %d; want 405", rec.Code)
+	}
+}
+
+func TestDownloadsOwnerAPI(t *testing.T) {
+	em := &fakeDownloadsEM{fakeEM: newFakeEM(), entries: map[string]types.Download{}}
+	h := New(em, &fakeSS{}, &fakeProber{}, types.Config{HTTPPort: 11470, AppPath: t.TempDir()})
+	if rec := doDL(t, h, http.MethodPost, "/downloads/owner", `{"pid":1234}`, true); rec.Code != http.StatusOK || em.owner == nil || *em.owner != 1234 {
+		t.Fatalf("set = %d %s", rec.Code, rec.Body)
+	}
+	for _, body := range []string{`{}`, `{"pid":-1}`, `{"pid":999999}`} {
+		if rec := doDL(t, h, http.MethodPost, "/downloads/owner", body, true); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d; want 400", body, rec.Code)
+		}
+	}
+	if rec := doDL(t, h, http.MethodPost, "/downloads/owner", `{"pid":1}`, false); rec.Code != http.StatusForbidden {
+		t.Fatalf("remote = %d; want 403", rec.Code)
 	}
 }
 

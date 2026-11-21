@@ -258,7 +258,12 @@ type manager struct {
 	writesMu     sync.Mutex
 	writesClosed bool
 	writes       sync.WaitGroup
-	limitOnce    sync.Once // ensures SetLimitFn goroutine is started at most once
+
+	// The app process the server lives for (SetOwner); ownerGen tells a
+	// replaced owner's watcher to do nothing.
+	ownerMu   sync.Mutex
+	ownerGen  uint64
+	limitOnce sync.Once // ensures SetLimitFn goroutine is started at most once
 
 	// limitMu guards limitFn and softLimitFn below, read once per tick by the
 	// shared background goroutine started by SetLimitFn/SetSoftLimitFn (see

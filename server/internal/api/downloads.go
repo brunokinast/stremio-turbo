@@ -53,6 +53,10 @@ func (s *server) handleDownloads(w http.ResponseWriter, r *http.Request) {
 		s.exitWhenDone(w, r, dl)
 		return
 	}
+	if rest == "owner" {
+		s.setOwner(w, r, dl)
+		return
+	}
 	if rest == "disk" {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -170,6 +174,32 @@ func (s *server) exitWhenDone(w http.ResponseWriter, r *http.Request, dl types.D
 	}
 	dl.SetExitWhenDone(*body.On)
 	writeJSON(w, http.StatusOK, map[string]any{"on": *body.On})
+}
+
+// setOwner serves POST /downloads/owner {"pid": n}: the app process the server
+// lives for (see types.Downloader.SetOwner).
+func (s *server) setOwner(w http.ResponseWriter, r *http.Request, dl types.Downloader) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if !s.settingsWriteAllowed(r) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "downloads write requires a browser origin, a loopback peer, or api_password"})
+		return
+	}
+	var body struct {
+		PID *int `json:"pid"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, downloadsMaxBody)).Decode(&body); err != nil || body.PID == nil || *body.PID < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": `body must be {"pid": n}`})
+		return
+	}
+	if err := dl.SetOwner(*body.PID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no such process: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pid": *body.PID})
 }
 
 func writeDownloadErr(w http.ResponseWriter, err error) {
