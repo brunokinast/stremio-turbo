@@ -504,6 +504,34 @@ func TestFirstFileOrder(t *testing.T) {
 	}
 }
 
+// A pause landing while setFirst is between its check and its SetPriority
+// must not leave the paused file at High.
+func TestFirstFilePausedNotHigh(t *testing.T) {
+	m, e := newTestEngine(t, 0, newSeasonPackTorrent(t, 256<<10))
+	e1 := fileIndex(t, e, "Show.S01E01.mkv")
+	if _, err := m.AddDownload(e.infoHash, e1, types.AddOptions{}, types.DownloadRequest{Origin: "manual", Order: 1001}); err != nil {
+		t.Fatal(err)
+	}
+	paused := make(chan struct{})
+	testHookFirstChecked = func() {
+		testHookFirstChecked = nil
+		go func() {
+			e.setBackground(e1, false)
+			close(paused)
+		}()
+		select {
+		case <-paused:
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	defer func() { testHookFirstChecked = nil }()
+	e.setFirst(e1)
+	<-paused
+	if got := e.t.Files()[e1].Priority(); got == torrent.PiecePriorityHigh {
+		t.Fatalf("paused file left at High")
+	}
+}
+
 func TestFirstFileRule(t *testing.T) {
 	t0 := time.Now()
 	cases := []struct {

@@ -404,6 +404,8 @@ func (e *engine) setBackground(idx int, on bool) {
 	if idx < 0 || idx >= len(files) {
 		return
 	}
+	e.prioMu.Lock()
+	defer e.prioMu.Unlock()
 	e.mu.Lock()
 	if e.background == nil {
 		e.background = map[int]struct{}{}
@@ -1022,9 +1024,13 @@ func firstFile(rs []fileRank) int {
 // setFirst gives background file idx High priority, so peers that have its
 // pieces send those first and the other background files take what's left
 // (a player's readahead still outranks it); the previous first file goes back
-// to Normal. -1 clears it.
+// to Normal. -1 clears it. prioMu keeps a pause (setBackground) from landing
+// between the check and the SetPriority, which would leave a paused file at
+// High.
 func (e *engine) setFirst(idx int) {
 	files := e.t.Files()
+	e.prioMu.Lock()
+	defer e.prioMu.Unlock()
 	e.mu.Lock()
 	prev, had := e.first, e.firstSet
 	_, prevBackground := e.background[prev]
@@ -1034,6 +1040,9 @@ func (e *engine) setFirst(idx int) {
 	}
 	e.first, e.firstSet = idx, idx >= 0
 	e.mu.Unlock()
+	if testHookFirstChecked != nil {
+		testHookFirstChecked()
+	}
 	if had && prev != idx && prevBackground && prev >= 0 && prev < len(files) {
 		files[prev].SetPriority(torrent.PiecePriorityNormal)
 	}
@@ -1041,6 +1050,10 @@ func (e *engine) setFirst(idx int) {
 		files[idx].SetPriority(torrent.PiecePriorityHigh)
 	}
 }
+
+// testHookFirstChecked runs in setFirst between its check and SetPriority
+// (tests only).
+var testHookFirstChecked func()
 
 // isFirst reports whether file idx is its torrent's first file (setFirst).
 func (e *engine) isFirst(idx int) bool {
