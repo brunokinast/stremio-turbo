@@ -1,6 +1,6 @@
 # Project directives
 
-Personal fork of [Stremio/stremio-web](https://github.com/Stremio/stremio-web) with changes that make Stremio work better for its owner. It runs inside the official Windows shell (`stremio-shell-ng.exe --webui-url=<our build>`). It is not a product: keep things lean. Claude writes and checks all the code here and is responsible for it.
+Personal fork of [Stremio/stremio-web](https://github.com/Stremio/stremio-web) with changes that make Stremio work better for its owner. It is the `web/` folder of Stremio Turbo (see the root `CLAUDE.md`). It is not a product: keep things lean. Claude writes and checks all the code here and is responsible for it.
 
 ## Principles
 
@@ -22,9 +22,9 @@ Personal fork of [Stremio/stremio-web](https://github.com/Stremio/stremio-web) w
 ## Workflow
 
 - Discuss and explore first, then write a plan; one part at a time, each with its own plan. For UI choices, present a few options (with previews) rather than picking one.
-- Commit straight to `main` and push to `origin` (brunokinast/stremio-web) once a change works. Never push to Stremio's repositories or force-push.
+- Commit straight to `main` and push to `origin` (brunokinast/stremio-turbo) once a change works. Never push to Stremio's repositories or force-push.
 - Before committing: `pnpm run lint` and `pnpm run build` pass, and the change has been tried in the real app.
-- Pull upstream with `git fetch upstream && git merge upstream/development`.
+- Upstream updates: `scripts/sync-upstreams.ps1` at the repository root.
 
 ## Testing
 
@@ -35,7 +35,8 @@ Personal fork of [Stremio/stremio-web](https://github.com/Stremio/stremio-web) w
 
 ## The user's Stremio setup
 
-- `scripts/start-stremio.ps1` starts our Rivulet build on `127.0.0.1:11470` and the official shell with `--development --webui-url=<fork>` (so the shell doesn't start Stremio's closed `server.js`), and stops Rivulet when the shell exits.
-- Streaming server = our fork of Rivulet Engine (open-source `server.js` replacement, Go): github.com/brunokinast/rivulet-engine, cloned at `C:\Users\bruno\Documents\git\rivulet-engine`, `upstream` = rivulet-kodi/rivulet-engine. Server changes are made there, following its `AGENTS.md`.
+- The user runs the installed Stremio Turbo (`%LOCALAPPDATA%\Programs\Stremio Turbo`): the app (`shell/`) starts the bundled Rivulet (`server/`), which serves this UI's production build at `http://127.0.0.1:11470/web/`.
+- For development, the repository root's `scripts/dev.ps1` runs the shell against the dev server (`corepack pnpm exec webpack serve --mode development --config webpack.local.config.js`, a git-excluded local file).
+- Server changes are made in `server/`, following its `AGENTS.md`.
 - Back up before changing the user's account (add-ons, library) or server settings, and only do it when asked.
 - Never commit or log auth keys or the server IPC key.
