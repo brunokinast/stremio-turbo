@@ -3,3 +3,5 @@
 node_modules/
 /research/data/
 /shell/libmpv-2_x64.zip
+/research/lab/bench/.pylib/
+__pycache__/

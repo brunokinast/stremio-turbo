@@ -321,6 +321,22 @@ func (cn *PeerConn) onClose() {
 	if cb := cn.callbacks.PeerConnClosed; cb != nil {
 		cb(cn)
 	}
+	if cbs := cn.callbacks.PeerConnClosedReason; len(cbs) > 0 {
+		ev := PeerConnClosedEvent{
+			Conn:       cn,
+			Reason:     cn.closeReason,
+			Err:        cn.closeErr,
+			Handshaken: cn.completedHandshake,
+			Downloaded: cn._stats.BytesReadUsefulData.Int64(),
+			Uploaded:   cn._stats.BytesWrittenData.Int64(),
+		}
+		if ev.Reason == "" {
+			ev.Reason = "unspecified"
+		}
+		for _, f := range cbs {
+			f(ev)
+		}
+	}
 }
 
 // Writes a message into the write buffer. Returns whether it's okay to keep writing. Writing is
@@ -1448,6 +1464,7 @@ func (cn *PeerConn) providedBadData() {
 	if ip == nil {
 		// Without an IP there's nothing to ban, so at least drop this connection.
 		cn.t.slogger().Debug("can't ban peer without ip, dropping it", "peer", cn)
+		cn.setCloseReason("bad data", nil)
 		cn.drop()
 		return
 	}

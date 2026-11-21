@@ -5,6 +5,7 @@ import (
 
 	"github.com/anacrolix/torrent/mse"
 	pp "github.com/anacrolix/torrent/peer_protocol"
+	"github.com/anacrolix/torrent/tracker"
 )
 
 // These are called synchronously, and do not pass ownership of arguments (do not expect to retain
@@ -18,6 +19,16 @@ type Callbacks struct {
 	// This can be folded into the general case below.
 	ReadExtendedHandshake func(*PeerConn, *pp.ExtendedHandshakeMessage)
 	PeerConnClosed        func(*PeerConn)
+	// Called with why a connection closed, when it closes.
+	PeerConnClosedReason []func(PeerConnClosedEvent)
+	// Called for every peer address offered to a torrent (from a tracker, the DHT, PEX, an
+	// incoming connection...), with what happened to it. Called with the client lock held.
+	PeerAdded []func(PeerAddedEvent)
+	// Called when a regular tracker announce completes. Called with the client lock held.
+	TrackerAnnounced []func(TrackerAnnouncedEvent)
+	// Called for each batch of peers a DHT get_peers traversal returns. Called with the client
+	// lock held.
+	DhtPeersReceived []func(DhtPeersReceivedEvent)
 	// BEP 10 message. Not sure if I should call this Ltep universally. Each handler here is called
 	// in order.
 	PeerConnReadExtensionMessage []func(PeerConnReadExtensionMessageEvent)
@@ -95,6 +106,84 @@ type OutgoingConnResultEvent struct {
 	DialWait time.Duration
 	// Nil when the connection was established and handshaken.
 	Err error
+
+	// The dial timeout this attempt used (it shrinks as more addresses wait; see
+	// ClientConfig.NominalDialTimeout and MinDialTimeout).
+	DialTimeout time.Duration
+	// Every transport dial whose result was seen, in arrival order (dials still running when one
+	// connected aren't listed), and every protocol handshake tried.
+	Dials      []DialAttempt
+	Handshakes []HandshakeAttempt
+	// When the attempt started (this attempt included): the torrent's and the client's half-open
+	// attempts, and the torrent's addresses still waiting to be dialled.
+	HalfOpenTorrent int
+	HalfOpenClient  int
+	PendingPeers    int
+}
+
+// PeerConnClosedEvent is a connection closing: why (a short reason, plus the error behind it if
+// any), when its BitTorrent handshake completed (zero if it never did), and the data it moved.
+type PeerConnClosedEvent struct {
+	Conn       *PeerConn
+	Reason     string
+	Err        error
+	Handshaken time.Time
+	Downloaded int64
+	Uploaded   int64
+}
+
+// PeerAddedOutcome is what happened to an address offered to a torrent.
+type PeerAddedOutcome string
+
+const (
+	PeerAddedNew       PeerAddedOutcome = "new"
+	PeerAddedReplaced  PeerAddedOutcome = "replaced"  // known, with different details
+	PeerAddedDuplicate PeerAddedOutcome = "duplicate" // already waiting, unchanged
+	PeerAddedBadAddr   PeerAddedOutcome = "bad-addr"  // banned or otherwise unusable
+)
+
+type PeerAddedEvent struct {
+	Torrent *Torrent
+	Peer    PeerInfo
+	Outcome PeerAddedOutcome
+}
+
+type TrackerAnnouncedEvent struct {
+	Torrent  *Torrent
+	URL      string
+	Event    tracker.AnnounceEvent
+	NumWant  int32
+	Started  time.Time
+	Duration time.Duration
+	Err      error
+	// Addresses returned, and how many of them were added as new or changed.
+	Peers    int
+	Added    int
+	Interval time.Duration
+	Seeders  int32
+	Leechers int32
+}
+
+type DhtPeersReceivedEvent struct {
+	Torrent *Torrent
+	Peers   int
+	Added   int
+}
+
+// DialAttempt is one transport's dial in an outgoing connection attempt.
+type DialAttempt struct {
+	Network  string
+	Duration time.Duration
+	Err      error
+}
+
+// HandshakeAttempt is one BitTorrent protocol handshake on a dialled connection, with or without
+// MSE header obfuscation.
+type HandshakeAttempt struct {
+	Network    string
+	Obfuscated bool
+	Duration   time.Duration
+	Err        error
 }
 
 type ReceivedUsefulDataEvent = PeerMessageEvent

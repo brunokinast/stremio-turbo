@@ -140,6 +140,50 @@ func TestTraceFromLoopbackStream(t *testing.T) {
 			t.Errorf("reader wait = %+v", w)
 		}
 	}
+
+	// Supply: the per-second samples saw the connection and the offered address.
+	var connected bool
+	for _, s := range tr.Supply.Samples {
+		connected = connected || s.Established > 0
+		if s.MaxEstablished == 0 || s.DialTimeoutMs == 0 {
+			t.Errorf("supply sample = %+v", s)
+		}
+	}
+	last := tr.Supply.Samples[len(tr.Supply.Samples)-1]
+	offered := 0
+	for _, n := range last.OfferedBySource {
+		offered += n
+	}
+	if !connected || offered == 0 {
+		t.Errorf("supply samples = %+v", tr.Supply.Samples)
+	}
+	// Closing the seeder's side closes ours, with a reason, a lifetime and the bytes it brought.
+	// (Other closes, such as a dial that reached this client itself, have reasons too.)
+	st.Drop()
+	seederClose := func() (types.ConnClose, bool) {
+		for _, c := range tr.Supply.Closes {
+			if c.Reason == "" || c.Reason == "unspecified" {
+				t.Errorf("close without a reason: %+v", c)
+			}
+			if c.Downloaded > 0 {
+				return c, true
+			}
+		}
+		return types.ConnClose{}, false
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	c, ok := seederClose()
+	for !ok && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		tr, _ = m.Trace(e.infoHash)
+		c, ok = seederClose()
+	}
+	if !ok {
+		t.Fatalf("the seeder's connection close wasn't recorded: %+v", tr.Supply.Closes)
+	}
+	if c.LifetimeMs <= 0 || c.Address == "" {
+		t.Errorf("close = %+v", c)
+	}
 }
 
 func TestEstimateMsKeepsUnknown(t *testing.T) {

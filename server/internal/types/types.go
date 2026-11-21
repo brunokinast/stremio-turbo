@@ -375,6 +375,31 @@ type DialRecord struct {
 	WaitMs int64  `json:"waitMs"`
 	Result string `json:"result"` // DialConnected, DialRefused, DialTimeout, DialHandshake or DialOther
 	Error  string `json:"error,omitempty"`
+	// Outgoing attempts: the dial timeout used, the torrent's and the client's
+	// half-open attempts and the torrent's waiting addresses when it started,
+	// each transport's dial, and each protocol handshake tried.
+	TimeoutMs       int64          `json:"timeoutMs,omitempty"`
+	HalfOpenTorrent int            `json:"halfOpenTorrent,omitempty"`
+	HalfOpenClient  int            `json:"halfOpenClient,omitempty"`
+	PendingPeers    int            `json:"pendingPeers,omitempty"`
+	Legs            []DialLeg      `json:"legs,omitempty"`
+	Handshakes      []HandshakeLeg `json:"handshakes,omitempty"`
+}
+
+// DialLeg is one transport's dial in an outgoing attempt.
+type DialLeg struct {
+	Network    string `json:"network"`
+	DurationMs int64  `json:"durationMs"`
+	Result     string `json:"result"`
+	Error      string `json:"error,omitempty"`
+}
+
+// HandshakeLeg is one BitTorrent handshake on a dialled connection.
+type HandshakeLeg struct {
+	Network    string `json:"network"`
+	Obfuscated bool   `json:"obfuscated"`
+	DurationMs int64  `json:"durationMs"`
+	Error      string `json:"error,omitempty"`
 }
 
 // Trace is a torrent's diagnostic record (GET /debug/trace/:infoHash): what
@@ -396,6 +421,70 @@ type Trace struct {
 	BlockedPieces     []BlockedPieceSample `json:"blockedPieces"`
 	FileBytes         []FileBytes          `json:"fileBytes"`
 	PendingWriteWaits PendingWriteWaits    `json:"pendingWriteWaits"`
+	// How the torrent got its peers: where addresses came from, the dial
+	// pipeline second by second, and why connections closed.
+	Supply SupplyTrace `json:"supply"`
+}
+
+// SupplyTrace is a torrent's peer supply record.
+type SupplyTrace struct {
+	Samples   []SupplySample    `json:"samples"`
+	Announces []TrackerAnnounce `json:"announces"`
+	Dht       []DhtBatch        `json:"dht"`
+	Closes    []ConnClose       `json:"closes"`
+}
+
+// SupplySample is the dial pipeline at one moment: addresses waiting by
+// source, attempts in progress, connections, and the addresses offered so far
+// by source (new or changed) and repeated (already known).
+type SupplySample struct {
+	AtMs             int64          `json:"atMs"`
+	PendingBySource  map[string]int `json:"pendingBySource"`
+	HalfOpen         int            `json:"halfOpen"`
+	MaxHalfOpen      int            `json:"maxHalfOpen"`
+	Established      int            `json:"established"`
+	MaxEstablished   int            `json:"maxEstablished"`
+	WantPeers        bool           `json:"wantPeers"`
+	DialTimeoutMs    int64          `json:"dialTimeoutMs"`
+	OfferedBySource  map[string]int `json:"offeredBySource"`
+	RepeatedBySource map[string]int `json:"repeatedBySource"`
+	RejectedBySource map[string]int `json:"rejectedBySource,omitempty"`
+}
+
+// TrackerAnnounce is one tracker announce and what it returned.
+type TrackerAnnounce struct {
+	AtMs       int64  `json:"atMs"` // when it started
+	URL        string `json:"url"`
+	Event      string `json:"event,omitempty"`
+	NumWant    int32  `json:"numWant"`
+	DurationMs int64  `json:"durationMs"`
+	Peers      int    `json:"peers"`
+	Added      int    `json:"added"`
+	Seeders    int32  `json:"seeders"`
+	Leechers   int32  `json:"leechers"`
+	IntervalS  int64  `json:"intervalS"`
+	Error      string `json:"error,omitempty"`
+}
+
+// DhtBatch is one batch of peers from a DHT get_peers lookup.
+type DhtBatch struct {
+	AtMs  int64 `json:"atMs"`
+	Peers int   `json:"peers"`
+	Added int   `json:"added"`
+}
+
+// ConnClose is a peer connection closing.
+type ConnClose struct {
+	AtMs       int64  `json:"atMs"`
+	Address    string `json:"address"`
+	Source     string `json:"source"`
+	Network    string `json:"network"`
+	Outgoing   bool   `json:"outgoing"`
+	Reason     string `json:"reason"`
+	Error      string `json:"error,omitempty"`
+	LifetimeMs int64  `json:"lifetimeMs"` // since its handshake; 0 if it never completed one
+	Downloaded int64  `json:"downloaded"`
+	Uploaded   int64  `json:"uploaded"`
 }
 
 // ReaderWait is a read that waited at least 20 ms for data, with the state of

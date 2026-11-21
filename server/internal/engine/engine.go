@@ -733,6 +733,9 @@ func (m *manager) EnsureEngine(infoHash string, opts types.AddOptions) (types.En
 		m.mu.Unlock()
 		m.dials.begin(ih, e.lastAccess)
 		m.trace.begin(ih, e.lastAccess)
+		if e.trace != nil {
+			go e.sampleSupply(e.lastAccess)
+		}
 		m.goWrite(func() {
 			select {
 			case <-t.GotInfo():

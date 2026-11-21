@@ -377,18 +377,28 @@ func (t *Torrent) addPeer(p PeerInfo) (added bool) {
 	if ipAddr, ok := tryIpPortFromNetAddr(p.Addr); ok {
 		if cl.badPeerIPPort(ipAddr.IP, ipAddr.Port) {
 			torrent.Add("peers not added because of bad addr", 1)
+			for _, f := range cl.config.Callbacks.PeerAdded {
+				f(PeerAddedEvent{Torrent: t, Peer: p, Outcome: PeerAddedBadAddr})
+			}
 			// cl.logger.Printf("peers not added because of bad addr: %v", p)
 			return false
 		}
 	}
+	outcome := PeerAddedNew
 	if replaced, ok := t.peers.AddReturningReplacedPeer(p); ok {
 		torrent.Add("peers replaced", 1)
 		if !replaced.equal(p) {
 			t.logger.WithDefaultLevel(log.Debug).Printf("added %v replacing %v", p, replaced)
 			added = true
+			outcome = PeerAddedReplaced
+		} else {
+			outcome = PeerAddedDuplicate
 		}
 	} else {
 		added = true
+	}
+	for _, f := range cl.config.Callbacks.PeerAdded {
+		f(PeerAddedEvent{Torrent: t, Peer: p, Outcome: outcome})
 	}
 	t.openNewConns()
 	for t.peers.Len() > cl.config.TorrentPeersHighWater {
@@ -1247,6 +1257,7 @@ func (t *Torrent) close(wg *sync.WaitGroup) {
 		}()
 	}
 	t.iterPeers(func(p *Peer) {
+		p.setCloseReason("torrent closed", nil)
 		p.close()
 	})
 	if t.storage != nil {
@@ -1509,6 +1520,7 @@ func (t *Torrent) maybeDropMutuallyCompletePeer(
 		return
 	}
 	p.logger.Levelf(log.Debug, "is mutually complete; dropping")
+	p.setCloseReason("mutually complete", nil)
 	p.drop()
 }
 
@@ -2458,11 +2470,13 @@ func (t *Torrent) consumeDhtAnnouncePeers(pvs <-chan dht.PeersValues) {
 				Source: PeerSourceDhtGetPeers,
 			})
 		}
-		if len(peerInfos) > 0 {
+		if len(peerInfos) > 0 || len(t.cl.config.Callbacks.DhtPeersReceived) > 0 {
 			cl.lock()
-			t.addPeers(peerInfos)
+			added := t.addPeers(peerInfos)
+			for _, f := range t.cl.config.Callbacks.DhtPeersReceived {
+				f(DhtPeersReceivedEvent{Torrent: t, Peers: len(peerInfos), Added: added})
+			}
 			cl.unlock()
-
 		}
 	}
 }
@@ -2668,6 +2682,7 @@ func (t *Torrent) addPeerConn(c *PeerConn) (err error) {
 			continue
 		}
 		if c.hasPreferredNetworkOver(c0) {
+			c0.setCloseReason("duplicate peer id", nil)
 			c0.close()
 			t.deletePeerConn(c0)
 		} else {
@@ -2686,6 +2701,7 @@ func (t *Torrent) addPeerConn(c *PeerConn) (err error) {
 		if c == nil {
 			return errors.New("don't want conn")
 		}
+		c.setCloseReason("replaced by a new connection", nil)
 		c.close()
 		t.deletePeerConn(c)
 	}
@@ -3169,6 +3185,46 @@ func (t *Torrent) getHalfOpenPath(
 	return nestedmaps.Next(nestedmaps.Next(nestedmaps.Begin(&t.halfOpen), addrStr), attemptKey)
 }
 
+// SupplyStats is a snapshot of how the torrent is getting peers: addresses waiting to be dialled,
+// by source, outgoing attempts in progress, established connections, and whether it wants more
+// addresses (which makes trackers ask for peers).
+type SupplyStats struct {
+	PendingBySource map[PeerSource]int
+	HalfOpen        int
+	MaxHalfOpen     int
+	Established     int
+	MaxEstablished  int
+	WantPeers       bool
+	DialTimeout     time.Duration
+}
+
+// SupplyStats returns the torrent's current SupplyStats.
+func (t *Torrent) SupplyStats() SupplyStats {
+	t.cl.rLock()
+	defer t.cl.rUnlock()
+	return t.supplyStatsLocked()
+}
+
+func (t *Torrent) supplyStatsLocked() (ret SupplyStats) {
+	ret.PendingBySource = map[PeerSource]int{}
+	t.peers.Each(func(p PeerInfo) { ret.PendingBySource[p.Source]++ })
+	ret.HalfOpen = t.numHalfOpenAttempts()
+	ret.MaxHalfOpen = t.maxHalfOpen()
+	ret.Established = len(t.conns)
+	ret.MaxEstablished = t.maxEstablishedConns
+	ret.WantPeers = t.wantPeers()
+	ret.DialTimeout = reducedDialTimeout(t.cl.config.MinDialTimeout, t.cl.config.NominalDialTimeout, t.cl.config.HalfOpenConnsPerTorrent, t.peers.Len())
+	return
+}
+
+// numHalfOpenAttempts counts the torrent's outgoing attempts in progress.
+func (t *Torrent) numHalfOpenAttempts() (n int) {
+	for _, attempts := range t.halfOpen {
+		n += len(attempts)
+	}
+	return
+}
+
 func (t *Torrent) addHalfOpen(addrStr string, attemptKey *PeerInfo) {
 	path := t.getHalfOpenPath(addrStr, attemptKey)
 	if path.Exists() {
@@ -3204,6 +3260,7 @@ func initiateConn(
 	}
 	attemptKey := &peer
 	t.addHalfOpen(addrStr, attemptKey)
+	opts.halfOpenTorrent, opts.halfOpenClient, opts.pendingPeers = t.numHalfOpenAttempts(), t.cl.numHalfOpen, t.peers.Len()
 	go t.cl.outgoingConnection(
 		opts,
 		attemptKey,

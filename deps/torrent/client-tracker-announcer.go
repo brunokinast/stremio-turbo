@@ -664,6 +664,7 @@ func (me *regularTrackerAnnounceDispatcher) singleAnnounce(
 	ctx, cancel := context.WithTimeout(context.TODO(), tracker.DefaultTrackerAnnounceTimeout)
 	defer cancel()
 	logger.Debug("announcing", "req", req)
+	started := time.Now()
 	resp, err := tc.Announce(ctx, req, me.getAnnounceOpts())
 	now := time.Now()
 	{
@@ -695,7 +696,18 @@ func (me *regularTrackerAnnounceDispatcher) singleAnnounce(
 			}
 		}
 	})
-	t.addPeers(peerInfos(nil).AppendFromTracker(resp.Peers))
+	added := t.addPeers(peerInfos(nil).AppendFromTracker(resp.Peers))
+	if cbs := t.cl.config.Callbacks.TrackerAnnounced; len(cbs) > 0 {
+		ev := TrackerAnnouncedEvent{
+			Torrent: t, URL: string(key.url), Event: req.Event, NumWant: req.NumWant,
+			Started: started, Duration: now.Sub(started), Err: err,
+			Peers: len(resp.Peers), Added: added,
+			Interval: time.Duration(resp.Interval) * time.Second, Seeders: resp.Seeders, Leechers: resp.Leechers,
+		}
+		for _, f := range cbs {
+			f(ev)
+		}
+	}
 }
 
 // Updates the announce state, shared by regularTrackerAnnounceDispatcher and Torrent, but it lives in Torrent

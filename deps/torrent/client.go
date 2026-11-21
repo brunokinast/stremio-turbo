@@ -774,6 +774,7 @@ func (cl *Client) incomingConnection(nc net.Conn, releaseHandshake func()) {
 	cl.runReceivedConn(c, releaseHandshake)
 
 	cl.lock()
+	c.setCloseReason("incoming handshake ended", nil)
 	c.close()
 	cl.unlock()
 }
@@ -789,6 +790,9 @@ func (cl *Client) Torrent(ih metainfo.Hash) (t *Torrent, ok bool) {
 type DialResult struct {
 	Conn   net.Conn
 	Dialer Dialer
+	// Why the dial failed (Conn is nil), and how long it took either way.
+	Err      error
+	Duration time.Duration
 }
 
 func countDialResult(err error) {
@@ -826,6 +830,12 @@ func DialFirst(ctx context.Context, addr string, dialers []Dialer) (res DialResu
 }
 
 func dialFromSocket(ctx context.Context, s Dialer, addr string) net.Conn {
+	c, _ := dialFromSocketErr(ctx, s, addr)
+	return c
+}
+
+// dialFromSocketErr is dialFromSocket that also returns the dial's error.
+func dialFromSocketErr(ctx context.Context, s Dialer, addr string) (net.Conn, error) {
 	c, err := s.Dial(ctx, addr)
 	if err != nil {
 		log.ContextLogger(ctx).Levelf(log.Debug, "error dialing %q: %v", addr, err)
@@ -837,7 +847,7 @@ func dialFromSocket(ctx context.Context, s Dialer, addr string) net.Conn {
 		tc.SetLinger(0)
 	}
 	countDialResult(err)
-	return c
+	return c, err
 }
 
 func (cl *Client) noLongerHalfOpen(t *Torrent, addr string, attemptKey outgoingConnAttemptKey) {
@@ -910,9 +920,22 @@ func doProtocolHandshakeOnDialResult(
 	return c, err
 }
 
+// dialTrace is what an outgoing attempt did, for OutgoingConnResultEvent.
+type dialTrace struct {
+	dialWait   time.Duration
+	timeout    time.Duration
+	dials      []DialAttempt
+	handshakes []HandshakeAttempt
+}
+
+func (tr *dialTrace) addDials(results []DialResult) {
+	for _, r := range results {
+		tr.dials = append(tr.dials, DialAttempt{Network: r.Dialer.DialerNetwork(), Duration: r.Duration, Err: r.Err})
+	}
+}
+
 // Returns nil connection and nil error if no connection could be established for valid reasons.
-// dialWait is the time spent waiting for the dial rate limiter.
-func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, dialWait time.Duration, err error) {
+func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, tr dialTrace, err error) {
 	// It would be better if dial rate limiting could be tested when considering to open connections
 	// instead. Doing it here means if the limit is low, and the half-open limit is high, we could
 	// end up with lots of outgoing connection attempts pending that were initiated on stale data.
@@ -923,8 +946,8 @@ func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, 
 				err = errors.New("can't make dial limit reservation")
 				return
 			}
-			dialWait = dialReservation.Delay()
-			time.Sleep(dialWait)
+			tr.dialWait = dialReservation.Delay()
+			time.Sleep(tr.dialWait)
 		}
 	}
 	torrent.Add("establish outgoing connection", 1)
@@ -935,6 +958,7 @@ func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, 
 	}
 	defer dialPool.startDrainer()
 	dialTimeout := opts.t.getDialTimeoutUnlocked()
+	tr.timeout = dialTimeout
 	{
 		ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 		defer cancel()
@@ -946,6 +970,8 @@ func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, 
 	headerObfuscationPolicy := opts.HeaderObfuscationPolicy
 	obfuscatedHeaderFirst := headerObfuscationPolicy.Preferred
 	firstDialResult := dialPool.getFirst()
+	tr.addDials(dialPool.results)
+	dialPool.results = nil
 	if firstDialResult.Conn == nil {
 		// No dialers worked. Try to initiate a holepunching rendezvous.
 		if holepunchAddrErr == nil {
@@ -972,12 +998,16 @@ func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, 
 		g.MapInsert(cl.dialedSuccessfullyAfterHolepunchConnect, holepunchAddr, struct{}{})
 		cl.unlock()
 	}
+	hsStarted := time.Now()
 	c, err = doProtocolHandshakeOnDialResult(
 		opts.t,
 		obfuscatedHeaderFirst,
 		addr,
 		firstDialResult,
 	)
+	tr.handshakes = append(tr.handshakes, HandshakeAttempt{
+		Network: firstDialResult.Dialer.DialerNetwork(), Obfuscated: obfuscatedHeaderFirst, Duration: time.Since(hsStarted), Err: err,
+	})
 	if err == nil {
 		torrent.Add("initiated conn with preferred header obfuscation", 1)
 		return
@@ -999,15 +1029,21 @@ func (cl *Client) dialAndCompleteHandshake(opts outgoingConnOpts) (c *PeerConn, 
 		dialPool.add(ctx, firstDialResult.Dialer)
 	}
 	secondDialResult := dialPool.getFirst()
+	tr.addDials(dialPool.results)
+	dialPool.results = nil
 	if secondDialResult.Conn == nil {
 		return
 	}
+	hsStarted = time.Now()
 	c, err = doProtocolHandshakeOnDialResult(
 		opts.t,
 		!obfuscatedHeaderFirst,
 		addr,
 		secondDialResult,
 	)
+	tr.handshakes = append(tr.handshakes, HandshakeAttempt{
+		Network: secondDialResult.Dialer.DialerNetwork(), Obfuscated: !obfuscatedHeaderFirst, Duration: time.Since(hsStarted), Err: err,
+	})
 	if err == nil {
 		torrent.Add("initiated conn with fallback header obfuscation", 1)
 		return
@@ -1031,6 +1067,9 @@ type outgoingConnOpts struct {
 	// Outgoing connection attempt is in response to holepunch connect message.
 	receivedHolepunchConnect bool
 	HeaderObfuscationPolicy  HeaderObfuscationPolicy
+	// The torrent's and the client's half-open attempts and the torrent's pending addresses when
+	// this attempt was started (this attempt included), for OutgoingConnResultEvent.
+	halfOpenTorrent, halfOpenClient, pendingPeers int
 }
 
 // Called to dial out and run a connection. The addr we're given is already
@@ -1040,7 +1079,7 @@ func (cl *Client) outgoingConnection(
 	attemptKey outgoingConnAttemptKey,
 ) {
 	started := time.Now()
-	c, dialWait, err := cl.dialAndCompleteHandshake(opts)
+	c, tr, err := cl.dialAndCompleteHandshake(opts)
 	if err == nil {
 		c.conn.SetWriteDeadline(time.Time{})
 	}
@@ -1054,8 +1093,15 @@ func (cl *Client) outgoingConnection(
 			Peer:     opts.peerInfo,
 			Started:  started,
 			Duration: time.Since(started),
-			DialWait: dialWait,
+			DialWait: tr.dialWait,
 			Err:      err,
+
+			DialTimeout:     tr.timeout,
+			Dials:           tr.dials,
+			Handshakes:      tr.handshakes,
+			HalfOpenTorrent: opts.halfOpenTorrent,
+			HalfOpenClient:  opts.halfOpenClient,
+			PendingPeers:    opts.pendingPeers,
 		}
 		if err == nil {
 			ev.Network = c.Network
@@ -1321,6 +1367,7 @@ func (t *Torrent) runHandshookConn(pc *PeerConn) error {
 	cl := t.cl
 	for i, b := range cl.config.MinPeerExtensions {
 		if pc.PeerExtensionBytes[i]&b != b {
+			pc.setCloseReason("missing peer extensions", nil)
 			return fmt.Errorf("peer did not meet minimum peer extensions: %x", pc.PeerExtensionBytes[:])
 		}
 	}
@@ -1335,6 +1382,7 @@ func (t *Torrent) runHandshookConn(pc *PeerConn) error {
 			// can record *us* as the doppleganger.
 		} */
 		t.logger.Levelf(log.Debug, "local and remote peer ids are the same")
+		pc.setCloseReason("connected to ourselves", nil)
 		return nil
 	}
 	pc.r = deadlineReader{pc.conn, pc.r}
@@ -1343,6 +1391,7 @@ func (t *Torrent) runHandshookConn(pc *PeerConn) error {
 		torrent.Add("completed handshake over ipv6", 1)
 	}
 	if err := t.addPeerConn(pc); err != nil {
+		pc.setCloseReason("not added", err)
 		return fmt.Errorf("adding connection: %w", err)
 	}
 	defer t.dropConnection(pc)
@@ -1362,6 +1411,7 @@ func (t *Torrent) runHandshookConn(pc *PeerConn) error {
 	}
 
 	err := pc.mainReadLoop()
+	pc.setCloseReason("read loop ended", err)
 	if err != nil {
 		for _, cb := range pc.callbacks.StatusUpdated {
 			cb(StatusUpdatedEvent{
@@ -1926,6 +1976,7 @@ func (cl *Client) banPeerIP(ip net.IP) {
 		t.iterPeers(func(p *Peer) {
 			if p.remoteIp().Equal(ip) {
 				t.slogger().Debug("dropping peer with banned ip", "peer", p, "ip", ip)
+				p.setCloseReason("banned", nil)
 				// Should this be a close?
 				p.drop()
 			}

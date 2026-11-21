@@ -94,6 +94,7 @@ type torrentTrace struct {
 	fileBegins  []int // first piece of each file, ascending, once known
 	fileBytes   map[int][]int64
 	pendingWait types.PendingWriteWaits
+	supply      supplyState
 }
 
 func newTracer() *tracer {
@@ -116,6 +117,7 @@ func (tr *tracer) begin(ih string, now time.Time) {
 		steals:     newRing[types.CriticalSteal](traceStealCap),
 		blocked:    newRing[types.BlockedPieceSample](traceBlockedCap),
 		fileBytes:  map[int][]int64{},
+		supply:     newSupplyState(),
 	}
 	tt.events.add(types.TraceEvent{Name: "created"})
 	tr.torrents[ih] = tt
@@ -433,6 +435,7 @@ func (tr *tracer) get(ih string) (types.Trace, bool) {
 		BlockedPieces:     tt.blocked.items(),
 		FileBytes:         tt.fileBytesList(),
 		PendingWriteWaits: tt.pendingWait,
+		Supply:            tt.supply.trace(),
 	}, true
 }
 
@@ -472,6 +475,7 @@ func installTracer(cc *torrent.ClientConfig, tr *tracer) {
 	cc.Callbacks.ReceivedUsefulChunk = append(cc.Callbacks.ReceivedUsefulChunk, tr.onReceivedUsefulChunk)
 	cc.Callbacks.ReaderWaited = append(cc.Callbacks.ReaderWaited, tr.onReaderWaited)
 	cc.Callbacks.CriticalRequestStolen = append(cc.Callbacks.CriticalRequestStolen, tr.onCriticalRequestStolen)
+	installSupplyTracer(cc, tr)
 	cc.LockHoldCallback = tr.onLockHold
 	cc.LockHoldThreshold = lockHoldThreshold
 }

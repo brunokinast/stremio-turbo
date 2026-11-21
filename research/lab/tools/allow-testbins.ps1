@@ -10,8 +10,17 @@ $lab = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $lab 'testbin\allow-testbins.log'
 Start-Transcript -Path $log -Force | Out-Null
 try {
-    $want = @(0..15 | ForEach-Object { Join-Path $lab ('testbin\slots\slot{0:D2}.exe' -f $_) }) +
-            @(Get-ChildItem -Path (Join-Path $lab 'transport') -Filter *.exe | ForEach-Object FullName)
+    # This lab's slots and tools, and the old streaming-research lab's slots while that folder exists
+    # (the user's GOFLAGS may still point at its goexec).
+    $labs = @($lab) + @(Join-Path $env:USERPROFILE 'Documents\git\streaming-research\lab' | Where-Object { Test-Path $_ })
+    $want = @(foreach ($l in $labs) { 0..15 | ForEach-Object { Join-Path $l ('testbin\slots\slot{0:D2}.exe' -f $_) } }) +
+            @(Get-ChildItem -Path (Join-Path $lab 'transport') -Filter *.exe | ForEach-Object FullName) +
+            @(
+                # The benchmark's libtorrent reference client runs on Python 3.13 (research/lab/bench/ltclient.py).
+                (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'),
+                # The libtorrent engine prototype (plan 16 Part E) is built to this fixed path.
+                (Join-Path $lab 'transport\rivulet-lt.exe')
+            )
     $wantSet = @{}; foreach ($w in $want) { $wantSet[$w.ToLower()] = $true }
 
     # One bulk read of every rule and every program filter, joined by InstanceID: a lookup per rule

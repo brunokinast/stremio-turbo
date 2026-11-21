@@ -102,9 +102,42 @@ func (d *dialLog) onOutgoing(ev torrent.OutgoingConnResultEvent) {
 		DurationMs: ev.Duration.Milliseconds(),
 		WaitMs:     ev.DialWait.Milliseconds(),
 		Result:     dialResult(ev.Err),
+
+		TimeoutMs:       ev.DialTimeout.Milliseconds(),
+		HalfOpenTorrent: ev.HalfOpenTorrent,
+		HalfOpenClient:  ev.HalfOpenClient,
+		PendingPeers:    ev.PendingPeers,
 	}
 	if ev.Err != nil {
 		rec.Error = ev.Err.Error()
+	}
+	for _, l := range ev.Dials {
+		leg := types.DialLeg{Network: l.Network, DurationMs: l.Duration.Milliseconds(), Result: dialResult(l.Err)}
+		if l.Err != nil {
+			leg.Error = l.Err.Error()
+		}
+		rec.Legs = append(rec.Legs, leg)
+	}
+	// "all initial dials failed" says nothing on its own: classify the attempt
+	// by its transports' outcome (every one timed out, or was refused).
+	if rec.Result == types.DialOther && len(rec.Legs) > 0 {
+		same := rec.Legs[0].Result
+		for _, l := range rec.Legs[1:] {
+			if l.Result != same {
+				same = ""
+				break
+			}
+		}
+		if same != "" && same != types.DialConnected {
+			rec.Result = same
+		}
+	}
+	for _, h := range ev.Handshakes {
+		leg := types.HandshakeLeg{Network: h.Network, Obfuscated: h.Obfuscated, DurationMs: h.Duration.Milliseconds()}
+		if h.Err != nil {
+			leg.Error = h.Err.Error()
+		}
+		rec.Handshakes = append(rec.Handshakes, leg)
 	}
 	d.add(ev.InfoHash.HexString(), ev.Started, rec)
 }

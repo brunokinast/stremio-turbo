@@ -36,10 +36,14 @@ type (
 		peerImpl  newHotPeerImpl
 		callbacks *Callbacks
 
-		RemoteAddr              PeerRemoteAddr
-		Discovery               PeerSource
-		trusted                 bool
-		closed                  chansync.SetOnce
+		RemoteAddr PeerRemoteAddr
+		Discovery  PeerSource
+		trusted    bool
+		closed     chansync.SetOnce
+		// Why the peer was closed, and the error behind it if any (PeerConnClosedEvent). The first
+		// reason set wins.
+		closeReason             string
+		closeErr                error
 		closedCtx               context.Context
 		closedCtxCancel         context.CancelFunc
 		lastUsefulChunkReceived time.Time
@@ -139,6 +143,11 @@ const (
 // Returns the Torrent a Peer belongs to. Shouldn't change for the lifetime of the Peer. May be nil
 // if we are the receiving end of a connection and the handshake hasn't been received or accepted
 // yet.
+// Outgoing reports whether we initiated the connection.
+func (p *Peer) Outgoing() bool {
+	return p.outgoing
+}
+
 func (p *Peer) Torrent() *Torrent {
 	return p.t
 }
@@ -226,6 +235,13 @@ func (cn *Peer) writeStatus(w io.Writer) {
 		cn.downloadRate()/(1<<10),
 	)
 	fmt.Fprintf(w, "\n")
+}
+
+// setCloseReason records why the peer is about to be closed, unless a reason is already set.
+func (p *Peer) setCloseReason(reason string, err error) {
+	if p.closeReason == "" {
+		p.closeReason, p.closeErr = reason, err
+	}
 }
 
 func (p *Peer) close() {
