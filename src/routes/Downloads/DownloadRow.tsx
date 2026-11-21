@@ -60,8 +60,10 @@ const DownloadRow = ({ item, group, downloads, checked, retrying, onToggle, onPa
             // Complete is the normal case: nothing to say unless it plays.
             return what !== null ? line([what]) : null;
         }
+        // Waiting behind an earlier episode of its torrent: said only while
+        // it gets nothing (it often downloads alongside).
         const behind = waitingBehind(record, downloads);
-        if (behind !== null && record.state !== 'paused') {
+        if (behind !== null && record.state !== 'paused' && record.rate === 0) {
             const episode = behind.meta?.episode !== undefined ? `E${behind.meta.episode}` : t('SMART_PLAY_DOWNLOADS_EARLIER');
             return line([what, percent, t('SMART_PLAY_DOWNLOADS_WAITING', { episode })], false, t('SMART_PLAY_DOWNLOADS_WAITING_HINT'));
         }

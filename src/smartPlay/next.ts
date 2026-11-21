@@ -296,6 +296,7 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             // On disk, paused, or the user's own download (never replaced):
             // nothing to watch.
             if (record.state === 'complete' || record.state === 'paused' || !isAutomatic(record)) {
+                trace({ skip: !isAutomatic(record) ? 'user download' : record.state, videoId: video.id, record: `${record.infoHash}:${record.fileIdx}` });
                 watched.current = null;
                 return;
             }

@@ -25,6 +25,7 @@ import { episodeTiers, startQuality } from './addonStreams';
 import { useNotify } from './notify';
 import useSteadyPlayback from './useSteadyPlayback';
 import debugTrace from './debugTrace';
+import { trackFor } from './tracks';
 
 // Not before this much steady playback (the start hold covers the start),
 // nor this close to the end.
@@ -94,6 +95,7 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             return;
         }
         if (Date.now() > pending.until) {
+            debugTrace('tracks', { timedOut: true, wanted: { audio: pending.audio, subtitles: pending.subtitles } });
             pendingTracks.current = null;
             return;
         }
@@ -101,12 +103,17 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             return;
         }
         pendingTracks.current = null;
-        const audio = audioTracks.find((track) => track.lang === pending.audio);
+        const audio = trackFor(audioTracks, pending.audio);
         if (audio !== undefined) {
             video.setAudioTrack(audio.id);
         }
-        const subtitles = pending.subtitles !== null ? subtitlesTracks.find((track) => track.lang === pending.subtitles) : undefined;
+        const subtitles = trackFor(subtitlesTracks, pending.subtitles);
         video.setSubtitlesTrack(pending.hadSubtitles && subtitles !== undefined ? subtitles.id : null);
+        debugTrace('tracks', {
+            wanted: { audio: pending.audio, subtitles: pending.hadSubtitles ? pending.subtitles : null },
+            chosen: { audio: audio?.lang ?? null, subtitles: pending.hadSubtitles ? subtitles?.lang ?? null : null },
+            offered: { audio: audioTracks.map((track) => track.lang), subtitles: subtitlesTracks.map((track) => track.lang) },
+        });
         // video's setters are stable; the lists decide.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [audioTracks, subtitlesTracks]);

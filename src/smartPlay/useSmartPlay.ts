@@ -31,6 +31,7 @@ import { need } from './health';
 import { remember } from './rateMemory';
 import type { RankedSource } from './groupByQuality';
 import { gb, times } from './format';
+import debugTrace from './debugTrace';
 
 type Options = {
     groups: StreamGroup[],
@@ -168,6 +169,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
     const likelyReady = likelyTier !== undefined && (likelyTier.best !== null || settled || likelyTier.disk !== null);
     const likelyTierKey = likelyTier?.key ?? null;
     useEffect(() => {
+        debugTrace('pick', { videoId, enabled, server: baseUrl !== null, likelyReady, likelyTierKey, playStarted: playStarted.current, run: run.current?.key ?? null });
         if (!enabled || baseUrl === null || !likelyReady || likelyTierKey === null || playStarted.current) {
             return;
         }
