@@ -48,7 +48,7 @@ ShowLanguageDialog=auto
 CloseApplications=force
 WizardImageFile={#SourcePath}..\images\windows-installer.bmp
 WizardSmallImageFile={#SourcePath}..\images\windows-installer-header.bmp
-SetupIconFile={#SourcePath}..\images\turbo.ico
+SetupIconFile={#SourcePath}..\images\stremio.ico
 UninstallDisplayIcon={app}\{#MyAppExeName},0
 #ifdef SIGN
 SignTool=stremiosign
