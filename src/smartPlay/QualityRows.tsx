@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import classNames from 'classnames';
@@ -12,6 +14,7 @@ import type { Match } from './candidates';
 import type { Picking } from './useSmartPlay';
 import type { EpisodeDownloadState } from './useEpisodeDownload';
 import styles from './QualityRows.less';
+import { gb, times, UNKNOWN } from './format';
 
 type Props = {
     tiers: RankedTier[],
@@ -26,7 +29,7 @@ type Props = {
     onPlay: (tierKey: string) => void,
     onPlayLeader: () => void,
     onCancel: () => void,
-    // Manual downloads (plan 12): the episode's record or race, and the
+    // Manual downloads: the episode's record or race, and the
     // actions; absent where downloads aren't offered.
     episodeDownload?: EpisodeDownloadState | null,
 };
@@ -108,7 +111,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
     // A file all on disk: it plays from there, so swarm figures don't matter
     // and it shows in place of them.
     const renderOnDisk = useCallback((size: number) => (
-        <span className={styles['on-disk']} title={t('SMART_PLAY_ON_DISK_HINT', { size: (size / 1e9).toFixed(1) })}>
+        <span className={styles['on-disk']} title={t('SMART_PLAY_ON_DISK_HINT', { size: gb(size) })}>
             <Icon className={styles['on-disk-icon']} name={'download'} />
             {t('SMART_PLAY_DOWNLOAD_ON_DISK')}
         </span>
@@ -134,7 +137,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
         );
     }, [renderSeeders, renderOnDisk]);
 
-    const times = (ratio: number | null) => ratio === null ? '–' : ratio === Infinity ? '∞' : `${ratio.toFixed(1)}×`;
+    const timesX = (ratio: number | null) => ratio === null ? UNKNOWN : `${times(ratio)}×`;
     const matchLabel = (match: Match) => t(match === 'exact' ? 'SMART_PLAY_MATCH_EXACT' : match === 'same' ? 'SMART_PLAY_MATCH_SAME' : 'SMART_PLAY_MATCH_LOWER');
 
     // One candidate of the step being tested: size, live seeders, and how many
@@ -146,7 +149,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
         if (candidate.ratio === null) {
             return t('SMART_PLAY_RACER_CONNECTING_SHORT');
         }
-        return candidate.live ? t('SMART_PLAY_CANDIDATE_HEALTH', { ratio: times(candidate.ratio) }) : t('SMART_PLAY_CANDIDATE_REMEMBERED', { ratio: times(candidate.ratio) });
+        return candidate.live ? t('SMART_PLAY_CANDIDATE_HEALTH', { ratio: timesX(candidate.ratio) }) : t('SMART_PLAY_CANDIDATE_REMEMBERED', { ratio: timesX(candidate.ratio) });
     };
 
     if (picking !== null) {
@@ -166,8 +169,8 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                                     <span className={styles['step-result']}>
                                         {
                                             result === 'testing' ? t('SMART_PLAY_STEP_TESTING') :
-                                                result === 'healthy' ? t('SMART_PLAY_STEP_HEALTHY', { ratio: times(best) }) :
-                                                    t('SMART_PLAY_STEP_TOO_SLOW', { ratio: times(best) })
+                                                result === 'healthy' ? t('SMART_PLAY_STEP_HEALTHY', { ratio: timesX(best) }) :
+                                                    t('SMART_PLAY_STEP_TOO_SLOW', { ratio: timesX(best) })
                                         }
                                     </span>
                                 </div>
@@ -177,7 +180,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                                             {
                                                 progress.candidates.map((candidate) => (
                                                     <div key={`${candidate.source.infoHash}:${candidate.source.fileIdx}`} className={classNames(styles['racer'], { [styles['leader']]: progress.leader === candidate })}>
-                                                        <span className={styles['racer-size']}>{candidate.source.size !== null ? `${(candidate.source.size / 1e9).toFixed(1)} GB` : '?'}</span>
+                                                        <span className={styles['racer-size']}>{candidate.source.size !== null ? `${gb(candidate.source.size)} GB` : UNKNOWN}</span>
                                                         {candidate.need === 0 ? null : renderSeeders(candidate.source.seeders)}
                                                         <span className={styles['racer-status']}>{candidateStatus(candidate)}</span>
                                                     </div>

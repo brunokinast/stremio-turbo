@@ -34,9 +34,9 @@ const usePrimaryAction = (metaItem: MetaItemMetaDetails | null, video: Video | n
     const { href, target, download, play } = useStreamPlay(lastUsed, { videoId: video?.id, videoReleased: video?.released, canMarkWatched });
     const { openEpisode } = useEpisodeNavigation();
     // Smart play: resume with the show's remembered quality when offered.
-    const smartResume = profile.settings.playerType === null && metaItem !== null && (
+    const smartResume = useMemo(() => profile.settings.playerType === null && metaItem !== null && (
         video !== null ? offersRememberedQuality(metaItem.id, video.id, streams) : hasRememberedQuality(metaItem.id)
-    );
+    ), [profile.settings.playerType, metaItem, video, streams]);
 
     return useMemo(() => {
         if (metaItem === null) {

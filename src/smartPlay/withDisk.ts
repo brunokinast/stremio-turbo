@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Which sources are all on disk, from the server's records.
 
 import { isComplete } from './downloads';

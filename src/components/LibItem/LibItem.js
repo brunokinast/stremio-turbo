@@ -9,6 +9,7 @@ const { useCore } = require('stremio/core');
 const { default: getMetaDetailsHref } = require('stremio/common/getMetaDetailsHref');
 const MetaItem = require('stremio/components/MetaItem');
 const { t } = require('i18next');
+const { routesRegexp } = require('stremio/common');
 const { requestAutoplay } = require('stremio/smartPlay/useSmartPlay');
 
 const LibItem = ({ _id, removable, notifications, watched, detailsVideosFirst, ...props }) => {
@@ -129,8 +130,8 @@ const LibItem = ({ _id, removable, notifications, watched, detailsVideosFirst, .
     const streamsHref = props.deepLinks && typeof props.deepLinks.metaDetailsStreams === 'string' ? props.deepLinks.metaDetailsStreams : null;
     const onPlayClick = React.useCallback((event) => {
         event.preventDefault();
-        const match = typeof streamsHref === 'string' ? /^#\/detail\/[^/]+\/([^/]+)\/([^/?]+)/.exec(streamsHref) : null;
-        if (match !== null && requestAutoplay(decodeURIComponent(match[1]), decodeURIComponent(match[2]))) {
+        const match = typeof streamsHref === 'string' ? routesRegexp.metadetails.regexp.exec(toPath(streamsHref).split('?')[0]) : null;
+        if (match !== null && typeof match[3] === 'string' && requestAutoplay(decodeURIComponent(match[2]), decodeURIComponent(match[3]))) {
             navigate(toPath(streamsHref));
         } else if (typeof playerHref === 'string') {
             navigate(toPath(playerHref));

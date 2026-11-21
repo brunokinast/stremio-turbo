@@ -1,4 +1,6 @@
-// The watch's timing (plan 11), kept free of I/O so it can be tested: a
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// The watch's timing, kept free of I/O so it can be tested: a
 // download's rate over a sliding window of its bytes on disk, and the rule
 // that a source unhealthy for UNHEALTHY_FOR in a row gets replaced.
 

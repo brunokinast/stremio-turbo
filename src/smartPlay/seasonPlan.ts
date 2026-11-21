@@ -1,4 +1,6 @@
-// Manual downloads (plan 12), the pure part: what a season download in one
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// Manual downloads, the pure part: what a season download in one
 // quality would fetch, episode by episode, and which torrents its race tests.
 //
 // Each episode takes the chosen quality, or the first step below it it has

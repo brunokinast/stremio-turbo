@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // The picker's decision for one quality step (picker.ts), kept free of I/O so
 // it can be tested on its own.
 

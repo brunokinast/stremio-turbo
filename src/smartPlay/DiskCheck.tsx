@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Once per app start: warns when the disk holding the server's data is low.
 // The toast opens the Downloads screen, the only place data is deleted.
 
@@ -7,6 +9,7 @@ import useStreamingServer from 'stremio/common/useStreamingServer';
 import useToast from 'stremio/common/Toast/useToast';
 import { getDisk } from './downloads';
 import type { DiskInfo } from './downloads';
+import { gb } from './format';
 
 // Low: under 10% of the volume or under 20 GB free.
 const LOW_SHARE = 0.1;
@@ -16,8 +19,6 @@ const LOW_BYTES = 20e9;
 const OLD_SEEN_KEY = 'smartPlay.leftoversSeen';
 
 const isLowDisk = (disk: DiskInfo) => disk.total > 0 && (disk.free < LOW_SHARE * disk.total || disk.free < LOW_BYTES);
-
-const gb = (bytes: number) => (bytes / 1e9).toFixed(1);
 
 let checked = false;
 

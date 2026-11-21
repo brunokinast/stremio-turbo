@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Names the file being played on the server's record: the server records a
 // played file as kept on its own, without knowing which episode it is, so the
 // Downloads screen could only show its file name. Once playback has started

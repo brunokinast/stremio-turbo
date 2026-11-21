@@ -1,9 +1,12 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Smart play's toasts for decisions it makes on its own (each automatic
 // choice is said out loud), in one place.
 
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import useToast from 'stremio/common/Toast/useToast';
+import { times } from './format';
 
 type NextEvent =
     | { kind: 'queued', episode: string, quality: string, gb: number, ratio: number | null, lower: boolean }
@@ -12,8 +15,6 @@ type NextEvent =
     | { kind: 'replaced', episode: string, quality: string, gb: number, ratio: number | null, oldGb: number, oldRatio: number | null }
     | { kind: 'none', episode: string }
     | { kind: 'failed', episode: string, reason: string };
-
-const times = (ratio: number | null) => ratio === null ? '?' : ratio === Infinity ? '∞' : ratio.toFixed(1);
 
 const useNotify = () => {
     const { t } = useTranslation();

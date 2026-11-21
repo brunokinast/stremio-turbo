@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // The streams page's download buttons: a quality row's ⬇ races that tier's
 // top sources and keeps the fastest; a source's ⬇ keeps that source. The episode's state for the buttons: its record (kept, not
 // complete) or a race running for it.

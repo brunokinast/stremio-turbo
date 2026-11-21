@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Downloads: everything the streaming server keeps on disk, grouped by show,
 // with each file's quality and state: complete (nothing shown), moving (an
 // accent bar: downloading, playing, testing, connecting) or stopped (a grey
@@ -9,53 +11,29 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import classnames from 'classnames';
 import Icon from '@stremio/stremio-icons/react';
-import { Button, Checkbox, Chips, Image, MainNavBars, ModalDialog, MultiselectMenu } from 'stremio/components';
-import { isStalled, useDownloads } from 'stremio/smartPlay/downloads';
-import { waitingBehind } from 'stremio/smartPlay/stall';
+import { Button, Chips, MainNavBars, ModalDialog, MultiselectMenu } from 'stremio/components';
+import { useDownloads } from 'stremio/smartPlay/downloads';
 import { retryElsewhere } from 'stremio/smartPlay/manualDownload';
 import { useProfile } from 'stremio/common';
 import type { Download } from 'stremio/smartPlay/downloads';
 import { cancelAhead } from 'stremio/smartPlay/next';
 import { isLowDisk } from 'stremio/smartPlay/DiskCheck';
-import { groupDownloads, isBetter, recordKey } from './groups';
+import { groupDownloads, recordKey } from './groups';
+import DownloadRow from './DownloadRow';
+import DownloadGroup from './DownloadGroup';
+import { isMoving } from './shared';
 import useShowInfo from './useShowInfo';
 import type { Filter, Group, Item, Sort } from './groups';
 import styles from './Downloads.less';
+import { size as gb } from 'stremio/smartPlay/format';
 
 const POLL = 3000;
 
 // Shows and seasons the user collapsed, kept while the app runs.
 const collapsedMemory = new Set<string>();
 
-const gb = (bytes: number) => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(0, Math.round(bytes / 1e6))} MB`;
-const mbps = (bits: number) => `${Math.round(bits / 1e6)} Mb`;
-
 // What the confirm dialog deletes; stop: some of it is still downloading.
 type Pending = { mode: 'delete' | 'stop', items: Item[], bytes: number } | null;
-
-const isMoving = (item: Item) => item.record.state === 'downloading' || item.record.state === 'queued';
-
-// Controls inside a clickable row or header (checkbox, buttons) keep their
-// click to themselves.
-const Own = ({ children, className }: { children: React.ReactNode, className?: string }) => (
-    <div className={className} style={{ display: 'contents' }} onClick={(event) => event.stopPropagation()}>{children}</div>
-);
-
-// A whole header or row as one control: click, Enter or Space.
-const pressable = (onPress: () => void, title?: string) => ({
-    role: 'button',
-    tabIndex: 0,
-    title,
-    onClick: onPress,
-    onKeyDown: (event: React.KeyboardEvent) => {
-        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
-            event.preventDefault();
-            onPress();
-        }
-    },
-});
-
-const qualityText = (item: Item) => [item.quality.resolution, item.quality.hdr, item.quality.encode ?? item.quality.source].filter((part) => part !== null).join(' ');
 
 const Downloads = () => {
     const { t } = useTranslation();
@@ -158,226 +136,24 @@ const Downloads = () => {
         onSelect: (value: string) => setSort(value as Sort),
     };
 
-    const state = (item: Item) => {
-        const { record } = item;
-        const percent = item.progress !== null ? `${Math.floor(item.progress * 100)}%` : null;
-        // What the file is, when it isn't a plain download: the state says it
-        // (no separate tags).
-        const what = record.streaming ? t('SMART_PLAY_DOWNLOADS_STATE_PLAYING') : record.kind === 'temporary' ? t('SMART_PLAY_DOWNLOADS_STATE_TESTING') : null;
-        const hint = record.streaming ? t('SMART_PLAY_DOWNLOADS_PLAYING_HINT') : record.kind === 'temporary' ? t('SMART_PLAY_DOWNLOADS_TEST_HINT') : undefined;
-        const line = (parts: (string | null)[], active = false, title = hint) => (
-            <span className={classnames(styles['state'], { [styles['active']]: active })} title={title}>{parts.filter((part) => part !== null).join(' · ')}</span>
-        );
-        if (record.info !== undefined) {
-            // Its torrent's file list isn't known: no size, so no %.
-            return record.info === 'pending' ?
-                line([t('SMART_PLAY_DOWNLOADS_READING_INFO')], false, t('SMART_PLAY_DOWNLOADS_READING_INFO_HINT'))
-                :
-                line([t('SMART_PLAY_DOWNLOADS_NO_INFO')], false, t('SMART_PLAY_DOWNLOADS_NO_INFO_HINT'));
-        }
-        if (item.complete) {
-            // Complete is the normal case: nothing to say unless it plays.
-            return what !== null ? line([what]) : null;
-        }
-        const behind = waitingBehind(record, downloads ?? []);
-        if (behind !== null && record.state !== 'paused') {
-            const episode = behind.meta?.episode !== undefined ? `E${behind.meta.episode}` : t('SMART_PLAY_DOWNLOADS_EARLIER');
-            return line([what, percent, t('SMART_PLAY_DOWNLOADS_WAITING', { episode })], false, t('SMART_PLAY_DOWNLOADS_WAITING_HINT'));
-        }
-        if (isStalled(record, downloads ?? [])) {
-            const key = `${record.infoHash}:${record.fileIdx}`;
-            return line([what, percent, retrying.has(key) ? t('SMART_PLAY_DOWNLOADS_RETRYING') : t('SMART_PLAY_DOWNLOADS_STALLED')], false, t('SMART_PLAY_DOWNLOADS_STALLED_HINT'));
-        }
-        switch (record.state) {
-            case 'downloading': {
-                const left = record.rate > 0 && item.total !== null ? Math.ceil((item.total - record.bytesCompleted) / record.rate / 60) : null;
-                return line([what, percent, `${(record.rate / 1e6).toFixed(1)} MB/s`, left !== null ? t('SMART_PLAY_DOWNLOADS_MINUTES_LEFT', { count: left }) : null, record.peers ? t('SMART_PLAY_DOWNLOADS_PEERS', { count: record.peers }) : null], true);
-            }
-            case 'queued':
-                return line([what, percent, t('SMART_PLAY_DOWNLOADS_CONNECTING')], true, t('SMART_PLAY_DOWNLOADS_CONNECTING_HINT'));
-            default:
-                // Stopped (paused, or data nobody fetches), or a test between reads.
-                return line([what, percent], record.streaming === true);
-        }
-    };
-
-    // Two rows for the same episode are duplicates, whatever their state
-    // (two releases kept, an unkept copy beside a kept one, two sources tested).
-    const duplicateOf = (item: Item, group: Group) => group.unknown || item.episodeLabel === null ? [] : group.items.filter((other) => other !== item && other.episodeLabel === item.episodeLabel);
-
-    const duplicate = (item: Item, group: Group) => {
-        const others = duplicateOf(item, group);
-        if (others.length === 0) {
-            return null;
-        }
-        const describe = (other: Item) => [qualityText(other) || other.fileName, other.bitrate !== null ? mbps(other.bitrate) : null, gb(other.onDisk)].filter((part) => part !== null).join(' · ');
-        const best = [item, ...others].reduce((a, b) => isBetter(b, a) ? b : a);
-        const hint = [
-            t('SMART_PLAY_DOWNLOADS_DUPLICATE_HINT', { episode: item.episodeLabel }),
-            ...others.map((other) => `• ${describe(other)}${other === best ? ` (${t('SMART_PLAY_DOWNLOADS_BETTER')})` : ''}`),
-            best === item ? t('SMART_PLAY_DOWNLOADS_THIS_BETTER') : t('SMART_PLAY_DOWNLOADS_OTHER_BETTER'),
-        ].join('\n');
-        return <span className={classnames(styles['copies'], { [styles['best']]: best === item })} title={hint}>{t(best === item ? 'SMART_PLAY_DOWNLOADS_DUPLICATE_BEST' : 'SMART_PLAY_DOWNLOADS_DUPLICATE_WORSE')}</span>;
-    };
-
-    // Moving: pause + delete; stopped: resume + delete; anything else: delete.
-    const actions = (item: Item) => {
-        const { record } = item;
-        const canPause = record.kind === 'kept' && isMoving(item);
-        const playing = record.streaming === true;
-        return (
-            <div className={styles['actions']} onClick={(event) => event.stopPropagation()}>
-                {
-                    canPause ?
-                        <Button className={styles['action']} title={t('SMART_PLAY_DOWNLOADS_PAUSE')} onClick={() => pause(record, true)}>
-                            <Icon className={styles['action-icon']} name={'pause'} />
-                        </Button>
-                        :
-                        item.stopped ?
-                            <Button className={styles['action']} title={t('SMART_PLAY_DOWNLOADS_RESUME')} onClick={() => resume(record)}>
-                                <Icon className={styles['action-icon']} name={'play'} />
-                            </Button>
-                            :
-                            null
-                }
-                {
-                    isStalled(record, downloads ?? []) && record.meta?.videoId !== undefined ?
-                        <Button className={classnames(styles['action'], { [styles['disabled']]: retrying.has(`${record.infoHash}:${record.fileIdx}`) })} title={t('SMART_PLAY_DOWNLOADS_TRY_ANOTHER')} onClick={() => retry(record)}>
-                            <Icon className={styles['action-icon']} name={'reset'} />
-                        </Button>
-                        :
-                        null
-                }
-                <Button className={classnames(styles['action'], styles['danger'], { [styles['disabled']]: playing })} title={playing ? t('SMART_PLAY_DOWNLOADS_PLAYING_NO_DELETE') : t('SMART_PLAY_DOWNLOADS_DELETE')} onClick={() => !playing && ask([item])}>
-                    <Icon className={styles['action-icon']} name={'bin'} />
-                </Button>
-            </div>
-        );
-    };
-
-    const row = (item: Item, group: Group) => {
-        const checked = selected.has(item.key);
-        // An episode by its number; a movie (or any unnumbered file) by its
-        // show's name when known, else by its file.
-        const label = item.episodeLabel ?? (item.record.meta?.name ?? item.fileName);
-        const showBar = item.progress !== null && !item.complete;
-        const quality = qualityText(item);
-        return (
-            <div key={item.key} className={classnames(styles['row'], styles['hoverable'], { [styles['selected']]: checked, [styles['live']]: item.live })} {...pressable(() => toggle([item.key], !checked))}>
-                <Own><Checkbox className={styles['check']} name={`select-${item.key}`} checked={checked} onChange={({ checked: on }) => toggle([item.key], on)} /></Own>
-                <div className={styles['what']}>
-                    <div className={styles['label']}>
-                        <span className={styles['episode']}>{label}</span>
-                        {item.title !== null ? <span className={styles['title']}>{item.title}</span> : null}
-                        {duplicate(item, group)}
-                        {item.record.watched ? <span className={styles['watched']}>{t('SMART_PLAY_DOWNLOADS_WATCHED')}</span> : null}
-                    </div>
-                    <div className={styles['file']} title={item.record.path ?? item.fileName}>
-                        {item.fileName}
-                    </div>
-                </div>
-                <div className={styles['quality']} title={quality.length > 0 ? t('SMART_PLAY_DOWNLOADS_QUALITY_HINT') : undefined}>
-                    {quality.length > 0 ? <span className={styles['quality-text']}>{quality}</span> : null}
-                    {item.bitrate !== null ? <span className={styles['bitrate']}>{mbps(item.bitrate)}</span> : null}
-                </div>
-                <div className={styles['state-cell']}>
-                    {state(item)}
-                    {
-                        showBar ?
-                            <div className={classnames(styles['bar'], { [styles['moving']]: isMoving(item), [styles['flowing']]: item.record.state === 'downloading' })}>
-                                <div className={styles['fill']} style={{ width: `${item.progress! * 100}%` }} />
-                            </div>
-                            :
-                            null
-                    }
-                </div>
-                <div className={styles['size']}>
-                    {gb(item.onDisk)}
-                    {showBar && item.total !== null ? <span className={styles['of']}>{` / ${gb(item.total)}`}</span> : null}
-                </div>
-                {actions(item)}
-            </div>
-        );
-    };
-
-    // A show's episodes, in a card per season (show > season > episode). A
-    // show's unnumbered files (a movie) are listed without one.
-    const rows = (g: Group) => {
-        const seasons = g.unknown ? [] : Array.from(new Set(g.items.map((item) => item.season)));
-        if (seasons.length === 0 || (seasons.length === 1 && seasons[0] === 0)) {
-            return <div className={styles['rows']}>{g.items.map((item) => row(item, g))}</div>;
-        }
-        return (
-            <div className={styles['seasons']}>
-                {
-                    seasons.map((season) => {
-                        const list = g.items.filter((item) => item.season === season);
-                        const keys = list.map((item) => item.key);
-                        const allChecked = keys.every((key) => selected.has(key));
-                        const bytes = list.reduce((sum, item) => sum + item.onDisk, 0);
-                        const key = `${g.key}#${season}`;
-                        const open = !collapsed.has(key);
-                        return (
-                            <div key={season} className={styles['season']}>
-                                <div className={classnames(styles['season-header'], styles['hoverable'])} {...pressable(() => toggleCollapsed(key), open ? t('SMART_PLAY_DOWNLOADS_COLLAPSE') : t('SMART_PLAY_DOWNLOADS_EXPAND'))}>
-                                    <Own><Checkbox className={styles['check']} name={`select-season-${key}`} checked={allChecked} onChange={({ checked: on }) => toggle(keys, on)} /></Own>
-                                    <div className={styles['season-toggle']}>
-                                        <Icon className={classnames(styles['chevron'], { [styles['closed']]: !open })} name={'chevron-down'} />
-                                        <span className={styles['season-name']}>{season > 0 ? t('SMART_PLAY_DOWNLOADS_SEASON', { season }) : t('SMART_PLAY_DOWNLOADS_SEASON_OTHER')}</span>
-                                        <span className={styles['season-meta']}>{t('SMART_PLAY_DOWNLOADS_FILES', { count: list.length })}</span>
-                                        {list.some((item) => item.live) ? <span className={styles['dot']} /> : null}
-                                        <span className={styles['season-size']}>{gb(bytes)}</span>
-                                    </div>
-                                    <div className={styles['slot']} onClick={(event) => event.stopPropagation()}>
-                                        <Button className={styles['icon-delete']} title={t('SMART_PLAY_DOWNLOADS_DELETE_SEASON')} onClick={() => ask(list)}>
-                                            <Icon className={styles['action-icon']} name={'bin'} />
-                                        </Button>
-                                    </div>
-                                </div>
-                                {open ? <div className={styles['season-rows']}>{list.map((item) => row(item, g))}</div> : null}
-                            </div>
-                        );
-                    })
-                }
-            </div>
-        );
-    };
-
-    const group = (g: Group) => {
-        const keys = g.items.map((item) => item.key);
-        const allChecked = keys.every((key) => selected.has(key));
-        const open = !collapsed.has(g.key);
-        return (
-            <section key={g.key} className={styles['group']}>
-                <div className={classnames(styles['group-header'], styles['hoverable'])} {...pressable(() => toggleCollapsed(g.key), open ? t('SMART_PLAY_DOWNLOADS_COLLAPSE') : t('SMART_PLAY_DOWNLOADS_EXPAND'))}>
-                    <Own><Checkbox className={styles['check']} name={`select-group-${g.key}`} checked={allChecked} onChange={({ checked: on }) => toggle(keys, on)} /></Own>
-                    <div className={styles['group-toggle']}>
-                        <Icon className={classnames(styles['chevron'], { [styles['closed']]: !open })} name={'chevron-down'} />
-                        {
-                            g.unknown ?
-                                <div className={classnames(styles['poster'], styles['poster-icon'])}><Icon className={styles['poster-glyph']} name={'local-import'} /></div>
-                                :
-                                <Image className={styles['poster']} src={g.poster ?? undefined} alt={' '} renderFallback={() => <div className={classnames(styles['poster'], styles['poster-icon'])}><Icon className={styles['poster-glyph']} name={'movies'} /></div>} />
-                        }
-                        <div className={styles['group-text']}>
-                            <div className={styles['group-name']} title={g.unknown ? t('SMART_PLAY_DOWNLOADS_UNKNOWN_HINT') : undefined}>{g.unknown ? t('SMART_PLAY_DOWNLOADS_UNKNOWN_GROUP') : g.name}</div>
-                            <div className={styles['group-meta']}>
-                                {t('SMART_PLAY_DOWNLOADS_FILES', { count: g.items.length })}
-                                {g.downloading ? <span className={styles['dot']} /> : null}
-                            </div>
-                        </div>
-                        <div className={styles['group-size']}>{gb(g.onDisk)}</div>
-                    </div>
-                    <div className={styles['slot']} onClick={(event) => event.stopPropagation()}>
-                        <Button className={styles['icon-delete']} title={t('SMART_PLAY_DOWNLOADS_DELETE_ALL')} onClick={() => ask(g.items)}>
-                            <Icon className={styles['action-icon']} name={'bin'} />
-                        </Button>
-                    </div>
-                </div>
-                {open ? rows(g) : null}
-            </section>
-        );
-    };
+    const row = (item: Item, g: Group) => (
+        <DownloadRow
+            key={item.key}
+            item={item}
+            group={g}
+            downloads={downloads ?? []}
+            checked={selected.has(item.key)}
+            retrying={retrying.has(`${item.record.infoHash}:${item.record.fileIdx}`)}
+            onToggle={(on) => toggle([item.key], on)}
+            onPause={(record) => pause(record, true)}
+            onResume={resume}
+            onRetry={retry}
+            onDelete={(one) => ask([one])}
+        />
+    );
+    const group = (g: Group) => (
+        <DownloadGroup key={g.key} group={g} selected={selected} collapsed={collapsed} renderRow={row} onToggle={toggle} onToggleCollapsed={toggleCollapsed} onDelete={ask} />
+    );
 
     const usedOther = disk !== null && disk.total > 0 ? Math.max(0, disk.total - disk.free - total) : 0;
     const pendingTitle = pending === null ? '' : pending.mode === 'stop' ?

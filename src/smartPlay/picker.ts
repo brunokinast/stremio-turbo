@@ -1,4 +1,6 @@
-// The picker, one procedure for every flow (plan 11): walk the quality steps
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// The picker, one procedure for every flow: walk the quality steps
 // (candidates.ts); in each, test the top sources start-only at the start
 // point and take the healthiest healthy one (health.ts). A copy on disk needs
 // nothing and wins at once. When none in a step is healthy, step down (the

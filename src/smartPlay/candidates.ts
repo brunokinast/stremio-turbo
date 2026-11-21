@@ -1,4 +1,6 @@
-// The quality order every flow follows (plan 11): the exact remembered label,
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// The quality order every flow follows: the exact remembered label,
 // then the other labels at the same resolution, then each lower resolution
 // (all its labels). Each step holds its top sources by live seeders.
 

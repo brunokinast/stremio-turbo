@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Shared smart-play state: autoplay requests handed from Resume/next-episode
 // to the streams list, and the chosen source's supply handed to the player.
 

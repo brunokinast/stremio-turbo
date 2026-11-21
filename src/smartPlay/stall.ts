@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // When a kept file counts as stalled. Of a torrent's files still to
 // download, the server gives the earliest episode first claim on its peers
 // (it reports that file as `first`); the others can gain nothing while peers

@@ -1,29 +1,30 @@
-// The watch on the episode playing (plan 11, step 5): every 10 s, the playing
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// The watch on the episode playing: every 10 s, the playing
 // file's health from its record (bytes still missing past the position /
 // time left, against the download rate). Unhealthy 30 s in a row, the shared
 // picker runs from the current position, skipping the torrent playing, and
 // a healthy winner (or a faster one, when nothing keeps up) takes over
 // mid-episode: the shell's mpv loads it at the same position (`loadfile
 // replace start=+<s>`, the command the player loads with; measured gap
-// 0.26-0.37 s, streaming-research findings/36) and the audio and subtitle
-// tracks are chosen again by language. The new file becomes kept when it
+// 0.26-0.37 s) and the audio and subtitle tracks are chosen again by
+// language. The new file becomes kept when it
 // opens (the server records a played file); the old record is deleted.
 //
 // Shell only: in a browser the player can't swap its file in place.
 
 import { useCallback, useEffect, useRef } from 'react';
-import { groupByQuality, rankTiers } from './groupByQuality';
 import { RateMeter } from './supply';
-import { getLastQuality, getQuality } from './qualityMemory';
 import { isAutomatic, listDownloads, removeDownload } from './downloads';
 import type { Download } from './downloads';
 import { qualitySteps } from './candidates';
-import { withDisk } from './withDisk';
 import { pick } from './picker';
 import { healthRatio, isHealthy, need } from './health';
 import { HealthWatch, WATCH_EVERY, WindowRate } from './watch';
-import { fetchStreams } from './next';
+import { episodeTiers, startQuality } from './addonStreams';
 import { useNotify } from './notify';
+import useSteadyPlayback from './useSteadyPlayback';
+import debugTrace from './debugTrace';
 
 // Not before this much steady playback (the start hold covers the start),
 // nor this close to the end.
@@ -68,8 +69,7 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
     const notify = useNotify();
     // The file actually playing: core's stream, until a switch replaces it.
     const playing = useRef<{ infoHash: string, fileIdx: number } | null>(null);
-    const played = useRef(0);
-    const last = useRef<{ time: number, at: number } | null>(null);
+    const played = useSteadyPlayback(time, paused, `${videoId}:${playingInfoHash}:${playingFileIdx}`);
     const watched = useRef<{ key: string, rate: WindowRate, health: HealthWatch } | null>(null);
     const busy = useRef<AbortController | null>(null);
     // Tracks to choose again once the new file's list arrives.
@@ -79,26 +79,12 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
 
     useEffect(() => {
         playing.current = playingInfoHash !== null && playingFileIdx !== null ? { infoHash: playingInfoHash, fileIdx: playingFileIdx } : null;
-        played.current = 0;
-        last.current = null;
         watched.current = null;
         return () => {
             busy.current?.abort();
             busy.current = null;
         };
     }, [videoId, playingInfoHash, playingFileIdx]);
-
-    useEffect(() => {
-        if (time === null) {
-            return;
-        }
-        const now = Date.now();
-        const prev = last.current;
-        last.current = { time, at: now };
-        if (prev !== null && paused === false && time > prev.time && time - prev.time <= (now - prev.at) * 2 + 1000) {
-            played.current += Math.min(time - prev.time, now - prev.at) / 1000;
-        }
-    }, [time, paused]);
 
     // After a switch: the new file's tracks, chosen by the old ones' languages.
     const { audioTracks, subtitlesTracks } = video.state;
@@ -135,11 +121,9 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
         busy.current = controller;
         try {
             const startFraction = ctx.time / ctx.duration;
-            const groups = await fetchStreams(ctx.addons, show.type, episode);
             const records = await listDownloads(base);
-            const tiers = withDisk(rankTiers(groupByQuality(groups, null), new Map()), records, episode)
-                .map((tier) => ({ ...tier, sources: tier.sources.filter((source) => source.infoHash !== current.infoHash) }));
-            const steps = qualitySteps(tiers, getQuality(show.id) ?? getLastQuality() ?? '4k');
+            const tiers = await episodeTiers(ctx.addons, show.type, episode, records, new Set([current.infoHash]));
+            const steps = qualitySteps(tiers, startQuality(show.id));
             if (steps.length === 0) {
                 return;
             }
@@ -156,7 +140,7 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             const now = live.current;
             const stillPlaying = playing.current !== null && playing.current.infoHash === current.infoHash && now.videoId === episode && now.time !== null;
             if (!stillPlaying || source.fileIdx === null || (result.weak && (result.ratio ?? 0) <= (ratio ?? 0))) {
-                if (source.fileIdx !== null && source.onDisk === null) {
+                if (result.owned && source.fileIdx !== null) {
                     removeDownload(base, source.infoHash, source.fileIdx);
                 }
                 return;
@@ -187,7 +171,7 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
                 busy.current = null;
             }
         }
-    }, [notify]);
+    }, [notify, played]);
     const switchRef = useRef(switchTo);
     switchRef.current = switchTo;
 
@@ -213,17 +197,13 @@ const useNowWatch = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             const position = live.current.time ?? 0;
             const needed = need({ size: record.size, completed: record.bytesCompleted, runtime: ctx.duration / 1000, startFraction: position / ctx.duration });
             const healthy = rate === null || needed === null ? null : isHealthy(rate, needed);
-            try {
-                sessionStorage.setItem('smartPlay.nowTrace', JSON.stringify({ at: new Date().toISOString(), key, rate, needed, healthy }));
-            } catch (_e) {
-                // Storage unavailable: no trace.
-            }
+            debugTrace('now', { key, rate, needed, healthy });
             if (watched.current.health.observe(now, healthy)) {
                 switchRef.current(current, healthRatio(rate, needed), record);
             }
         }, WATCH_EVERY);
         return () => clearInterval(timer);
-    }, []);
+    }, [played]);
 };
 
 export { useNowWatch };

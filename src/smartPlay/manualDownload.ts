@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Manual downloads: one episode from its streams page, or a season from the
 // episode list. Each job races every episode's top sources (temporary
 // records, as the play picker tests them; a season pack tested once for all
@@ -8,12 +10,10 @@
 // Jobs live in this module, not in a component: a race keeps going when the
 // chooser closes, and ManualDownloadToasts (mounted in App) says how it ended.
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { addDownload, hasKept, listDownloads, refreshDownloads, removeDownload } from './downloads';
 import type { Download, DownloadMeta } from './downloads';
-import { fetchStreams } from './next';
-import { groupByQuality, rankTiers } from './groupByQuality';
-import { withDisk } from './withDisk';
+import { episodeTiers, DEFAULT_QUALITY } from './addonStreams';
 import { stats } from './serverApi';
 import { RateMeter } from './supply';
 import { STEP_TIMEOUT } from './picker';
@@ -55,10 +55,12 @@ const listeners = new Set<Listener>();
 // Jobs that ended since the toasts last looked.
 const ended: number[] = [];
 let nextId = 1;
-let version = 0;
+// The jobs as one array, replaced on every change (useSyncExternalStore's
+// snapshot).
+let snapshot: Job[] = [];
 
 const emit = () => {
-    version++;
+    snapshot = Array.from(jobs.values());
     listeners.forEach((listener) => listener());
 };
 
@@ -237,13 +239,12 @@ const retryElsewhere = async (baseUrl: string, addons: Addon[], record: Download
         return false;
     }
     const videoId = meta.videoId;
-    const groups = await fetchStreams(addons, meta.type, videoId);
     const records = await listDownloads(baseUrl);
-    const tiers = withDisk(rankTiers(groupByQuality(groups, null), new Map()), records, videoId);
+    const tiers = await episodeTiers(addons, meta.type, videoId, records);
     const current = tiers.find((tier) => tier.sources.some((source) => source.infoHash === record.infoHash && source.fileIdx === record.fileIdx));
     const others = tiers.map((tier) => ({ ...tier, sources: tier.sources.filter((source) => source.infoHash !== record.infoHash) }));
     const offer = { videoId, season: meta.season ?? 0, episode: meta.episode ?? 0, title: meta.title ?? null, unaired: false, downloading: false, tiers: others };
-    const planned = planEpisode(offer, current?.key ?? tiers[0]?.key ?? '4k');
+    const planned = planEpisode(offer, current?.key ?? tiers[0]?.key ?? DEFAULT_QUALITY);
     if (planned === null || planned.sources.length === 0) {
         return false;
     }
@@ -271,18 +272,15 @@ const retryElsewhere = async (baseUrl: string, addons: Addon[], record: Download
     return false;
 };
 
-// Every job, re-rendered on any change.
-const useManualDownloads = (): Job[] => {
-    const [, setVersion] = useState(version);
-    useEffect(() => {
-        const listener = () => setVersion(version);
-        listeners.add(listener);
-        return () => {
-            listeners.delete(listener);
-        };
-    }, []);
-    return Array.from(jobs.values());
+const subscribe = (listener: Listener) => {
+    listeners.add(listener);
+    return () => {
+        listeners.delete(listener);
+    };
 };
+
+// Every job, re-rendered on any change.
+const useManualDownloads = (): Job[] => useSyncExternalStore(subscribe, () => snapshot);
 
 // Jobs that ended since the last call (for their toast).
 const takeEnded = (): Job[] => ended.splice(0).map((id) => jobs.get(id)).filter((job): job is Job => job !== undefined);

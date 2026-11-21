@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Says how each manual download job ended (manualDownload.ts): what was
 // queued, any episode taken below the chosen quality, any that found no
 // source. Informational only: downloads are managed on the Downloads screen.
@@ -8,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import useToast from 'stremio/common/Toast/useToast';
 import { takeEnded, useManualDownloads } from './manualDownload';
 import { episodeRuns } from './seasonPlan';
+import { gb } from './format';
 
 const ManualDownloadToasts = () => {
     const { t } = useTranslation();
@@ -37,7 +40,7 @@ const ManualDownloadToasts = () => {
                     episodes: episodeRuns(queued.map((ep) => ep.planned.episode)),
                     season: job.season,
                     quality: job.quality,
-                    size: (job.bytes / 1e9).toFixed(1),
+                    size: gb(job.bytes),
                 }),
                 message: notes.join(' · '),
                 timeout: 10000,

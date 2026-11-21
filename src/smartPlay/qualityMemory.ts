@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // The quality last chosen for each show, and the last one chosen anywhere,
 // kept per device.
 

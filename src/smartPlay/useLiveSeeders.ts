@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isKnown, scrapeStream } from './serverApi';
 import type { ScrapeResult, ScrapeTorrent } from './serverApi';

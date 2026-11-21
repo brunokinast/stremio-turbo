@@ -1,8 +1,10 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Whether a source's swarm can keep up with its file: the rate the server
 // downloads it at (or the race reads it at, when it's already on disk) against
 // the bitrate the file needs (size / runtime).
 //
-// On House of the Dragon S02E01 4K (streaming-research findings/20) a 31 GB
+// On House of the Dragon S02E01 4K a 31 GB
 // remux's swarm delivered 0.4-0.7x its bitrate, steadily from the first
 // seconds, and it stalled 54 s of 90; the 9.9 GB file's swarm ramped from
 // about 0.9x in its first seconds to 7.8x. So a source keeps up only from its

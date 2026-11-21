@@ -1,8 +1,10 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Each source's last measured rate ÷ bitrate, kept per device for a day. A
 // swarm's health changes over days, not between two plays of an evening: the
 // House of the Dragon remux measured 0.02-0.4x its bitrate in all eight plays
 // of one evening, while the race waited up to 5 s for a fresh rate before
-// passing it over (streaming-research findings/23). A remembered ratio only
+// passing it over. A remembered ratio only
 // stands in until a live rate arrives, and nothing is chosen on it alone.
 
 const STORAGE_KEY = 'smartPlay.rates';

@@ -1,22 +1,19 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Warns once per session when no peer has connected in to the streaming
 // server while torrents have been loaded for a while: its listening port is
 // unreachable (no router forward), which on small swarms costs most of the
-// speed, since their seeds can often only connect in (findings/30).
+// speed, since their seeds can often only connect in.
 
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import useStreamingServer from 'stremio/common/useStreamingServer';
 import useToast from 'stremio/common/Toast/useToast';
+import { incoming } from './serverApi';
 
 const POLL = 60 * 1000;
 // How long torrents must have been loaded with no incoming connection.
 const GRACE = 5 * 60 * 1000;
-
-type Incoming = {
-    count: number,
-    listenPort: number,
-    activeSince: string | null,
-};
 
 let warned = false;
 
@@ -32,19 +29,15 @@ const PortCheck = () => {
             return;
         }
         const check = () => {
-            fetch(new URL('network-info', baseUrl))
-                .then((response) => response.ok ? response.json() : null)
-                .then((body: { incoming?: Incoming } | null) => {
-                    const incoming = body?.incoming;
-                    if (warned || incoming === undefined || incoming.count > 0 || incoming.activeSince === null) {
-                        return;
-                    }
-                    if (Date.now() - Date.parse(incoming.activeSince) >= GRACE) {
-                        warned = true;
-                        toastRef.current.show({ type: 'alert', title: t('SMART_PLAY_PORT_UNREACHABLE', { port: incoming.listenPort }), timeout: 15000 });
-                    }
-                })
-                .catch(() => undefined);
+            incoming(baseUrl).then((state) => {
+                if (warned || state === null || state.count > 0 || state.activeSince === null) {
+                    return;
+                }
+                if (Date.now() - Date.parse(state.activeSince) >= GRACE) {
+                    warned = true;
+                    toastRef.current.show({ type: 'alert', title: t('SMART_PLAY_PORT_UNREACHABLE', { port: state.listenPort }), timeout: 15000 });
+                }
+            });
         };
         check();
         const timer = setInterval(check, POLL);

@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Episode list: which of a show's episodes have a file on disk, and how far
 // each is, from the server's record (the shared poller). A record names its
 // episode when the client said which one it is; older next-episode downloads

@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Client for the streaming server's record of every file on disk (our Rivulet
 // fork, /downloads): kept files (downloaded whole, deleted only on request; a
 // played file becomes kept), temporary ones (measurements, leased), and

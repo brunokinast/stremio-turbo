@@ -1,4 +1,6 @@
-// The Next slot (plan 11): while an episode plays, the next one is downloaded
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// The Next slot: while an episode plays, the next one is downloaded
 // in the background (a kept record, origin "next"), so it later plays from
 // disk without buffering.
 //
@@ -9,18 +11,18 @@
 // pick that skips it, and each decision is said in a toast (notify.ts).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { StreamGroup } from 'stremio/routes/Details/Streams/useStreamsByAddon';
-import { groupByQuality, rankTiers } from './groupByQuality';
+import { getEpisodeLabel } from 'stremio/routes/Details/format';
 import { RateMeter } from './supply';
-import { getLastQuality, getQuality } from './qualityMemory';
 import { addDownload, isAutomatic, listDownloads, markWatched, removeDownload } from './downloads';
 import type { Download } from './downloads';
 import { qualitySteps } from './candidates';
-import { withDisk } from './withDisk';
+import { episodeTiers, startQuality } from './addonStreams';
 import { pick } from './picker';
 import { healthRatio, isHealthy, need } from './health';
 import { HealthWatch, WATCH_EVERY, WindowRate } from './watch';
 import { useNotify } from './notify';
+import debugTrace from './debugTrace';
+import useSteadyPlayback from './useSteadyPlayback';
 
 const SETTING_KEY = 'smartPlay.downloadAhead';
 const MEMORY_KEY = 'smartPlay.ahead';
@@ -105,59 +107,9 @@ const downloadedSource = (metaId: string, videoId: string): AheadEntry | null =>
     return entry !== null && entry.infoHash !== '' ? entry : null;
 };
 
-// ---- fetching an episode's sources ------------------------------------------
-
-type ManifestResource = string | { name: string, types?: string[], idPrefixes?: string[] };
-
-// The installed addons that serve streams for this type and id.
-const streamAddons = (addons: Addon[], type: string, id: string): Addon[] => {
-    return addons.filter(({ manifest }) => {
-        const m = manifest as AddonManifest & { resources?: ManifestResource[], idPrefixes?: string[] };
-        return (m.resources ?? []).some((resource) => {
-            const name = typeof resource === 'string' ? resource : resource.name;
-            const types = typeof resource === 'string' ? m.types : resource.types ?? m.types;
-            const prefixes = typeof resource === 'string' ? m.idPrefixes : resource.idPrefixes ?? m.idPrefixes;
-            return name === 'stream' && (types ?? []).includes(type) && (prefixes === undefined || prefixes.some((prefix) => id.startsWith(prefix)));
-        });
-    });
-};
-
-// Asks the addons for a video's streams, as core does when the episode is
-// opened. Core renames two fields of the addon protocol, and groupByQuality
-// reads core's names: `title` (where Torrentio puts the size and seeders) is
-// `description`, and torrent `sources` are `announce`.
-const fetchStreams = async (addons: Addon[], type: string, videoId: string): Promise<StreamGroup[]> => {
-    return Promise.all(streamAddons(addons, type, videoId).map(async (addon) => {
-        const base = addon.transportUrl.replace(/\/manifest\.json$/, '');
-        try {
-            const response = await fetch(`${base}/stream/${encodeURIComponent(type)}/${encodeURIComponent(videoId)}.json`);
-            const body = response.ok ? await response.json() : null;
-            const streams = Array.isArray(body?.streams) ? body.streams as (Stream & { title?: string, sources?: string[] })[] : [];
-            return {
-                addon,
-                streams: streams.map((stream) => ({
-                    ...stream,
-                    description: stream.description ?? stream.title ?? '',
-                    announce: stream.announce ?? stream.sources ?? [],
-                })),
-            };
-        } catch (_e) {
-            return { addon, streams: [] };
-        }
-    }));
-};
-
 // ---- the slot ---------------------------------------------------------------
 
-// The last check's outcome (sessionStorage smartPlay.nextTrace), for
-// diagnosis.
-const trace = (entry: object) => {
-    try {
-        sessionStorage.setItem('smartPlay.nextTrace', JSON.stringify({ at: new Date().toISOString(), ...entry }));
-    } catch (_e) {
-        // Storage unavailable: no trace.
-    }
-};
+const trace = (entry: object) => debugTrace('next', entry);
 
 type Meta = { id: string, type: string, videos: Video[], name?: string, poster?: string | null };
 
@@ -174,10 +126,7 @@ const nextEpisode = (videos: Video[], videoId: string): Video | null => {
         .sort(episodeOrder)[0] ?? null;
 };
 
-const episodeLabel = (video: Video) => {
-    const pad = (n: number | undefined) => String(n ?? 0).padStart(2, '0');
-    return video.season !== undefined && video.episode !== undefined ? `S${pad(video.season)}E${pad(video.episode)}` : video.title;
-};
+const episodeLabel = (video: Video) => getEpisodeLabel(video) ?? video.title;
 
 // The Next record of an episode: the kept record named for it, else the one
 // remembered for it.
@@ -207,10 +156,8 @@ type HookOptions = {
 // then watches it every WATCH_EVERY.
 const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingFileIdx, time, duration, paused }: HookOptions) => {
     const notify = useNotify();
-    const played = useRef(0);
+    const played = useSteadyPlayback(time, paused, videoId ?? '');
     const marked = useRef(false);
-    const lastTime = useRef<number | null>(null);
-    const lastAt = useRef<number | null>(null);
     const busy = useRef<AbortController | null>(null);
     // The watched record (`infoHash:fileIdx`) and its rate and health.
     const watched = useRef<{ key: string, rate: WindowRate, health: HealthWatch } | null>(null);
@@ -218,9 +165,6 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
     live.current = { baseUrl, addons, meta, videoId, playingInfoHash, time, duration, paused };
 
     useEffect(() => {
-        played.current = 0;
-        lastTime.current = null;
-        lastAt.current = null;
         marked.current = false;
         watched.current = null;
         return () => {
@@ -238,22 +182,6 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
         }
     }, [baseUrl, playingInfoHash, playingFileIdx, time, duration]);
 
-    // Steady playback only: the player's time moving forward while playing,
-    // by about the wall time passed (a seek jumps further).
-    useEffect(() => {
-        if (time === null) {
-            return;
-        }
-        const now = Date.now();
-        const prev = lastTime.current;
-        const prevAt = lastAt.current;
-        lastTime.current = time;
-        lastAt.current = now;
-        if (prev !== null && prevAt !== null && paused === false && time > prev && time - prev <= (now - prevAt) * 2 + 1000) {
-            played.current += Math.min(time - prev, now - prevAt) / 1000;
-        }
-    }, [time, paused]);
-
     // Picks a source for the next episode and keeps it; `replacing` is the
     // record found too slow (deleted once its replacement is kept).
     const fill = useCallback(async (video: Video, downloads: Download[], replacing: { record: Download, ratio: number | null } | null) => {
@@ -268,11 +196,8 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
         try {
             const known = aheadSource(show.id, video.id);
             const slow = new Set([...(known?.slow ?? []), ...(replacing !== null ? [replacing.record.infoHash] : [])]);
-            const groups = await fetchStreams(ctx.addons, show.type, video.id);
-            const tiers = withDisk(rankTiers(groupByQuality(groups, null), new Map()), downloads, video.id)
-                .map((tier) => ({ ...tier, sources: tier.sources.filter((source) => !slow.has(source.infoHash)) }));
-            const startKey = getQuality(show.id) ?? getLastQuality() ?? '4k';
-            const steps = qualitySteps(tiers, startKey);
+            const tiers = await episodeTiers(ctx.addons, show.type, video.id, downloads, slow);
+            const steps = qualitySteps(tiers, startQuality(show.id));
             if (steps.length === 0) {
                 if (replacing === null) {
                     notify.next({ kind: 'none', episode });
@@ -297,7 +222,7 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             const replacingKey = replacing !== null ? `${replacing.record.infoHash}:${replacing.record.fileIdx}` : null;
             // A replacement that isn't healthy either only goes in when it's faster.
             if (replacing !== null && result.weak && (result.ratio ?? 0) <= (replacing.ratio ?? 0)) {
-                if (source.fileIdx !== null && `${source.infoHash}:${source.fileIdx}` !== replacingKey) {
+                if (result.owned && source.fileIdx !== null && `${source.infoHash}:${source.fileIdx}` !== replacingKey) {
                     removeDownload(base, source.infoHash, source.fileIdx);
                 }
                 return;
@@ -390,7 +315,7 @@ const useNextSlot = ({ baseUrl, addons, meta, videoId, playingInfoHash, playingF
             }
         }, WATCH_EVERY);
         return () => clearInterval(timer);
-    }, []);
+    }, [played]);
 };
 
-export { cancelAhead, downloadedSource, fetchStreams, isAheadEnabled, useAheadToggle, useNextSlot };
+export { cancelAhead, downloadedSource, isAheadEnabled, useAheadToggle, useNextSlot };

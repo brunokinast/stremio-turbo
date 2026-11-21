@@ -52,7 +52,7 @@ const Streams = ({ streams, video, type, canMarkWatched, title, metaId = null, v
         enabled: profile.settings.playerType === null,
     });
     const hasQualities = smartPlay.tiers.length > 0;
-    // Manual downloads (plan 12): the quality rows' ⬇.
+    // Manual downloads: the quality rows' ⬇.
     const show = useMemo(() => metaId !== null ? { id: metaId, type, name: title ?? '', poster: null } : null, [metaId, type, title]);
     const episodeDownload = useEpisodeDownload({ show, video: video ?? null, tiers: smartPlay.tiers, enabled: hasQualities && video !== undefined && video !== null });
     const [allStreamsOpen, setAllStreamsOpen] = useState(false);

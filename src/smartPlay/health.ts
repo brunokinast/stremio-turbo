@@ -1,4 +1,6 @@
-// One rule for "fast enough", shared by every flow (plan 11): a source is
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// One rule for "fast enough", shared by every flow: a source is
 // healthy when its download rate covers what is still missing of its file
 // before playback reaches the end, with a margin.
 //

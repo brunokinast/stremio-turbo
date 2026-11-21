@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // What the screen needs to know about each show, from the user's Cinemeta
 // add-on, looked up once per show:
 // - records saved before the client said which show they are (found by file

@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Client for the streaming server (our Rivulet fork) routes smart play uses.
 
 // A torrent's best figures so far, merged from trackers, DHT scrapes and (for
@@ -61,44 +63,6 @@ const scrapeStream = async (baseUrl: string, torrents: ScrapeTorrent[], signal: 
     }
 };
 
-// The URL stremio-core builds for torrent streams (/{infoHash}/{fileIdx}?tr=…),
-// marked as a probe: the server serves it like the player's stream but leaves
-// the file prepared for the player (head and tail pieces kept, nothing
-// demoted when it closes).
-const probeUrl = (baseUrl: string, infoHash: string, fileIdx: number | null, trackers: string[]): URL => {
-    const url = new URL(`${infoHash}/${fileIdx ?? -1}`, baseUrl);
-    trackers.forEach((tracker) => url.searchParams.append('tr', tracker));
-    url.searchParams.set('probe', '1');
-    return url;
-};
-
-// Reads up to `bytes` from `offset`, calling onProgress with the bytes read so
-// far. Resolves with the total once the range is read or the body ends.
-const readRange = async (url: URL, offset: number, bytes: number, signal: AbortSignal, onProgress: (read: number) => void): Promise<number> => {
-    const response = await fetch(url, {
-        headers: { Range: `bytes=${offset}-${offset + bytes - 1}` },
-        signal,
-    });
-    if (!response.ok || response.body === null) {
-        throw new Error(`read failed: ${response.status}`);
-    }
-    const reader = response.body.getReader();
-    let read = 0;
-    try {
-        while (read < bytes) {
-            const { done, value } = await reader.read();
-            if (done) {
-                break;
-            }
-            read += value.byteLength;
-            onProgress(read);
-        }
-    } finally {
-        reader.cancel().catch(() => undefined);
-    }
-    return read;
-};
-
 type TorrentStats = {
     peers: number,
     // Bytes per second.
@@ -117,34 +81,22 @@ const stats = (baseUrl: string, infoHash: string): Promise<TorrentStats | null> 
         .catch(() => null);
 };
 
-// Opens a torrent on the server without reading it: it finds peers and
-// fetches metadata (plus the file's first and last pieces) in the background,
-// so playing it later starts at once. Unplayed torrents close on their own
-// after the server's idle timeout.
-// Starts a torrent ahead of playback. fileIdx names the episode in a season
-// pack, so the server primes that file's first and last pieces instead of
-// guessing the largest file.
-// startFraction is where playback will start (a resume point, 0 from the
-// start): the server primes the pieces there too, where the race and the
-// player will read first.
-const preload = (baseUrl: string, infoHash: string, fileIdx: number | null, trackers: string[], startFraction: number): void => {
-    fetch(new URL(`${infoHash}/create`, baseUrl), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            torrent: { infoHash },
-            ...(fileIdx !== null ? { fileIdx } : {}),
-            ...(startFraction > 0 && startFraction < 1 ? { startFraction } : {}),
-            // The addon's sources as given ("tracker:<url>", "dht:<hash>"): the
-            // server's peer-search syntax already.
-            peerSearch: { sources: trackers },
-        }),
-    }).catch(() => undefined);
+type Incoming = {
+    // Peers that connected in since the server started.
+    count: number,
+    listenPort: number,
+    // When a torrent became active (incoming is only expected then), or null.
+    activeSince: string | null,
 };
 
-const remove = (baseUrl: string, infoHash: string): Promise<void> => {
-    return fetch(new URL(`${infoHash}/remove`, baseUrl)).then(() => undefined, () => undefined);
+// The server's incoming connections (is its listening port reachable?), or
+// null when it doesn't answer.
+const incoming = (baseUrl: string): Promise<Incoming | null> => {
+    return fetch(new URL('network-info', baseUrl))
+        .then((response) => response.ok ? response.json() as Promise<{ incoming?: Incoming }> : null)
+        .then((body) => body?.incoming ?? null)
+        .catch(() => null);
 };
 
-export type { ScrapeResult, ScrapeTorrent, TorrentStats };
-export { isKnown, scrapeStream, probeUrl, readRange, stats, preload, remove };
+export type { Incoming, ScrapeResult, ScrapeTorrent, TorrentStats };
+export { incoming, isKnown, scrapeStream, stats };

@@ -1,4 +1,6 @@
-// "Download season" (plan 12): a button beside the season picker with the
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// "Download season": a button beside the season picker with the
 // season's live status, opening a chooser of every quality the season's
 // episodes offer. The chooser fills in as answers arrive: each episode's
 // sources from the add-ons (qualities, sizes, step-downs), then live seeders,
@@ -17,13 +19,14 @@ import type { Tier } from './groupByQuality';
 import useLiveSeeders from './useLiveSeeders';
 import { isComplete, useDownloads } from './downloads';
 import { withDisk } from './withDisk';
-import { fetchStreams } from './next';
+import { fetchStreams } from './addonStreams';
 import { getQuality } from './qualityMemory';
 import { seasonRows, stepDowns } from './seasonPlan';
 import type { EpisodeOffer, SeasonRow } from './seasonPlan';
 import { startDownload, useManualDownloads } from './manualDownload';
 import type { Job, Show } from './manualDownload';
 import styles from './SeasonDownload.less';
+import { gb } from './format';
 
 const POLL = 5000;
 // Free space kept spare after a download.
@@ -35,8 +38,6 @@ type Props = {
     // The season's episodes.
     videos: Video[],
 };
-
-const gb = (bytes: number) => (bytes / 1e9).toFixed(1);
 
 // The release name a source card shows first (Torrentio: the torrent title).
 const releaseOf = (description: string | undefined) => (description ?? '').split('\n')[0];

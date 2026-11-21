@@ -1,13 +1,15 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Hold a smart-play start on its first frame until a short buffer builds,
 // when the chosen source only just keeps up.
 //
 // The shell runs mpv on its defaults, which start playing with under a second
 // buffered. A swarm still ramping then runs dry at once: on House of the
 // Dragon 4K the source chosen at 1.08x its bitrate stalled 2.1 s, 0.7 s into
-// playback, while its download climbed from 2.2 to 17.5 MB/s (streaming-
-// research findings/21). Replaying 25 measured plays, a 4 s buffer removed
-// every such stall. The shell doesn't let the web UI set mpv's cache options,
-// so the hold is a pause the web UI lifts.
+// playback, while its download climbed from 2.2 to 17.5 MB/s. Replaying 25
+// measured plays, a 4 s buffer removed every such stall. The shell doesn't
+// let the web UI set mpv's cache options, so the hold is a pause the web UI
+// lifts.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSmartPlayState, setState } from './session';

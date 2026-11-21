@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Groups torrent streams by the quality label their addon gives them (the 2nd
 // line of stream.name, e.g. Torrentio's "4k HDR" or "1080p").
 

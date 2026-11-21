@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Turns the server's records into what the Downloads screen lists: one group
 // per show (by the episode the client named, else by the file name), episodes
 // in season and episode order; files that match no show in an Unknown group,
@@ -7,6 +9,7 @@ import parseRelease, { resolutionRank } from 'stremio/smartPlay/parseRelease';
 import type { Quality } from 'stremio/smartPlay/parseRelease';
 import { isComplete, isLive, isStopped } from 'stremio/smartPlay/downloads';
 import type { Download } from 'stremio/smartPlay/downloads';
+import { getEpisodeLabel } from 'stremio/routes/Details/format';
 
 type Filter = 'all' | 'downloading' | 'stopped';
 type Sort = 'size' | 'played' | 'added';
@@ -14,7 +17,7 @@ type Sort = 'size' | 'played' | 'added';
 type Item = {
     key: string,
     record: Download,
-    // "S02E05" (null for a movie or an unparsed file).
+    // "S2 E5" (null for a movie or an unparsed file).
     episodeLabel: string | null,
     title: string | null,
     fileName: string,
@@ -59,8 +62,6 @@ const recordKey = (record: Pick<Download, 'infoHash' | 'fileIdx'> & { path?: str
 
 const baseName = (path: string) => (path.split('/').pop() ?? path).replace(/\.part$/, '');
 
-const pad = (n: number) => String(n).padStart(2, '0');
-
 const timeOf = (iso: string | undefined): number | null => {
     const t = iso !== undefined ? Date.parse(iso) : NaN;
     return Number.isNaN(t) ? null : t;
@@ -80,7 +81,7 @@ const toItem = (record: Download, runtimes: Runtimes): Item & { show: string | n
     return {
         key: recordKey(record),
         record,
-        episodeLabel: season !== null && season !== undefined && episode !== null && episode !== undefined ? `S${pad(season)}E${pad(episode)}` : null,
+        episodeLabel: getEpisodeLabel({ season: season ?? undefined, episode: episode ?? undefined }),
         title: meta.title ?? null,
         fileName: baseName(path),
         onDisk: record.bytesOnDisk,

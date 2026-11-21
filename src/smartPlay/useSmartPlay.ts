@@ -1,4 +1,6 @@
-// Streams-list side of smart play (plan 11, the Now slot): groups sources by
+// Copyright (C) 2017-2026 Smart code 203358507
+
+// Streams-list side of smart play (the Now slot): groups sources by
 // quality, ranks them by live seeders, and picks the source to play with the
 // shared picker (picker.ts): a copy on disk plays directly; otherwise the
 // quality's top sources are tested start-only and the healthiest healthy one
@@ -28,6 +30,7 @@ import type { PickResult, Progress } from './picker';
 import { need } from './health';
 import { remember } from './rateMemory';
 import type { RankedSource } from './groupByQuality';
+import { gb, times } from './format';
 
 type Options = {
     groups: StreamGroup[],
@@ -64,9 +67,6 @@ const PICK_DEBOUNCE = 2000;
 const DISK_POLL = 5000;
 // The background winner's test record is renewed while the page stays open.
 const RENEW = 30000;
-
-const gb = (bytes: number | null) => bytes !== null ? (bytes / 1e9).toFixed(1) : '?';
-const times = (ratio: number | null) => ratio === null ? '?' : ratio === Infinity ? '∞' : ratio.toFixed(1);
 
 const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, runtime, enabled }: Options) => {
     const core = useCore();

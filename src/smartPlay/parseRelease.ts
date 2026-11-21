@@ -1,3 +1,5 @@
+// Copyright (C) 2017-2026 Smart code 203358507
+
 // Show, season and episode from a torrent file path, for records the client
 // never named (files recorded before it said which episode they are, and
 // leftover folders): "Peaky Blinders (2013 - 2022)/season 6/Peaky.Blinders.
