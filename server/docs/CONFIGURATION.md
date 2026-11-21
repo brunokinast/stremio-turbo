@@ -73,6 +73,7 @@ Every knob is an environment variable. Unprefixed names (`HTTP_PORT`, `APP_PATH`
 | `RIVULET_HTTP_LOG` | _(off)_ | `1` emits a structured access log line per request (`method`, `uri`, `status`, `duration_ms`, `bytes`, `remote`). Standard boolean parsing: `0`/`false`/`no`/`off` (case-insensitive) disable it, any other non-empty value enables it — unlike most other on/off knobs here this used to be "any non-empty value enables", so `RIVULET_HTTP_LOG=0` now disables logging instead of enabling it. |
 | `RIVULET_LOG_LEVEL` | `info` | log verbosity: `debug` / `info` / `warn` / `error` |
 | `RIVULET_LOG_FORMAT` | `text` | log output format: `text` (compact `time LEVEL component: msg key=value`) or `json` |
+| `RIVULET_LOG_FILE` | _(stderr)_ | write the log to this file instead of stderr, keeping the previous run's as `<name>.prev.log` (the executable only) |
 | `RIVULET_PROXY_PASSWORD` | _(unset)_ | `api_password` required on `/proxy/*` and `/extractor/*` requests |
 | `RIVULET_PROXY_SECRET` | _(auto)_ | signing key for signed proxy URLs (auto-generated under `APP_PATH`) |
 | `RIVULET_PROXY_IP_ACL` | _(unset)_ | comma-separated CIDR allowlist for proxy clients |

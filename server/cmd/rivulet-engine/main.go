@@ -17,8 +17,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/rivulet-kodi/rivulet-engine/internal/app"
@@ -53,9 +55,32 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err := app.Run(ctx, app.Config{Lookup: app.OSLookup, Version: version}, os.Stderr)
+	logw := io.Writer(os.Stderr)
+	if path := os.Getenv("RIVULET_LOG_FILE"); path != "" {
+		f, err := openLogFile(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "rivulet-engine: RIVULET_LOG_FILE:", err)
+		} else {
+			defer f.Close() //nolint:errcheck // process exit
+			logw = f
+		}
+	}
+
+	err := app.Run(ctx, app.Config{Lookup: app.OSLookup, Version: version}, logw)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rivulet-engine:", err)
 		os.Exit(1)
 	}
+}
+
+// openLogFile starts a new log at path, keeping the previous run's (a server
+// that exited or crashed) as <name>.prev.log. An app that bundles the server
+// sets RIVULET_LOG_FILE: the server can outlive the app's output pipe while
+// it finishes downloads.
+func openLogFile(path string) (*os.File, error) {
+	if _, err := os.Stat(path); err == nil {
+		prev := strings.TrimSuffix(path, ".log") + ".prev.log"
+		_ = os.Rename(path, prev)
+	}
+	return os.Create(path)
 }
