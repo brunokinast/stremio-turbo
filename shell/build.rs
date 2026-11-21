@@ -35,8 +35,8 @@ fn main() {
     res.set("FileDescription", "Freedom to Stream");
     res.set("LegalCopyright", &copyright);
     res.set("OriginalFilename", &exe_name);
-    res.set_icon_with_id("images/stremio.ico", "MAINICON");
-    res.append_rc_content(r##"SPLASHIMAGE IMAGE "images/stremio.png""##);
+    res.set_icon_with_id("images/turbo.ico", "MAINICON");
+    res.append_rc_content(r##"SPLASHIMAGE IMAGE "images/turbo.png""##);
     res.compile().unwrap();
 
     //extract libmpv-2
