@@ -34,6 +34,10 @@ import (
 	"github.com/rivulet-kodi/rivulet-engine/internal/types"
 )
 
+// givingBackUpload caps upload (bytes/sec) while seeding is enabled: enough to
+// trade with peers on small swarms, without using much of a home upstream.
+const givingBackUpload = 1 << 20
+
 // DefaultVersion is the Stremio-compatible serverVersion reported when
 // Config.Version is empty; keep it aligned with a real Stremio server
 // version so stremio-web does not gate features.
@@ -278,7 +282,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	// SetLimitFn is detected via structural assertion on the concrete *manager, matching
 	// the pattern used for StartJanitor above.
 	//   • btDownloadSpeedHardLimit: 0 = unlimited; positive = bytes/sec download cap.
-	//   • seedingEnabled: false → upload effectively disabled (1 byte/sec); true → unlimited.
+	//   • seedingEnabled: false → upload effectively disabled (1 byte/sec); true → givingBackUpload.
 	if l, ok := em.(interface{ SetLimitFn(func() (int64, int64)) }); ok {
 		l.SetLimitFn(func() (int64, int64) {
 			// --- download cap ---
@@ -301,8 +305,10 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 			// --- upload cap ---
 			// seedingEnabled=false → 1 byte/sec (effectively no upload) so peers
 			// get valid rate.Limiter reservations but seeding is negligible.
-			// seedingEnabled=true → 0 (unlimited).
-			var up int64
+			// seedingEnabled=true → givingBackUpload: a small share back while
+			// downloading (the engine stops a torrent's upload once it has
+			// nothing left to download).
+			up := int64(givingBackUpload)
 			if seeding, _ := ss.Get("seedingEnabled").(bool); !seeding {
 				up = 1
 			}

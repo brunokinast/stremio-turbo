@@ -1421,10 +1421,13 @@ func seedRatioExceeded(ul, dl int64, maxRatio float64) (exceeded bool, ratio flo
 
 // applySeedRatio moves one engine to the desired upload state, calling into
 // anacrolix (and logging) only on an actual transition rather than every tick.
-// ctl is the torrent whose upload is toggled; it is nil only in tests that
-// exercise the bookkeeping alone.
-func (e *engine) applySeedRatio(ctl uploadToggler, ul, dl int64, maxRatio float64) {
+// A torrent uploads only while it still downloads (giving back while taking:
+// reciprocity is what earns unchokes) and below the seed ratio. ctl is the
+// torrent whose upload is toggled; it is nil only in tests that exercise the
+// bookkeeping alone.
+func (e *engine) applySeedRatio(ctl uploadToggler, ul, dl int64, maxRatio float64, downloading bool) {
 	block, ratio := seedRatioExceeded(ul, dl, maxRatio)
+	block = block || !downloading
 
 	e.mu.Lock()
 	if e.uploadBlocked == block {
@@ -1439,12 +1442,12 @@ func (e *engine) applySeedRatio(ctl uploadToggler, ul, dl int64, maxRatio float6
 	}
 	if block {
 		ctl.DisallowDataUpload()
-		logging.For("engine").Info("seed ratio reached; pausing upload",
-			"info_hash", e.infoHash, "ratio", math.Round(ratio*100)/100, "max_ratio", maxRatio)
+		logging.For("engine").Info("pausing upload",
+			"info_hash", e.infoHash, "downloading", downloading, "ratio", math.Round(ratio*100)/100, "max_ratio", maxRatio)
 		return
 	}
 	ctl.AllowDataUpload()
-	logging.For("engine").Info("seed ratio below cap; resuming upload",
+	logging.For("engine").Info("resuming upload",
 		"info_hash", e.infoHash, "ratio", math.Round(ratio*100)/100, "max_ratio", maxRatio)
 }
 
@@ -1468,8 +1471,22 @@ func (m *manager) enforceSeedRatio(maxRatio float64) {
 
 	for _, e := range snap {
 		ts := e.t.Stats()
-		e.applySeedRatio(e.t, ts.BytesWrittenData.Int64(), ts.BytesReadData.Int64(), maxRatio)
+		e.applySeedRatio(e.t, ts.BytesWrittenData.Int64(), ts.BytesReadData.Int64(), maxRatio, e.downloadingData())
 	}
+}
+
+// downloadingData reports whether the torrent still wants data: its metadata
+// is pending, or a file it downloads (priority above None) is incomplete.
+func (e *engine) downloadingData() bool {
+	if e.t.Info() == nil {
+		return true
+	}
+	for _, f := range e.t.Files() {
+		if f.Priority() != torrent.PiecePriorityNone && f.BytesCompleted() < f.Length() {
+			return true
+		}
+	}
+	return false
 }
 
 // --------------------------------------------------------------------------

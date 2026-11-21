@@ -84,7 +84,7 @@ func TestApplySeedRatioOnlyActsOnTransition(t *testing.T) {
 
 	// Under the cap: no call at all, since engines start unblocked.
 	for range 3 {
-		e.applySeedRatio(f, 10, 100, 2.0)
+		e.applySeedRatio(f, 10, 100, 2.0, true)
 	}
 	if allow, disallow := f.counts(); allow != 0 || disallow != 0 {
 		t.Fatalf("under cap: got allow=%d disallow=%d; want no calls", allow, disallow)
@@ -95,7 +95,7 @@ func TestApplySeedRatioOnlyActsOnTransition(t *testing.T) {
 
 	// Cross the cap: exactly one disallow, however many ticks run.
 	for range 3 {
-		e.applySeedRatio(f, 250, 100, 2.0)
+		e.applySeedRatio(f, 250, 100, 2.0, true)
 	}
 	if allow, disallow := f.counts(); allow != 0 || disallow != 1 {
 		t.Fatalf("over cap: got allow=%d disallow=%d; want allow=0 disallow=1", allow, disallow)
@@ -106,7 +106,7 @@ func TestApplySeedRatioOnlyActsOnTransition(t *testing.T) {
 
 	// Fall back under the cap (more data downloaded): exactly one resume.
 	for range 3 {
-		e.applySeedRatio(f, 250, 1000, 2.0)
+		e.applySeedRatio(f, 250, 1000, 2.0, true)
 	}
 	if allow, disallow := f.counts(); allow != 1 || disallow != 1 {
 		t.Fatalf("back under cap: got allow=%d disallow=%d; want allow=1 disallow=1", allow, disallow)
@@ -123,12 +123,12 @@ func TestApplySeedRatioDisablingReleasesBlock(t *testing.T) {
 	e := &engine{infoHash: "abc"}
 	f := &fakeToggler{}
 
-	e.applySeedRatio(f, 500, 100, 1.0)
+	e.applySeedRatio(f, 500, 100, 1.0, true)
 	if !e.uploadBlocked {
 		t.Fatal("expected upload to be blocked at ratio 5.0 with cap 1.0")
 	}
 
-	e.applySeedRatio(f, 500, 100, 0) // cap removed
+	e.applySeedRatio(f, 500, 100, 0, true) // cap removed
 	if e.uploadBlocked {
 		t.Fatal("removing the cap should release the pause")
 	}
@@ -147,7 +147,7 @@ func TestApplySeedRatioIsIndependentOfIdleEviction(t *testing.T) {
 	m.engines[e.infoHash] = e
 	f := &fakeToggler{}
 
-	e.applySeedRatio(f, 10_000, 100, 1.0)
+	e.applySeedRatio(f, 10_000, 100, 1.0, true)
 
 	if !e.uploadBlocked {
 		t.Fatal("expected upload paused at ratio 100 with cap 1.0")
@@ -157,5 +157,24 @@ func TestApplySeedRatioIsIndependentOfIdleEviction(t *testing.T) {
 	}
 	if _, disallow := f.counts(); disallow != 1 {
 		t.Fatalf("expected exactly one DisallowDataUpload, got %d", disallow)
+	}
+}
+
+// TestApplySeedRatioUploadsOnlyWhileDownloading: a torrent with nothing left to
+// download stops uploading, under any ratio, and resumes when it wants data again.
+func TestApplySeedRatioUploadsOnlyWhileDownloading(t *testing.T) {
+	e := &engine{infoHash: "abc"}
+	f := &fakeToggler{}
+
+	e.applySeedRatio(f, 10, 100, 0, false)
+	if !e.uploadBlocked {
+		t.Fatal("a torrent that downloads nothing should not upload")
+	}
+	e.applySeedRatio(f, 10, 100, 0, true)
+	if e.uploadBlocked {
+		t.Fatal("a torrent downloading again should upload")
+	}
+	if allow, disallow := f.counts(); allow != 1 || disallow != 1 {
+		t.Fatalf("got allow=%d disallow=%d; want allow=1 disallow=1", allow, disallow)
 	}
 }

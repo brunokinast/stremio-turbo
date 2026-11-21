@@ -333,6 +333,21 @@ func TestHandlerOpenSubHash(t *testing.T) {
 	}
 }
 
+// ─── GET /subtitleSignature ──────────────────────────────────────────────────
+
+func TestHandlerSubtitleSignature(t *testing.T) {
+	h := newHandler(t)
+	rec := serve(t, h, http.MethodGet, "/subtitleSignature?videoUrl=http://example.com/video.mkv&container=matroska", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200", rec.Code)
+	}
+	m := decodeJSON(t, rec.Body.Bytes())
+	result, ok := m["result"].(map[string]any)
+	if !ok || result["signature"] != nil {
+		t.Errorf("subtitleSignature = %v; want a result with a null signature", m)
+	}
+}
+
 // ─── GET /subtitlesTracks ────────────────────────────────────────────────────
 
 func TestHandlerSubtitlesTracks(t *testing.T) {

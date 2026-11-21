@@ -746,6 +746,11 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleProbe(w, r)
 	case "opensubHash":
 		s.handleOpenSubHash(w, r)
+	case "subtitleSignature":
+		// The web player asks for an embedded-subtitle signature after load; the
+		// client's core (stremio-core-web 0.67) ignores it, so it isn't computed:
+		// that would read the file while the player is starting.
+		writeJSON(w, http.StatusOK, map[string]any{"result": map[string]any{"signature": nil, "videoFpsMilli": nil}})
 	case "subtitlesTracks":
 		s.handleSubtitlesTracks(w, r)
 	case "hwaccel-profiler":
