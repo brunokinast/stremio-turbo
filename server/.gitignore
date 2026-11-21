@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+#
+# SPDX-License-Identifier: MIT
+
+# Build output
+/rivulet-engine
+/rivulet-engine-*
+*.exe
+/bin/
+/dist/
+/releases/
+
+# Test / coverage
+*.test
+*.out
+coverage.html
+/schemathesis-report/
+
+# Local runtime / app data
+*.log
+/.rivulet-engine/
+.env
+*.env
+
+# TLS material written by the get-https route (ProvisionCert) into the app
+# path: never commit a real certificate, key or auth key.
+https-cert.pem
+https-key.pem
+cert-authkey
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*~

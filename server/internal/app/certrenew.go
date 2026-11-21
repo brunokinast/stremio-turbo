@@ -1,0 +1,124 @@
+// SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+//
+// SPDX-License-Identifier: MIT
+
+package app
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/rivulet-kodi/rivulet-engine/internal/api"
+	"github.com/rivulet-kodi/rivulet-engine/internal/logging"
+)
+
+// renewBefore triggers renewal when the live cert expires within this window.
+const renewBefore = 30 * 24 * time.Hour
+
+// renewCheckInterval is how often the renewer re-evaluates the live cert.
+const renewCheckInterval = 12 * time.Hour
+
+// certHolder stores the active TLS certificate behind tls.Config.GetCertificate
+// so the renewer can hot-swap it without restarting the HTTPS listener.
+type certHolder struct {
+	mu   sync.RWMutex
+	cert *tls.Certificate
+}
+
+func (h *certHolder) set(c tls.Certificate) {
+	h.mu.Lock()
+	h.cert = &c
+	h.mu.Unlock()
+}
+
+func (h *certHolder) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.cert, nil
+}
+
+func (h *certHolder) leaf() *x509.Certificate {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.cert == nil || len(h.cert.Certificate) == 0 {
+		return nil
+	}
+	c, err := x509.ParseCertificate(h.cert.Certificate[0])
+	if err != nil {
+		return nil
+	}
+	return c
+}
+
+// certNeedsRenewal reports whether the live cert should be (re)provisioned: when
+// it is missing, self-signed (Issuer == Subject), or within renewBefore of expiry.
+func certNeedsRenewal(h *certHolder) (bool, string) {
+	leaf := h.leaf()
+	if leaf == nil {
+		return true, "no usable cert"
+	}
+	if leaf.Issuer.String() == leaf.Subject.String() {
+		return true, "self-signed cert"
+	}
+	if time.Until(leaf.NotAfter) < renewBefore {
+		return true, "cert expiring " + leaf.NotAfter.Format(time.RFC3339)
+	}
+	return false, ""
+}
+
+// renewCertLoop provisions a browser-trusted cert from api.strem.io and hot-swaps
+// it into holder when needed, then re-checks every renewCheckInterval. It is a
+// no-op while no authKey is available (RIVULET_CERT_AUTHKEY, or one cached by
+// a prior /get-https call), so it never disturbs an existing self-signed setup
+// unless the user has opted into HTTPS provisioning. Returns when ctx is done,
+// so a restart (Stop then Start) never leaks this goroutine.
+func renewCertLoop(ctx context.Context, appPath string, holder *certHolder, lookup Lookup) {
+	check := func() {
+		authKey := getenv(lookup, "RIVULET_CERT_AUTHKEY", "")
+		if authKey == "" {
+			authKey = api.CachedAuthKey(appPath)
+		}
+		if authKey == "" {
+			return // nothing to provision with; leave the existing cert alone
+		}
+		ip := getenv(lookup, "RIVULET_CERT_IP", api.PrimaryIPv4())
+		if ip == "" {
+			return
+		}
+		need, reason := certNeedsRenewal(holder)
+		if !need {
+			return
+		}
+		res, err := api.ProvisionCert(appPath, authKey, ip)
+		if err != nil {
+			logging.For("https").Error("auto-provision failed", "reason", reason, "err", err)
+			return
+		}
+		cert, err := tls.LoadX509KeyPair(
+			filepath.Join(appPath, "https-cert.pem"),
+			filepath.Join(appPath, "https-key.pem"),
+		)
+		if err != nil {
+			logging.For("https").Error("reload after provision failed", "err", err)
+			return
+		}
+		holder.set(cert)
+		logging.For("https").Info("provisioned cert", "domain", res.Domain, "reason", reason, "valid_until", res.NotAfter.Format(time.RFC3339))
+	}
+
+	check() // attempt once at startup
+	t := time.NewTicker(renewCheckInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			check()
+		}
+	}
+}

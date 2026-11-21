@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+#
+# SPDX-License-Identifier: MIT
+
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # no caches in a publishing workflow (cache poisoning)
+      - run: CGO_ENABLED=0 go build -v ./...
+      - run: go test -p 1 ./...
+
+  release:
+    name: GoReleaser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: validate
+    permissions:
+      contents: write # create the GitHub release and upload assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # no caches in a publishing workflow (cache poisoning)
+      - name: Install UPX
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+      - name: Locate the Android NDK cross-compilers
+        # android/arm and android/arm64 are both cgo builds: Android ships no
+        # /etc/resolv.conf, so a pure-Go binary's resolver falls back to
+        # 127.0.0.1:53 (nothing listens there) and every DNS lookup fails --
+        # only cgo linking against bionic's real resolver works. android/arm
+        # also can't build any other way: the Go toolchain refuses it without
+        # external linking. See the rivulet-engine-android and
+        # rivulet-engine-android-arm builds in .goreleaser.yml.
+        #
+        # Use the NDK preinstalled on the runner image rather than fetching
+        # one: a cached third-party NDK restored with its clang binary missing
+        # while the wrapper scripts survived, so the presence check passed and
+        # the build only failed minutes later inside goreleaser. Hence also
+        # checking the tools the wrappers actually exec, not just the wrappers.
+        run: |
+          bin="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for tool in clang clang++ \
+                      armv7a-linux-androideabi21-clang \
+                      armv7a-linux-androideabi21-clang++ \
+                      aarch64-linux-android21-clang \
+                      aarch64-linux-android21-clang++ \
+                      x86_64-linux-android21-clang \
+                      x86_64-linux-android21-clang++ \
+                      i686-linux-android21-clang \
+                      i686-linux-android21-clang++; do
+            test -x "$bin/$tool" || { echo "missing NDK tool: $bin/$tool"; exit 1; }
+          done
+          {
+            echo "ANDROID_ARM_CC=$bin/armv7a-linux-androideabi21-clang"
+            echo "ANDROID_ARM_CXX=$bin/armv7a-linux-androideabi21-clang++"
+            echo "ANDROID_ARM64_CC=$bin/aarch64-linux-android21-clang"
+            echo "ANDROID_ARM64_CXX=$bin/aarch64-linux-android21-clang++"
+            echo "ANDROID_AMD64_CC=$bin/x86_64-linux-android21-clang"
+            echo "ANDROID_AMD64_CXX=$bin/x86_64-linux-android21-clang++"
+            echo "ANDROID_386_CC=$bin/i686-linux-android21-clang"
+            echo "ANDROID_386_CXX=$bin/i686-linux-android21-clang++"
+          } >> "$GITHUB_ENV"
+      - name: Install syft (for goreleaser SBOMs)
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 30

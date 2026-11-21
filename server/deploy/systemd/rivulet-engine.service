@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+#
+# SPDX-License-Identifier: MIT
+
+[Unit]
+Description=Rivulet Engine streaming server (pure-Go implementation)
+Documentation=https://github.com/rivulet-kodi/rivulet-engine
+After=network.target
+
+[Service]
+Type=simple
+# Packaged defaults, then the per-user override (later files win).
+EnvironmentFile=-/etc/rivulet-engine/rivulet-engine.env
+EnvironmentFile=-%h/.config/rivulet-engine/env
+# Create the data dir outside the sandbox ("+"): ProtectHome=read-only would
+# otherwise stop the server creating it, and ReadWritePaths needs it to exist.
+# A pre-rename ~/.stremio-server is moved over first so upgrades keep their
+# settings, certificate and caches.
+ExecStartPre=+/bin/sh -c 'if [ -d "%h/.stremio-server" ] && [ ! -e "%h/.rivulet-engine" ]; then mv "%h/.stremio-server" "%h/.rivulet-engine"; fi; mkdir -p "%h/.rivulet-engine"'
+ExecStart=/usr/bin/rivulet-engine
+Restart=on-failure
+RestartSec=5
+# Graceful shutdown drains HTTP for 5s before closing the torrent engine.
+TimeoutStopSec=20
+
+# Security hardening (user unit; /dev/dri stays reachable for VAAPI transcoding)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-%h/.rivulet-engine
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=default.target

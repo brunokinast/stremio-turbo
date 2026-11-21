@@ -1,0 +1,339 @@
+# SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+#
+# SPDX-License-Identifier: MIT
+
+version: 2
+
+project_name: rivulet-engine
+
+# Defaults so a local `goreleaser build` works when the NDK toolchain bin dir
+# is on PATH; the release workflow overrides these with absolute paths.
+env:
+  - ANDROID_ARM_CC={{ if index .Env "ANDROID_ARM_CC" }}{{ .Env.ANDROID_ARM_CC }}{{ else }}armv7a-linux-androideabi21-clang{{ end }}
+  - ANDROID_ARM_CXX={{ if index .Env "ANDROID_ARM_CXX" }}{{ .Env.ANDROID_ARM_CXX }}{{ else }}armv7a-linux-androideabi21-clang++{{ end }}
+  - ANDROID_ARM64_CC={{ if index .Env "ANDROID_ARM64_CC" }}{{ .Env.ANDROID_ARM64_CC }}{{ else }}aarch64-linux-android21-clang{{ end }}
+  - ANDROID_ARM64_CXX={{ if index .Env "ANDROID_ARM64_CXX" }}{{ .Env.ANDROID_ARM64_CXX }}{{ else }}aarch64-linux-android21-clang++{{ end }}
+  - ANDROID_AMD64_CC={{ if index .Env "ANDROID_AMD64_CC" }}{{ .Env.ANDROID_AMD64_CC }}{{ else }}x86_64-linux-android21-clang{{ end }}
+  - ANDROID_AMD64_CXX={{ if index .Env "ANDROID_AMD64_CXX" }}{{ .Env.ANDROID_AMD64_CXX }}{{ else }}x86_64-linux-android21-clang++{{ end }}
+  - ANDROID_386_CC={{ if index .Env "ANDROID_386_CC" }}{{ .Env.ANDROID_386_CC }}{{ else }}i686-linux-android21-clang{{ end }}
+  - ANDROID_386_CXX={{ if index .Env "ANDROID_386_CXX" }}{{ .Env.ANDROID_386_CXX }}{{ else }}i686-linux-android21-clang++{{ end }}
+
+before:
+  hooks:
+    # -diff fails instead of silently rewriting go.mod/go.sum, so dependency
+    # drift breaks the release instead of shipping an unreviewed tidy.
+    - go mod tidy -diff
+
+builds:
+  # Desktop / server targets.
+  - id: rivulet-engine
+    main: ./cmd/rivulet-engine
+    binary: rivulet-engine
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      # -checklinkname=0 is harmless on these platforms and required so the
+      # android build (separate id below) links github.com/wlynxg/anet on Go 1.23+.
+      - -s -w -checklinkname=0
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildCommit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      - { goos: darwin, goarch: arm }
+      - { goos: windows, goarch: arm }
+
+  # Android (arm64) — runs standalone / under Termux.
+  #
+  # CGO is required, not merely tolerated: Android ships no /etc/resolv.conf,
+  # so a pure-Go binary's resolver falls back to 127.0.0.1:53 (nothing
+  # listens there) and every DNS lookup fails. Cgo links against bionic's
+  # real resolver instead. CC/CXX come from ANDROID_ARM64_CC/ANDROID_ARM64_CXX
+  # (set by the release workflow via setup-ndk, defaulting to the plain NDK
+  # tool names so a local build works with the NDK toolchain bin dir on
+  # PATH). -linkmode=external + PIE mirrors elgatito/elementum's
+  # Makefile:91-103.
+  #
+  # Enabling cgo also pulls in the C++ github.com/anacrolix/go-libutp
+  # implementation instead of the pure-Go uTP fallback the other targets use,
+  # hence CXX is required too -- and -static-libstdc++ so the binary doesn't
+  # NEED libc++_shared.so, an NDK-redistributable apps normally bundle inside
+  # their APK that a standalone Kodi-addon-dropped binary has no APK to ship.
+  - id: rivulet-engine-android
+    main: ./cmd/rivulet-engine
+    binary: rivulet-engine
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_ARM64_CC }}
+      - CXX={{ .Env.ANDROID_ARM64_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-pie -lm -static-libstdc++"'
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildCommit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+    goos:
+      - android
+    goarch:
+      - arm64
+
+  # Android (32-bit armv7) — the ABI shipped by most Android TV / Google TV
+  # devices (Chromecast with Google TV included): an ARMv8 kernel with a
+  # 32-bit userspace, where only armeabi-v7a binaries load.
+  #
+  # Same cgo-for-DNS requirement as arm64 above; the Go toolchain also
+  # hard-requires external linking for android/arm regardless
+  # ("android/arm requires external (cgo) linking"), so it needs an NDK
+  # cross-compiler. CC/CXX come from ANDROID_ARM_CC/ANDROID_ARM_CXX (set by
+  # the release workflow via setup-ndk, defaulting to the plain NDK tool
+  # names so a local build works with the NDK toolchain bin dir on PATH).
+  #
+  # Enabling cgo also pulls in the C++ github.com/anacrolix/go-libutp
+  # implementation instead of the pure-Go uTP fallback the other targets use,
+  # hence CXX is required too -- and -static-libstdc++ so the binary doesn't
+  # NEED libc++_shared.so, an NDK-redistributable apps normally bundle inside
+  # their APK that a standalone Kodi-addon-dropped binary has no APK to ship.
+  - id: rivulet-engine-android-arm
+    main: ./cmd/rivulet-engine
+    binary: rivulet-engine
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_ARM_CC }}
+      - CXX={{ .Env.ANDROID_ARM_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-pie -lm -static-libstdc++"'
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildCommit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+    goos:
+      - android
+    goarch:
+      - arm
+    goarm:
+      - "7"
+
+  # librivulet-engine.so (arm64) — c-shared build of the exact same server
+  # for SELinux-enforcing Android hosts where a Kodi addon's shell can
+  # dlopen() a .so dropped next to its own native libs but is blocked from
+  # exec()'ing a bundled executable (see cmd/librivulet-engine). Shipped inside the
+  # same archive as rivulet-engine-android (below), next to the executable.
+  #
+  # Same CC/CXX/-static-libstdc++ requirement as rivulet-engine-android
+  # above, but deliberately WITHOUT -pie: cmd/link already passes -shared
+  # for buildmode=c-shared, and some gcc/clang frontends misinterpret
+  # "-shared -pie" together and pull in the executable startup object
+  # (Scrt1.o, which wants a `main` symbol a .so doesn't export as an entry
+  # point), failing the link. -pie is an executable-only concern; a shared
+  # object is already position-independent code.
+  - id: rivulet-engine-android-lib
+    main: ./cmd/librivulet-engine
+    binary: librivulet-engine
+    buildmode: c-shared
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_ARM64_CC }}
+      - CXX={{ .Env.ANDROID_ARM64_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-lm -static-libstdc++"'
+    goos:
+      - android
+    goarch:
+      - arm64
+
+  # librivulet-engine.so (32-bit armv7) — same rationale as
+  # rivulet-engine-android-lib above, matching rivulet-engine-android-arm's
+  # target ABI.
+  - id: rivulet-engine-android-arm-lib
+    main: ./cmd/librivulet-engine
+    binary: librivulet-engine
+    buildmode: c-shared
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_ARM_CC }}
+      - CXX={{ .Env.ANDROID_ARM_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-lm -static-libstdc++"'
+    goos:
+      - android
+    goarch:
+      - arm
+    goarm:
+      - "7"
+
+  # Android x86_64 / x86 (emulators, Chromebooks/ARC, Android-x86 boxes).
+  # Same cgo-for-DNS, external-linking and -static-libstdc++ rationale as the
+  # arm builds above; executables use -pie, the c-shared libs do not.
+  - id: rivulet-engine-android-amd64
+    main: ./cmd/rivulet-engine
+    binary: rivulet-engine
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_AMD64_CC }}
+      - CXX={{ .Env.ANDROID_AMD64_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-pie -lm -static-libstdc++"'
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildCommit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+    goos:
+      - android
+    goarch:
+      - amd64
+
+  - id: rivulet-engine-android-amd64-lib
+    main: ./cmd/librivulet-engine
+    binary: librivulet-engine
+    buildmode: c-shared
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_AMD64_CC }}
+      - CXX={{ .Env.ANDROID_AMD64_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-lm -static-libstdc++"'
+    goos:
+      - android
+    goarch:
+      - amd64
+
+  - id: rivulet-engine-android-386
+    main: ./cmd/rivulet-engine
+    binary: rivulet-engine
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_386_CC }}
+      - CXX={{ .Env.ANDROID_386_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-pie -lm -static-libstdc++"'
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildCommit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+    goos:
+      - android
+    goarch:
+      - "386"
+
+  - id: rivulet-engine-android-386-lib
+    main: ./cmd/librivulet-engine
+    binary: librivulet-engine
+    buildmode: c-shared
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.ANDROID_386_CC }}
+      - CXX={{ .Env.ANDROID_386_CXX }}
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0
+      - -linkmode=external
+      - '-extldflags "-lm -static-libstdc++"'
+    goos:
+      - android
+    goarch:
+      - "386"
+
+upx:
+  # Linux only: macOS Gatekeeper rejects upx-packed Mach-O, and upx on
+  # android can break the loader.
+  - enabled: true
+    compress: best
+    lzma: true
+    goos:
+      - linux
+
+archives:
+  - id: default
+    ids:
+      - rivulet-engine
+    formats: tar.gz
+    format_overrides:
+      - goos: windows
+        formats: zip
+    name_template: &archive_name >-
+      rivulet-engine_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+  # Android archives carry two artifacts (executable + librivulet-engine.so);
+  # goreleaser requires a constant binary count per archive group, so they
+  # get their own group with the same naming.
+  - id: android
+    ids:
+      - rivulet-engine-android
+      - rivulet-engine-android-arm
+      - rivulet-engine-android-lib
+      - rivulet-engine-android-arm-lib
+      - rivulet-engine-android-amd64
+      - rivulet-engine-android-amd64-lib
+      - rivulet-engine-android-386
+      - rivulet-engine-android-386-lib
+    formats: tar.gz
+    name_template: *archive_name
+
+checksum:
+  name_template: "checksums.txt"
+
+sboms:
+  - id: archives
+    artifacts: archive
+
+changelog:
+  use: github
+  sort: asc
+  abbrev: -1
+  groups:
+    - { title: "🚀 Features", regexp: '^.*?feat(\([[:word:]/.-]+\))??!?:.+$', order: 0 }
+    - { title: "🐛 Bug Fixes", regexp: '^.*?fix(\([[:word:]/.-]+\))??!?:.+$', order: 1 }
+    - { title: "⚡ Performance", regexp: '^.*?perf(\([[:word:]/.-]+\))??!?:.+$', order: 2 }
+    - { title: "♻️ Refactor", regexp: '^.*?refactor(\([[:word:]/.-]+\))??!?:.+$', order: 3 }
+    - { title: "📘 Documentation", regexp: '^.*?docs(\([[:word:]/.-]+\))??!?:.+$', order: 4 }
+    - { title: "🔧 CI & Build", regexp: '^.*?(ci|build)(\([[:word:]/.-]+\))??!?:.+$', order: 5 }
+    - { title: "🧰 Miscellaneous", order: 999 }
+  filters:
+    exclude:
+      - "^Merge "
+      - "^wip:"
+      - "^style:"
+
+release:
+  draft: false
+  prerelease: auto

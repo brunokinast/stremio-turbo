@@ -1,0 +1,515 @@
+// SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+//
+// SPDX-License-Identifier: MIT
+
+package engine
+
+import (
+	"context"
+	"encoding/binary"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"github.com/rivulet-kodi/rivulet-engine/internal/logging"
+)
+
+// The remote tracker source URL is configurable (RIVULET_TRACKERS_URL, wired via
+// types.Config.TrackersURL). The embeddedTrackers snapshot below is the always
+// available fallback when the remote fetch is disabled or unreachable, so
+// startup is never blocked.
+
+// defaultTrackerTopN is the fallback number of ranked UDP/HTTP trackers attached
+// per torrent when RIVULET_TRACKERS_MAX is unset or invalid. Upstream capped
+// this at 5 because anacrolix's announce dispatcher does work proportional to
+// (torrents x trackers), recomputing bytesLeft over every piece per announce.
+// For a streaming server's handful of open torrents that cost is negligible
+// (measured: five 4K torrents, 0.2% -> 0.4% CPU going from 5 to 25 trackers),
+// while small swarms - typical for 4K - find twice the peers. Only trackers
+// that answer the startup probe are attached.
+const defaultTrackerTopN = 25
+
+// trackerRefreshIntv is how often the tracker list is re-fetched and re-ranked.
+const trackerRefreshIntv = 24 * time.Hour
+
+// probeHTTPTimeout / probeUDPTimeout mirror the reference tracker_prober.rs constants.
+const probeHTTPTimeout = 2 * time.Second
+const probeUDPTimeout = 1 * time.Second
+
+// probeWSTimeout bounds the WebSocket-tracker reachability handshake.
+const probeWSTimeout = 5 * time.Second
+
+// probeWSFn is the WebSocket prober used by rankWSS (a seam for tests).
+var probeWSFn = probeTrackerWS
+
+// maxWSSProbeConcurrency bounds concurrent WebSocket handshake probes.
+const maxWSSProbeConcurrency = 16
+
+// probeMaxRTT is the sentinel RTT assigned to failed probes so they sort last.
+const probeMaxRTT = time.Hour
+
+var embeddedTrackers = []string{
+	"udp://tracker.opentrackr.org:1337/announce",
+	"udp://open.demonii.com:1337/announce",
+	"udp://open.stealth.si:80/announce",
+	"udp://tracker.torrent.eu.org:451/announce",
+	"udp://tracker.dler.org:6969/announce",
+	"udp://tracker.qu.ax:6969/announce",
+	"udp://tracker.filemail.com:6969/announce",
+	"udp://tracker.ducks.party:1984/announce",
+	"udp://tracker.bittor.pw:1337/announce",
+	"udp://open.free-tracker.ga:6969/announce",
+	"udp://explodie.org:6969/announce",
+	// WebTorrent (WebRTC) trackers for browser/webtorrent peers:
+	"wss://tracker.openwebtorrent.com",
+	"wss://tracker.webtorrent.dev",
+	"wss://tracker.btorrent.xyz",
+}
+
+var (
+	trackersMu      sync.RWMutex
+	currentTrackers = embeddedTrackers
+)
+
+// getTrackers returns the current tracker list (thread-safe).
+func getTrackers() []string {
+	trackersMu.RLock()
+	defer trackersMu.RUnlock()
+	return currentTrackers
+}
+
+func setTrackers(t []string) {
+	if len(t) == 0 {
+		return
+	}
+	trackersMu.Lock()
+	currentTrackers = t
+	trackersMu.Unlock()
+}
+
+// parseTrackers extracts one tracker URL per non-empty line.
+func parseTrackers(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "udp://") || strings.HasPrefix(line, "http://") ||
+			strings.HasPrefix(line, "https://") || strings.HasPrefix(line, "ws://") ||
+			strings.HasPrefix(line, "wss://") {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// announceableTrackers keeps only tracker URLs the anacrolix regular announce
+// dispatcher can build a client for. tracker.NewClient supports http(s) and
+// udp(4/6) only; ws:// and wss:// are served by the WebTorrent websocket
+// announcer, which exists only when WebTorrent is enabled. With WebTorrent
+// disabled a ws/wss URL falls through to tracker.NewClient → ErrBadScheme →
+// panicif.Err panic, so they (and any other unknown scheme) must be dropped
+// before being added to a torrent. Pass allowWS=true only when WebTorrent is on.
+func announceableTrackers(urls []string, allowWS bool) []string {
+	out := make([]string, 0, len(urls))
+	for _, u := range urls {
+		s := strings.ToLower(strings.TrimSpace(u))
+		switch {
+		case strings.HasPrefix(s, "http://"), strings.HasPrefix(s, "https://"),
+			strings.HasPrefix(s, "udp://"), strings.HasPrefix(s, "udp4://"),
+			strings.HasPrefix(s, "udp6://"):
+			out = append(out, u)
+		case allowWS && (strings.HasPrefix(s, "ws://") || strings.HasPrefix(s, "wss://")):
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// announceableTiers applies announceableTrackers to each announce-list tier,
+// dropping any tier left empty.
+func announceableTiers(tiers [][]string, allowWS bool) [][]string {
+	out := make([][]string, 0, len(tiers))
+	for _, tier := range tiers {
+		if f := announceableTrackers(tier, allowWS); len(f) > 0 {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// newTrackerClient constructs an HTTP client for tracker list fetches.
+// If proxyURL is non-empty and parses successfully, the client routes through
+// that proxy; otherwise it uses a plain direct transport. This is the single
+// source of truth for the proxy-fallback behavior — an unparseable proxyURL
+// silently degrades to direct rather than failing.
+func newTrackerClient(proxyURL string) *http.Client {
+	transport := &http.Transport{}
+	if proxyURL != "" {
+		if u, err := url.Parse(proxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(u)
+		}
+	}
+	return &http.Client{Timeout: 10 * time.Second, Transport: transport}
+}
+
+// initTrackers loads a cached list immediately (if present) and launches a
+// background goroutine that fetches, probes, ranks, and re-persists the list.
+// The goroutine repeats every 24 h and stops when done is closed.
+// The embedded snapshot always serves as the fallback so startup is never blocked.
+func initTrackers(cacheDir string, maxTrackers int, srcURL string, proxyURL string, done <-chan struct{}) {
+	cache := filepath.Join(cacheDir, "trackers_best.txt")
+	// Synchronous fast-path: serve the last ranked list immediately if cached.
+	if b, err := os.ReadFile(cache); err == nil {
+		if t := parseTrackers(string(b)); len(t) > 0 {
+			setTrackers(mergeWS(t))
+		}
+	}
+	// Background: fetch → probe → rank → persist, then repeat every 24 h.
+	if srcURL == "" {
+		return // remote refresh disabled; serve the embedded/cached list only
+	}
+	go func() {
+		hc := newTrackerClient(proxyURL)
+		doRefreshTrackers(cache, maxTrackers, srcURL, hc, proxyURL)
+		ticker := time.NewTicker(trackerRefreshIntv)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				doRefreshTrackers(cache, maxTrackers, srcURL, hc, proxyURL)
+			}
+		}
+	}()
+}
+
+// doRefreshTrackers fetches the upstream curated UDP/HTTP list plus ngosang's
+// WebSocket list, probes the UDP/HTTP trackers in parallel to measure RTT, keeps
+// the fastest maxTrackers, merges all wss trackers (fetched + embedded) back in,
+// updates the in-memory list, and persists the ranked UDP/HTTP list for a fast
+// next startup.
+func doRefreshTrackers(cache string, maxTrackers int, srcURL string, hc *http.Client, proxyURL string) {
+	if maxTrackers <= 0 {
+		maxTrackers = defaultTrackerTopN
+	}
+	candidates := fetchTrackerList(srcURL, hc)
+	if len(candidates) == 0 {
+		return // upstream unreachable — keep the current/embedded list
+	}
+
+	// Separate wss (un-probeable) from UDP/HTTP candidates.
+	var probeable, wss []string
+	for _, u := range candidates {
+		if strings.HasPrefix(u, "ws://") || strings.HasPrefix(u, "wss://") {
+			wss = append(wss, u)
+		} else {
+			probeable = append(probeable, u)
+		}
+	}
+
+	// Probe and keep the fastest topN UDP/HTTP trackers.
+	ranked := rankAndKeep(probeable, maxTrackers, proxyURL)
+	if len(ranked) == 0 {
+		// Nothing responded: keep the current list (and cache) rather than
+		// replacing it with dead trackers.
+		logging.For("trackers").Warn("no tracker responded to probes; keeping current list")
+		return
+	}
+
+	// Persist only the ranked UDP/HTTP list; wss are merged at runtime via mergeWS.
+	_ = os.WriteFile(cache, []byte(strings.Join(ranked, "\n")+"\n"), 0o644)
+
+	// Probe wss trackers (fetched + embedded) and keep only reachable ones so the
+	// client never wastes announces (or log noise) on dead WebTorrent trackers.
+	embeddedWSS := make([]string, 0, 4)
+	for _, t := range embeddedTrackers {
+		if strings.HasPrefix(t, "wss://") || strings.HasPrefix(t, "ws://") {
+			embeddedWSS = append(embeddedWSS, t)
+		}
+	}
+	liveWSS := rankWSS(append(wss, embeddedWSS...))
+	setTrackers(dedup(append(ranked, liveWSS...)))
+}
+
+// fetchTrackerList GETs a newline-delimited tracker list and returns the parsed
+// URLs. Returns nil on any error so the caller falls back to the current list.
+func fetchTrackerList(rawURL string, hc *http.Client) []string {
+	resp, err := hc.Get(rawURL)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if err != nil {
+		return nil
+	}
+	return parseTrackers(string(body))
+}
+
+// rankAndKeep probes all candidates in parallel, sorts by RTT ascending
+// and returns the top topN entries. Failed probes (rtt >= probeMaxRTT) are
+// dropped, so the result may be shorter than topN or empty.
+//
+// When proxyURL is set, UDP candidates are never probed: a UDP tracker
+// connect handshake dials the tracker directly and cannot be routed through
+// an HTTP/SOCKS proxy without UDP ASSOCIATE support, which this client does
+// not implement. Skipped UDP URLs keep their input order and are appended
+// after the ranked HTTP results rather than being sorted by a fabricated RTT.
+func rankAndKeep(candidates []string, topN int, proxyURL string) []string {
+	type result struct {
+		url string
+		rtt time.Duration
+	}
+
+	toProbe := candidates
+	var skippedUDP []string
+	if proxyURL != "" {
+		toProbe = nil
+		for _, u := range candidates {
+			if strings.HasPrefix(u, "udp://") {
+				skippedUDP = append(skippedUDP, u)
+			} else {
+				toProbe = append(toProbe, u)
+			}
+		}
+		logging.For("trackers").Info("skipping udp rtt probes because bt proxy is configured",
+			"skipped_count", len(skippedUDP))
+	}
+
+	// Bound concurrency: at most 32 probe goroutines in flight at once.
+	// Without this, hundreds of goroutines could be spawned for a large upstream list.
+	const maxConcurrent = 32
+	sem := make(chan struct{}, maxConcurrent)
+
+	ch := make(chan result, len(toProbe))
+	for _, u := range toProbe {
+		u := u
+		sem <- struct{}{} // acquire slot; blocks when 32 probes are in flight
+		go func() {
+			defer func() { <-sem }() // release slot when done
+			ch <- result{u, probeTracker(u, proxyURL)}
+		}()
+	}
+
+	results := make([]result, 0, len(toProbe))
+	for range toProbe {
+		results = append(results, <-ch)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].rtt < results[j].rtt
+	})
+
+	ranked := make([]string, 0, len(results)+len(skippedUDP))
+	for _, r := range results {
+		if r.rtt >= probeMaxRTT {
+			continue // failed probe: never keep a dead tracker
+		}
+		ranked = append(ranked, r.url)
+	}
+	ranked = append(ranked, skippedUDP...)
+
+	n := min(topN, len(ranked))
+	return ranked[:n]
+}
+
+// probeTracker dispatches to the appropriate protocol prober.
+// Returns probeMaxRTT for unknown schemes (wss, etc.). proxyURL is forwarded
+// to the HTTP prober so it never bypasses a configured BT proxy; callers must
+// not invoke this for udp:// URLs when a proxy is configured (see rankAndKeep).
+func probeTracker(rawURL string, proxyURL string) time.Duration {
+	switch {
+	case strings.HasPrefix(rawURL, "udp://"):
+		return probeTrackerUDP(rawURL)
+	case strings.HasPrefix(rawURL, "http://"), strings.HasPrefix(rawURL, "https://"):
+		return probeTrackerHTTP(rawURL, proxyURL)
+	default:
+		return probeMaxRTT
+	}
+}
+
+// probeTrackerHTTP sends an HTTP HEAD request with a 2-second timeout,
+// routed through proxyURL when set (via the same construction path as
+// newTrackerClient, so tracker fetches and RTT probes never disagree on
+// proxy config). Falls back to GET if HEAD is refused. Matches reference
+// tracker_prober.rs.
+func probeTrackerHTTP(rawURL string, proxyURL string) time.Duration {
+	hc := newTrackerClient(proxyURL)
+	hc.Timeout = probeHTTPTimeout
+	// Each probe owns a throwaway Transport: disable keep-alives and drop any
+	// idle connection on return so probes never leak sockets/goroutines.
+	if tr, ok := hc.Transport.(*http.Transport); ok {
+		tr.DisableKeepAlives = true
+	}
+	defer hc.CloseIdleConnections()
+	start := time.Now()
+	resp, err := hc.Head(rawURL)
+	if err == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return time.Since(start)
+	}
+	// Fall back to GET (some trackers reject HEAD).
+	resp2, err2 := hc.Get(rawURL)
+	if err2 != nil {
+		return probeMaxRTT
+	}
+	_, _ = io.Copy(io.Discard, resp2.Body)
+	_ = resp2.Body.Close()
+	return time.Since(start)
+}
+
+// probeTrackerUDP performs a BEP 15 UDP tracker connect handshake with a
+// 1-second timeout. Returns the round-trip time on success, probeMaxRTT on
+// failure (no response, wrong action/transaction_id, or network error).
+func probeTrackerUDP(rawURL string) time.Duration {
+	// Parse host:port from "udp://host:port/path".
+	hostPort := strings.TrimPrefix(rawURL, "udp://")
+	if i := strings.IndexByte(hostPort, '/'); i >= 0 {
+		hostPort = hostPort[:i]
+	}
+	if hostPort == "" {
+		return probeMaxRTT
+	}
+
+	conn, err := net.DialTimeout("udp", hostPort, probeUDPTimeout)
+	if err != nil {
+		return probeMaxRTT
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(probeUDPTimeout)); err != nil {
+		return probeMaxRTT
+	}
+
+	// BEP 15 connect request:
+	//   0  8  protocol_id   = 0x41727101980 (magic)
+	//   8  4  action        = 0 (connect)
+	//  12  4  transaction_id
+	const (
+		protocolID    uint64 = 0x41727101980
+		action        uint32 = 0
+		transactionID uint32 = 12345
+	)
+	var req [16]byte
+	binary.BigEndian.PutUint64(req[0:8], protocolID)
+	binary.BigEndian.PutUint32(req[8:12], action)
+	binary.BigEndian.PutUint32(req[12:16], transactionID)
+
+	start := time.Now()
+	if _, err := conn.Write(req[:]); err != nil {
+		return probeMaxRTT
+	}
+
+	var resp [16]byte
+	n, err := conn.Read(resp[:])
+	if err != nil || n < 8 {
+		return probeMaxRTT
+	}
+
+	// Validate: action == 0, transaction_id matches.
+	recvAction := binary.BigEndian.Uint32(resp[0:4])
+	recvTxID := binary.BigEndian.Uint32(resp[4:8])
+	if recvAction != 0 || recvTxID != transactionID {
+		return probeMaxRTT
+	}
+
+	return time.Since(start)
+}
+
+// mergeWS appends our WebTorrent (wss) trackers to a fetched list that only
+// contains udp/http trackers, so WebRTC peers remain discoverable.
+func mergeWS(t []string) []string {
+	have := make(map[string]bool, len(t))
+	out := make([]string, 0, len(t)+len(embeddedTrackers))
+	for _, x := range t {
+		if !have[x] {
+			have[x] = true
+			out = append(out, x)
+		}
+	}
+	for _, ws := range embeddedTrackers {
+		if (strings.HasPrefix(ws, "wss://") || strings.HasPrefix(ws, "ws://")) && !have[ws] {
+			have[ws] = true
+			out = append(out, ws)
+		}
+	}
+	return out
+}
+
+// probeTrackerWS reports whether a WebSocket tracker completes the WS upgrade
+// handshake within probeWSTimeout. Dead or non-WebSocket endpoints are filtered
+// out so the client does not waste announces on them.
+func probeTrackerWS(rawURL string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), probeWSTimeout)
+	defer cancel()
+	c, resp, err := websocket.Dial(ctx, rawURL, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		return false
+	}
+	_ = c.CloseNow()
+	return true
+}
+
+// rankWSS probes WebSocket trackers in parallel and returns the reachable,
+// deduplicated subset.
+func rankWSS(list []string) []string {
+	seen := make(map[string]bool, len(list))
+	uniq := make([]string, 0, len(list))
+	for _, u := range list {
+		if (strings.HasPrefix(u, "wss://") || strings.HasPrefix(u, "ws://")) && !seen[u] {
+			seen[u] = true
+			uniq = append(uniq, u)
+		}
+	}
+	results := make([]bool, len(uniq))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxWSSProbeConcurrency)
+	for i, u := range uniq {
+		wg.Add(1)
+		sem <- struct{}{} // acquire; bounds in-flight handshakes
+		go func(idx int, url string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[idx] = probeWSFn(url)
+		}(i, u)
+	}
+	wg.Wait()
+	live := make([]string, 0, len(uniq))
+	for i, ok := range results {
+		if ok {
+			live = append(live, uniq[i])
+		}
+	}
+	return live
+}
+
+// dedup returns t with duplicate entries removed, preserving order.
+func dedup(t []string) []string {
+	have := make(map[string]bool, len(t))
+	out := make([]string, 0, len(t))
+	for _, x := range t {
+		if !have[x] {
+			have[x] = true
+			out = append(out, x)
+		}
+	}
+	return out
+}

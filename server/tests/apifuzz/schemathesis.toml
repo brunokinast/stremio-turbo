@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: 2026 The rivulet-engine Authors
+#
+# SPDX-License-Identifier: MIT
+
+# Schemathesis configuration for scripts/api-fuzz.sh. Request budget, seed and
+# target come from the runner; this file holds what is static: the operations
+# the fuzzer must not call and the documented known issues.
+
+color = false
+
+# --- Fuzzed, with an expected 5xx ------------------------------------------------
+# expected-statuses replaces the default list, so the non-error classes stay.
+
+[[operations]]
+# 501 is the deliberate answer to a GET without ?lz= (use POST, or GET ?lz=).
+include-name = "GET /nzb/create"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "501"]
+
+[[operations]]
+include-name = "GET /nzb/create/{key}"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "501"]
+
+[[operations]]
+# Asks api.strem.io for a certificate; 502 is the answer when it is unreachable,
+# which is always the case on the network-less fuzz network.
+include-name = "GET /get-https"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "502"]
+
+[[operations]]
+# Resolves the egress IP through the given proxy; 502 when it is unreachable.
+include-name = "GET /proxy/ip"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "502"]
+
+[[operations]]
+# 502 is the documented answer when the subtitle source cannot be fetched; the
+# fuzzer supplies random public URLs and the fuzz network has no egress.
+include-name = "GET /subtitles.{ext}"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "502"]
+
+[[operations]]
+# Same 502 (the handler fetches its own stream URL and may find it unreachable).
+include-name = "GET /{infoHash}/{fileIdx}/subtitles.vtt"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "502"]
+
+[[operations]]
+# yt-dlp has no network on the fuzz network; 502 is its failure answer.
+include-name = "GET /yt/{id}"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "502"]
+
+[[operations]]
+# 504 is the documented answer when no peer delivers the torrent metadata in
+# time; the fuzzer asks for random info hashes that nobody seeds.
+include-name = "GET /{infoHash}/create"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "504"]
+
+[[operations]]
+include-name = "POST /{infoHash}/create"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "504"]
+
+[[operations]]
+include-name = "GET /{infoHash}/{fileIdx}"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "504"]
+
+[[operations]]
+include-name = "GET /stream/{infoHash}/{fileIdx}"
+
+[operations.checks.not_a_server_error]
+expected-statuses = ["2xx", "3xx", "4xx", "504"]
+
+# --- Known issues (found or suspected, not covered by this run) --------------------
+# Nothing here is silenced by the configuration above; these are behaviours the
+# fuzzer cannot reach statelessly or that were judged out of scope, kept so
+# they are not forgotten. Each one is a candidate for its own fix + test.
+#
+# * This (main) pass only sees the "nothing there" paths of the stateful routes
+#   (/nzb/*, /{zip,tar,tgz,7zip,rar}/*, /record*, /api/recordings*, /hlsv2/*,
+#   /local-addon/*, /iptv/*, /probe): the "stateful" pass of the same script reaches their
+#   success paths against fixtures (stateful.toml, fixtures.py). What neither
+#   pass reaches: /casting/* past its 404 (SSDP discovery is multicast and no
+#   renderer exists offline), /subtitles.{ext} and /opensubHash success (their
+#   fetch ignores the private-host allowlist), and the torrent routes (no
+#   peers offline).
+# * GET /{infoHash}/stats.json answers 200 `null` for an unknown engine: by
+#   design (server.js parity). stremio-core deserializes it as
+#   Option<Statistics>; `null` is a valid "no update" result, a 404 would
+#   surface as an error in the UI.
+# * POST /settings is not disabled: it mutates the fuzz engine's settings on
+#   disk only, which is thrown away with the container.
