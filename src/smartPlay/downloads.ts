@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useCore } from 'stremio/core';
+import { stalledSince, waitingBehind } from './stall';
 
 type DownloadState = 'queued' | 'downloading' | 'paused' | 'complete' | 'idle';
 type DownloadKind = 'kept' | 'temporary' | 'unkept';
@@ -146,9 +147,6 @@ const store = {
 
 const notify = () => store.listeners.forEach((_interval, listener) => listener());
 
-// A kept file that hasn't moved for this long is stalled (the Downloads
-// screen offers another source).
-const STALL_AFTER = 10 * 60 * 1000;
 // Per kept, incomplete, unpaused file: its bytes and when they last grew.
 const movement = new Map<string, { bytes: number, at: number }>();
 
@@ -170,10 +168,12 @@ const trackMovement = (downloads: Download[] | null) => {
 };
 
 // A kept file still to download that hasn't gained a byte in STALL_AFTER
-// (as far as this session has watched it).
-const isStalled = (d: Download) => {
+// (as far as this session has watched it), and isn't waiting behind an
+// earlier file of its torrent (stall.ts). The Downloads screen then offers
+// another source.
+const isStalled = (d: Download, all: Download[]) => {
     const last = d.kind === 'kept' && d.state !== 'complete' && d.state !== 'paused' ? movement.get(`${d.infoHash}:${d.fileIdx}`) : undefined;
-    return last !== undefined && Date.now() - last.at >= STALL_AFTER;
+    return stalledSince(last?.at, Date.now(), waitingBehind(d, all) !== null);
 };
 
 const refreshStore = async () => {
@@ -306,6 +306,10 @@ const isStopped = (d: Download) => !isComplete(d) && (d.state === 'paused' || (d
 // Origins smart play gives a record by itself. A record with any other
 // origin (the user's own download, "manual" or "resume") is never replaced or
 // deleted by smart play.
+// A kept record of this file exists (a download the picker must not delete).
+const hasKept = (records: Download[] | null, file: { infoHash: string, fileIdx: number | null }) =>
+    (records ?? []).some((d) => d.kind === 'kept' && d.infoHash === file.infoHash && d.fileIdx === file.fileIdx);
+
 const AUTOMATIC_ORIGINS = ['picker', 'play', 'next'];
 const isAutomatic = (d: Pick<Download, 'origins'>) => (d.origins ?? []).every((origin) => AUTOMATIC_ORIGINS.includes(origin));
 
@@ -316,4 +320,4 @@ const useActiveDownloads = (): number => {
 };
 
 export type { Download, DownloadKind, DownloadMeta, DownloadRequest, DownloadState, DiskInfo };
-export { refreshStore as refreshDownloads, listDownloads, getDisk, addDownload, markWatched, setDownloadMeta, setPaused, removeDownload, isLive, isComplete, isStopped, isAutomatic, isStalled, useDownloads, useActiveDownloads };
+export { refreshStore as refreshDownloads, listDownloads, getDisk, addDownload, markWatched, setDownloadMeta, setPaused, removeDownload, isLive, isComplete, isStopped, isAutomatic, hasKept, isStalled, useDownloads, useActiveDownloads };

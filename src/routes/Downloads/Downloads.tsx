@@ -11,6 +11,7 @@ import classnames from 'classnames';
 import Icon from '@stremio/stremio-icons/react';
 import { Button, Checkbox, Chips, Image, MainNavBars, ModalDialog, MultiselectMenu } from 'stremio/components';
 import { isStalled, useDownloads } from 'stremio/smartPlay/downloads';
+import { waitingBehind } from 'stremio/smartPlay/stall';
 import { retryElsewhere } from 'stremio/smartPlay/manualDownload';
 import { useProfile } from 'stremio/common';
 import type { Download } from 'stremio/smartPlay/downloads';
@@ -178,7 +179,12 @@ const Downloads = () => {
             // Complete is the normal case: nothing to say unless it plays.
             return what !== null ? line([what]) : null;
         }
-        if (isStalled(record)) {
+        const behind = waitingBehind(record, downloads ?? []);
+        if (behind !== null && record.state !== 'paused') {
+            const episode = behind.meta?.episode !== undefined ? `E${behind.meta.episode}` : t('SMART_PLAY_DOWNLOADS_EARLIER');
+            return line([what, percent, t('SMART_PLAY_DOWNLOADS_WAITING', { episode })], false, t('SMART_PLAY_DOWNLOADS_WAITING_HINT'));
+        }
+        if (isStalled(record, downloads ?? [])) {
             const key = `${record.infoHash}:${record.fileIdx}`;
             return line([what, percent, retrying.has(key) ? t('SMART_PLAY_DOWNLOADS_RETRYING') : t('SMART_PLAY_DOWNLOADS_STALLED')], false, t('SMART_PLAY_DOWNLOADS_STALLED_HINT'));
         }
@@ -235,7 +241,7 @@ const Downloads = () => {
                             null
                 }
                 {
-                    isStalled(record) && record.meta?.videoId !== undefined ?
+                    isStalled(record, downloads ?? []) && record.meta?.videoId !== undefined ?
                         <Button className={classnames(styles['action'], { [styles['disabled']]: retrying.has(`${record.infoHash}:${record.fileIdx}`) })} title={t('SMART_PLAY_DOWNLOADS_TRY_ANOTHER')} onClick={() => retry(record)}>
                             <Icon className={styles['action-icon']} name={'reset'} />
                         </Button>

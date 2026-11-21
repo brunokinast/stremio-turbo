@@ -1,12 +1,11 @@
-// The streams page's download buttons (plan 12): a quality row's ⬇ races
-// that tier's top sources and keeps the fastest; a source's ⬇ keeps that
-// source. The episode's state for the buttons: its record (kept, not
+// The streams page's download buttons: a quality row's ⬇ races that tier's
+// top sources and keeps the fastest; a source's ⬇ keeps that source. The episode's state for the buttons: its record (kept, not
 // complete) or a race running for it.
 
 import { useCallback, useMemo } from 'react';
 import { useDownloads } from './downloads';
 import type { Download } from './downloads';
-import { keepSource, racingFor, startDownload, undoDownload, useManualDownloads } from './manualDownload';
+import { keepSource, racingFor, startDownload, useManualDownloads } from './manualDownload';
 import type { Job, Show } from './manualDownload';
 import { planEpisode } from './seasonPlan';
 import type { RankedSource, RankedTier } from './groupByQuality';
@@ -27,7 +26,6 @@ type EpisodeDownloadState = {
     racing: Job | null,
     download: (tierKey: string) => void,
     downloadSource: (source: RankedSource, tierKey: string) => void,
-    cancel: () => void,
 };
 
 const useEpisodeDownload = ({ show, video, tiers, enabled }: Options): EpisodeDownloadState => {
@@ -53,7 +51,7 @@ const useEpisodeDownload = ({ show, video, tiers, enabled }: Options): EpisodeDo
         if (baseUrl === null || show === null || planned === null) {
             return;
         }
-        startDownload(baseUrl, show, 'episode', planned.label, [planned]);
+        startDownload(baseUrl, show, 'episode', tierKey, planned.label, [planned]);
     }, [baseUrl, show, offerOf]);
 
     const downloadSource = useCallback((source: RankedSource, tierKey: string) => {
@@ -62,16 +60,10 @@ const useEpisodeDownload = ({ show, video, tiers, enabled }: Options): EpisodeDo
         if (baseUrl === null || show === null || planned === null || source.fileIdx === null) {
             return;
         }
-        keepSource(baseUrl, show, { ...planned, stepped: false, label: tiers.find((tier) => tier.key === tierKey)?.label ?? planned.label, sources: [source] }, source);
+        keepSource(baseUrl, show, tierKey, { ...planned, stepped: false, label: tiers.find((tier) => tier.key === tierKey)?.label ?? planned.label, sources: [source] }, source);
     }, [baseUrl, show, offerOf, tiers]);
 
-    const cancel = useCallback(() => {
-        if (baseUrl !== null && racing !== null) {
-            undoDownload(baseUrl, racing.id);
-        }
-    }, [baseUrl, racing]);
-
-    return { record, racing, download, downloadSource, cancel };
+    return { record, racing, download, downloadSource };
 };
 
 export type { EpisodeDownloadState };

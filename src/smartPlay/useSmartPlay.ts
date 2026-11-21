@@ -186,7 +186,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
     useEffect(() => {
         const timer = setInterval(() => {
             const result = run.current?.result;
-            if (baseUrl !== null && result && !playStarted.current && result.source.onDisk === null && result.source.fileIdx !== null) {
+            if (baseUrl !== null && result?.owned === true && result.source.fileIdx !== null && !playStarted.current) {
                 addDownload(baseUrl, result.source.infoHash, result.source.fileIdx, result.source.trackers, { kind: 'temporary', origin: 'picker', startFraction, meta }).catch(() => undefined);
             }
         }, RENEW);
@@ -199,7 +199,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
             run.current = null;
             current?.controller.abort();
             const result = current?.result;
-            if (!playStarted.current && baseUrl !== null && result && result.source.onDisk === null && result.source.fileIdx !== null) {
+            if (!playStarted.current && baseUrl !== null && result?.owned === true && result.source.fileIdx !== null) {
                 removeDownload(baseUrl, result.source.infoHash, result.source.fileIdx);
             }
         };

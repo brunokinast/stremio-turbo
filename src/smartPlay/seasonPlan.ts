@@ -142,30 +142,33 @@ type Test = { source: RankedSource, videoId: string };
 
 const bySeeders = (a: RankedSource, b: RankedSource) => (b.seeders ?? b.listedSeeders ?? -1) - (a.seeders ?? a.listedSeeders ?? -1);
 
-// The torrents a race tests: every episode's top source first (so each has
-// at least one), then the rest by seeders, up to MAX_TESTS. Each torrent once,
-// on the file of the earliest episode that lists it.
-const testSet = (episodes: PlannedEpisode[], max = MAX_TESTS): Map<string, Test> => {
+// The torrents a race tests, in waves of at most `max` (raced one after the
+// other): every episode's top source (so each has at least one measured),
+// earliest episodes first; the last wave is filled with the other sources by
+// seeders. Each torrent once, on the file of the earliest episode that lists
+// it (a season pack is measured once for all its episodes).
+const testWaves = (episodes: PlannedEpisode[], max = MAX_TESTS): Map<string, Test>[] => {
     const ordered = [...episodes].sort((a, b) => a.season - b.season || a.episode - b.episode);
-    const tests = new Map<string, Test>();
     const firstFile = new Map<string, Test>();
     ordered.forEach((planned) => planned.sources.forEach((source) => {
         if (!firstFile.has(source.infoHash)) {
             firstFile.set(source.infoHash, { source, videoId: planned.videoId });
         }
     }));
-    const add = (source: RankedSource) => {
-        if (tests.size < max && !tests.has(source.infoHash)) {
-            tests.set(source.infoHash, firstFile.get(source.infoHash)!);
-        }
-    };
-    ordered.forEach((planned) => {
-        if (planned.sources.length > 0) {
-            add(planned.sources[0]);
-        }
-    });
-    ordered.flatMap((planned) => planned.sources.slice(1)).sort(bySeeders).forEach(add);
-    return tests;
+    const tops = Array.from(new Set(ordered.filter((planned) => planned.sources.length > 0).map((planned) => planned.sources[0].infoHash)));
+    const waves: Map<string, Test>[] = [];
+    for (let i = 0; i < tops.length; i += max) {
+        waves.push(new Map(tops.slice(i, i + max).map((infoHash) => [infoHash, firstFile.get(infoHash)!])));
+    }
+    const last = waves[waves.length - 1];
+    if (last !== undefined) {
+        ordered.flatMap((planned) => planned.sources.slice(1)).sort(bySeeders).forEach((source) => {
+            if (last.size < max && !waves.some((wave) => wave.has(source.infoHash))) {
+                last.set(source.infoHash, firstFile.get(source.infoHash)!);
+            }
+        });
+    }
+    return waves;
 };
 
 // An episode's winner: the source that would finish soonest (largest rate ÷
@@ -185,4 +188,4 @@ const chooseWinner = (planned: PlannedEpisode, rates: Map<string, number | null>
 const orderOf = (season: number, episode: number) => season * 1000 + episode;
 
 export type { EpisodeOffer, PlannedEpisode, SeasonRow, Test };
-export { seasonRows, planEpisode, stepDowns, episodeRuns, testSet, chooseWinner, orderOf, MAX_TESTS };
+export { seasonRows, planEpisode, stepDowns, episodeRuns, testWaves, chooseWinner, orderOf, MAX_TESTS };

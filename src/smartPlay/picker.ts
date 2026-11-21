@@ -9,9 +9,11 @@
 // temporary): it primes the file's start, end and the window at the start
 // point, and is deleted when its lease lapses (2 min) unless renewed. The
 // winner becomes kept when the player opens it (the server records a played
-// file); losers are deleted as soon as a step is decided.
+// file); losers are deleted as soon as a step is decided. A source that
+// already has a kept record (a manual download, a Next pick) is measured as
+// it is and never deleted: the picker only removes the tests it added.
 
-import { addDownload, removeDownload } from './downloads';
+import { addDownload, hasKept, removeDownload } from './downloads';
 import type { Download, DownloadMeta } from './downloads';
 import { stats } from './serverApi';
 import { knownRate, RateMeter } from './supply';
@@ -44,6 +46,9 @@ type PickResult = {
     weak: boolean,
     // Steps passed over, with their best ratio.
     passed: { step: Step, best: number | null }[],
+    // The source is a test this pick added (the caller renews or deletes it);
+    // false for a copy on disk or a record that was already kept.
+    owned: boolean,
 };
 
 type PickOptions = {
@@ -92,8 +97,9 @@ const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, met
         const step = steps[i];
         progress.steps.push({ step, result: 'testing', best: null });
         const tested = step.sources;
+        const owns = (source: RankedSource): source is RankedSource & { fileIdx: number } => source.onDisk === null && source.fileIdx !== null && !hasKept(records, source);
         const register = () => tested.forEach((source) => {
-            if (source.onDisk === null && source.fileIdx !== null) {
+            if (owns(source)) {
                 addDownload(baseUrl, source.infoHash, source.fileIdx, source.trackers, { kind: 'temporary', origin: 'picker', startFraction, meta }).catch(() => undefined);
             }
         });
@@ -136,7 +142,7 @@ const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, met
                 // Cancelled (page left, or "Play leader now"): the step's tests
                 // go, except the one the caller is about to play.
                 tested.forEach((source) => {
-                    if (source.onDisk === null && source.fileIdx !== null && source !== keep?.()) {
+                    if (owns(source) && source !== keep?.()) {
                         removeDownload(baseUrl, source.infoHash, source.fileIdx);
                     }
                 });
@@ -145,14 +151,14 @@ const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, met
         const winner = decision !== 'none' && decision !== null ? decision : null;
         // Losers (or the whole step) go now, not when their lease lapses.
         tested.forEach((source) => {
-            if (source !== winner?.source && source.onDisk === null && source.fileIdx !== null) {
+            if (source !== winner?.source && owns(source)) {
                 removeDownload(baseUrl, source.infoHash, source.fileIdx);
             }
         });
         if (winner !== null) {
             progress.steps[i].result = 'healthy';
             report();
-            return { source: winner.source, step, ratio: winner.ratio, weak: false, passed };
+            return { source: winner.source, step, ratio: winner.ratio, weak: false, passed, owned: owns(winner.source) };
         }
         progress.steps[i].result = 'too-slow';
         passed.push({ step, best: progress.steps[i].best });
@@ -162,7 +168,7 @@ const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, met
         }
     }
     const fallback = overall ?? { candidate: { source: steps[0].sources[0], need: null, rate: null, ratio: null, live: false }, step: steps[0] };
-    return { source: fallback.candidate.source, step: fallback.step, ratio: fallback.candidate.ratio, weak: true, passed };
+    return { source: fallback.candidate.source, step: fallback.step, ratio: fallback.candidate.ratio, weak: true, passed, owned: overall !== null && !hasKept(records, fallback.candidate.source) && fallback.candidate.source.onDisk === null };
 };
 
 export type { Candidate, PickResult, Progress, StepResult };

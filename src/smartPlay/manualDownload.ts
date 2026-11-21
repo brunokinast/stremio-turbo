@@ -1,14 +1,15 @@
-// Manual downloads (plan 12): one episode from its streams page, or a season
-// from the episode list. Each job races every episode's top sources at once
-// (temporary records, as the play picker tests them; a season pack tested
-// once for all its episodes), keeps each episode's fastest as a kept record
-// with origin "manual" and the episode's order, and can be undone.
+// Manual downloads: one episode from its streams page, or a season from the
+// episode list. Each job races every episode's top sources (temporary
+// records, as the play picker tests them; a season pack tested once for all
+// its episodes), then keeps each episode's fastest as a kept record with
+// origin "manual" and the episode's order. Once started, a job runs to its
+// end; the Downloads screen is where downloads are managed.
 //
 // Jobs live in this module, not in a component: a race keeps going when the
 // chooser closes, and ManualDownloadToasts (mounted in App) says how it ended.
 
 import { useEffect, useState } from 'react';
-import { addDownload, listDownloads, refreshDownloads, removeDownload } from './downloads';
+import { addDownload, hasKept, listDownloads, refreshDownloads, removeDownload } from './downloads';
 import type { Download, DownloadMeta } from './downloads';
 import { fetchStreams } from './next';
 import { groupByQuality, rankTiers } from './groupByQuality';
@@ -16,8 +17,8 @@ import { withDisk } from './withDisk';
 import { stats } from './serverApi';
 import { RateMeter } from './supply';
 import { STEP_TIMEOUT } from './picker';
-import { chooseWinner, orderOf, planEpisode, testSet } from './seasonPlan';
-import type { PlannedEpisode } from './seasonPlan';
+import { chooseWinner, orderOf, planEpisode, testWaves } from './seasonPlan';
+import type { PlannedEpisode, Test } from './seasonPlan';
 import type { RankedSource } from './groupByQuality';
 
 const POLL = 1000;
@@ -29,31 +30,27 @@ type Show = { id: string, type: string, name: string, poster: string | null };
 type JobEpisode = {
     planned: PlannedEpisode,
     state: 'racing' | 'queued' | 'failed',
-    // Measured rates of its sources' torrents (bytes/s), while racing.
+    // Measured rates of the tested torrents (bytes/s), while racing.
     rates: Record<string, number | null>,
     winner: RankedSource | null,
 };
-
-type JobState = 'racing' | 'done' | 'undone';
 
 type Job = {
     id: number,
     metaId: string,
     kind: 'episode' | 'season',
-    // The quality chosen (a season: the row's label).
+    // The row clicked (a quality row's key) and the quality it stands for.
+    tierKey: string,
     quality: string,
     season: number,
-    state: JobState,
+    state: 'racing' | 'done',
     episodes: JobEpisode[],
-    // Kept records this job created (undo deletes them).
-    created: { infoHash: string, fileIdx: number }[],
     bytes: number,
 };
 
 type Listener = () => void;
 
 const jobs = new Map<number, Job>();
-const controllers = new Map<number, AbortController>();
 const listeners = new Set<Listener>();
 // Jobs that ended since the toasts last looked.
 const ended: number[] = [];
@@ -73,6 +70,13 @@ const update = (id: number, change: (job: Job) => Job) => {
     }
 };
 
+const finish = (id: number, change: (job: Job) => Job) => {
+    update(id, (job) => ({ ...change(job), state: 'done' }));
+    ended.push(id);
+    emit();
+    refreshDownloads();
+};
+
 const metaOf = (show: Show, planned: PlannedEpisode): DownloadMeta => ({
     metaId: show.id,
     videoId: planned.videoId,
@@ -84,86 +88,85 @@ const metaOf = (show: Show, planned: PlannedEpisode): DownloadMeta => ({
     title: planned.title ?? undefined,
 });
 
-const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => {
-        clearTimeout(timer);
-        resolve();
-    }, { once: true });
-});
+const trackersOf = (source: RankedSource) => source.trackers.length > 0 ? source.trackers : [`dht:${source.infoHash}`];
 
-// The race: every tested torrent's start is primed as a temporary record and
-// its download rate sampled, until each has a rate or the picker's step
-// timeout passes. Returns the rates by torrent.
-const race = async (baseUrl: string, id: number, show: Show, episodes: PlannedEpisode[], signal: AbortSignal): Promise<Map<string, number | null>> => {
-    const tests = testSet(episodes);
-    const tested = Array.from(tests.values()).filter(({ source }) => source.onDisk === null && source.fileIdx !== null);
-    const byVideo = new Map(episodes.map((planned) => [planned.videoId, planned]));
-    const register = () => tested.forEach(({ source, videoId }) => {
-        const planned = byVideo.get(videoId)!;
-        addDownload(baseUrl, source.infoHash, source.fileIdx!, source.trackers, { kind: 'temporary', origin: 'picker', startFraction: 0, meta: metaOf(show, planned) }).catch(() => undefined);
-    });
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// One wave of the race: each tested torrent's start is primed as a temporary
+// record and its download rate sampled, until each has a rate or the
+// picker's step timeout passes. Rates are written into `rates`. Returns a
+// wait for the wave's adds still in flight, so the caller's removals can't
+// be overtaken by a late add that recreates a record.
+const raceWave = async (baseUrl: string, id: number, show: Show, wave: Test[], byVideo: Map<string, PlannedEpisode>, rates: Map<string, number | null>) => {
     const meter = new RateMeter();
-    const rates = new Map<string, number | null>(tested.map(({ source }) => [source.infoHash, null]));
+    const pending: Promise<unknown>[] = [];
+    const register = () => wave.forEach(({ source, videoId }) => {
+        pending.push(addDownload(baseUrl, source.infoHash, source.fileIdx!, source.trackers, { kind: 'temporary', origin: 'picker', startFraction: 0, meta: metaOf(show, byVideo.get(videoId)!) }).catch(() => undefined));
+    });
+    wave.forEach(({ source }) => rates.set(source.infoHash, null));
     register();
     const renew = setInterval(register, RENEW);
     const started = Date.now();
     try {
-        while (!signal.aborted) {
+        for (;;) {
             const now = Date.now();
-            await Promise.all(tested.map(({ source }) => stats(baseUrl, source.infoHash).then((s) => {
+            await Promise.all(wave.map(({ source }) => stats(baseUrl, source.infoHash).then((s) => {
                 if (s !== null) {
                     meter.add(source.infoHash, now, s.downloaded);
                 }
             })));
-            tested.forEach(({ source }) => rates.set(source.infoHash, meter.rate(source.infoHash)));
+            wave.forEach(({ source }) => rates.set(source.infoHash, meter.rate(source.infoHash)));
             const snapshot = Object.fromEntries(rates);
             update(id, (job) => ({ ...job, episodes: job.episodes.map((ep) => ({ ...ep, rates: snapshot })) }));
-            if (Array.from(rates.values()).every((rate) => rate !== null) || Date.now() - started >= STEP_TIMEOUT) {
+            if (wave.every(({ source }) => rates.get(source.infoHash) !== null) || Date.now() - started >= STEP_TIMEOUT) {
                 break;
             }
-            await sleep(POLL, signal);
+            await sleep(POLL);
         }
     } finally {
         clearInterval(renew);
     }
-    return rates;
+    return () => Promise.all(pending);
 };
 
-// Starts a job: races the episodes' sources, then keeps each one's winner.
-// `episodes` come from seasonPlan (a season row, or one episode's tier).
-const startDownload = (baseUrl: string, show: Show, kind: Job['kind'], quality: string, episodes: PlannedEpisode[]): number => {
+// Starts a job: races the episodes' sources wave by wave, then keeps each
+// one's winner. `episodes` come from seasonPlan (a season row, or one
+// episode's tier).
+const startDownload = (baseUrl: string, show: Show, kind: Job['kind'], tierKey: string, quality: string, episodes: PlannedEpisode[]): number => {
     const id = nextId++;
-    const controller = new AbortController();
-    controllers.set(id, controller);
     jobs.set(id, {
         id,
         metaId: show.id,
         kind,
+        tierKey,
         quality,
         season: episodes[0]?.season ?? 0,
         state: 'racing',
         episodes: episodes.map((planned) => ({ planned, state: 'racing', rates: {}, winner: null })),
-        created: [],
         bytes: 0,
     });
     emit();
     (async () => {
         const before = await listDownloads(baseUrl);
-        const existing = new Set((before ?? []).filter((d) => d.kind === 'kept').map((d) => `${d.infoHash}:${d.fileIdx}`));
-        const rates = await race(baseUrl, id, show, episodes, controller.signal);
-        const tested = testSet(episodes);
-        if (controller.signal.aborted) {
-            tested.forEach(({ source }) => removeDownload(baseUrl, source.infoHash, source.fileIdx!));
-            return;
+        // Only tests this job adds are removed: never a copy on disk or a
+        // record that was already kept.
+        const owns = (source: RankedSource) => source.onDisk === null && source.fileIdx !== null && !hasKept(before, source);
+        const byVideo = new Map(episodes.map((planned) => [planned.videoId, planned]));
+        const rates = new Map<string, number | null>();
+        const tested: Test[] = [];
+        const settled: (() => Promise<unknown>)[] = [];
+        for (const wave of testWaves(episodes)) {
+            const owned = Array.from(wave.values()).filter(({ source }) => owns(source));
+            tested.push(...owned);
+            settled.push(await raceWave(baseUrl, id, show, owned, byVideo, rates));
         }
-        const winners = episodes.map((planned) => ({ planned, winner: chooseWinner(planned, rates) }));
-        const results = await Promise.all(winners.map(async ({ planned, winner }) => {
+        const results = await Promise.all(episodes.map(async (planned) => {
+            const winner = chooseWinner(planned, rates);
             if (winner === null || winner.fileIdx === null) {
                 return { planned, winner: null };
             }
             try {
-                await addDownload(baseUrl, winner.infoHash, winner.fileIdx, winner.trackers.length > 0 ? winner.trackers : [`dht:${winner.infoHash}`], {
+                await addDownload(baseUrl, winner.infoHash, winner.fileIdx, trackersOf(winner), {
                     kind: 'kept',
                     origin: 'manual',
                     order: orderOf(planned.season, planned.episode),
@@ -175,75 +178,52 @@ const startDownload = (baseUrl: string, show: Show, kind: Job['kind'], quality: 
             }
         }));
         // Tests that didn't win go now, not when their lease lapses.
+        await Promise.all(settled.map((wait) => wait()));
         const kept = new Set(results.filter((r) => r.winner !== null).map((r) => `${r.winner!.infoHash}:${r.winner!.fileIdx}`));
         tested.forEach(({ source }) => {
             if (!kept.has(`${source.infoHash}:${source.fileIdx}`)) {
                 removeDownload(baseUrl, source.infoHash, source.fileIdx!);
             }
         });
-        const created = results
-            .filter((r) => r.winner !== null && !existing.has(`${r.winner.infoHash}:${r.winner.fileIdx}`))
-            .map((r) => ({ infoHash: r.winner!.infoHash, fileIdx: r.winner!.fileIdx! }));
-        const bytes = results.reduce((sum, r) => sum + (r.winner?.size ?? 0), 0);
-        update(id, (job) => job.state === 'undone' ? job : ({
+        finish(id, (job) => ({
             ...job,
-            state: 'done',
-            created,
-            bytes,
+            bytes: results.reduce((sum, r) => sum + (r.winner?.size ?? 0), 0),
             episodes: job.episodes.map((ep) => {
-                const result = results.find((r) => r.planned.videoId === ep.planned.videoId);
-                return { ...ep, state: result?.winner !== null && result?.winner !== undefined ? 'queued' : 'failed', winner: result?.winner ?? null };
+                const winner = results.find((r) => r.planned.videoId === ep.planned.videoId)?.winner ?? null;
+                return { ...ep, state: winner !== null ? 'queued' : 'failed', winner };
             }),
         }));
-        ended.push(id);
-        emit();
-        refreshDownloads();
     })().catch(() => {
-        update(id, (job) => ({ ...job, state: 'done', episodes: job.episodes.map((ep) => ({ ...ep, state: 'failed' })) }));
-        ended.push(id);
-        emit();
-    }).finally(() => controllers.delete(id));
+        finish(id, (job) => ({ ...job, episodes: job.episodes.map((ep) => ({ ...ep, state: 'failed' })) }));
+    });
     return id;
 };
 
 // Keeps one chosen source of an episode, with no race (a source picked from
 // the expanded list).
-const keepSource = (baseUrl: string, show: Show, planned: PlannedEpisode, source: RankedSource): number => {
+const keepSource = (baseUrl: string, show: Show, tierKey: string, planned: PlannedEpisode, source: RankedSource): number => {
     const id = nextId++;
     jobs.set(id, {
         id,
         metaId: show.id,
         kind: 'episode',
+        tierKey,
         quality: planned.label,
         season: planned.season,
         state: 'racing',
         episodes: [{ planned, state: 'racing', rates: {}, winner: source }],
-        created: [],
         bytes: 0,
     });
     emit();
-    (async () => {
-        const before = await listDownloads(baseUrl);
-        const existed = (before ?? []).some((d) => d.kind === 'kept' && d.infoHash === source.infoHash && d.fileIdx === source.fileIdx);
-        await addDownload(baseUrl, source.infoHash, source.fileIdx!, source.trackers.length > 0 ? source.trackers : [`dht:${source.infoHash}`], {
-            kind: 'kept',
-            origin: 'manual',
-            order: orderOf(planned.season, planned.episode),
-            meta: metaOf(show, planned),
-        });
-        update(id, (job) => ({
-            ...job,
-            state: 'done',
-            created: existed ? [] : [{ infoHash: source.infoHash, fileIdx: source.fileIdx! }],
-            bytes: source.size ?? 0,
-            episodes: job.episodes.map((ep) => ({ ...ep, state: 'queued' })),
-        }));
-    })().catch(() => {
-        update(id, (job) => ({ ...job, state: 'done', episodes: job.episodes.map((ep) => ({ ...ep, state: 'failed', winner: null })) }));
-    }).finally(() => {
-        ended.push(id);
-        emit();
-        refreshDownloads();
+    addDownload(baseUrl, source.infoHash, source.fileIdx!, trackersOf(source), {
+        kind: 'kept',
+        origin: 'manual',
+        order: orderOf(planned.season, planned.episode),
+        meta: metaOf(show, planned),
+    }).then(() => {
+        finish(id, (job) => ({ ...job, bytes: source.size ?? 0, episodes: job.episodes.map((ep) => ({ ...ep, state: 'queued' })) }));
+    }, () => {
+        finish(id, (job) => ({ ...job, episodes: job.episodes.map((ep) => ({ ...ep, state: 'failed', winner: null })) }));
     });
     return id;
 };
@@ -268,11 +248,11 @@ const retryElsewhere = async (baseUrl: string, addons: Addon[], record: Download
         return false;
     }
     const show: Show = { id: meta.metaId, type: meta.type, name: meta.name ?? '', poster: meta.poster ?? null };
-    const id = startDownload(baseUrl, show, 'episode', planned.label, [planned]);
+    const id = startDownload(baseUrl, show, 'episode', current?.key ?? planned.label, planned.label, [planned]);
     const done = await new Promise<Job | undefined>((resolve) => {
         const check = () => {
             const job = jobs.get(id);
-            if (job === undefined || job.state !== 'racing') {
+            if (job === undefined || job.state === 'done') {
                 listeners.delete(check);
                 resolve(job);
             }
@@ -291,18 +271,6 @@ const retryElsewhere = async (baseUrl: string, addons: Addon[], record: Download
     return false;
 };
 
-// Cancels a race, or deletes what a finished job created.
-const undoDownload = (baseUrl: string, id: number) => {
-    const job = jobs.get(id);
-    if (job === undefined || job.state === 'undone') {
-        return;
-    }
-    controllers.get(id)?.abort();
-    job.created.forEach(({ infoHash, fileIdx }) => removeDownload(baseUrl, infoHash, fileIdx));
-    update(id, (current) => ({ ...current, state: 'undone' }));
-    setTimeout(refreshDownloads, 500);
-};
-
 // Every job, re-rendered on any change.
 const useManualDownloads = (): Job[] => {
     const [, setVersion] = useState(version);
@@ -317,10 +285,10 @@ const useManualDownloads = (): Job[] => {
 };
 
 // Jobs that ended since the last call (for their toast).
-const takeEnded = (): Job[] => ended.splice(0).map((id) => jobs.get(id)).filter((job): job is Job => job !== undefined && job.state === 'done');
+const takeEnded = (): Job[] => ended.splice(0).map((id) => jobs.get(id)).filter((job): job is Job => job !== undefined);
 
 // The racing job for an episode, if any.
 const racingFor = (all: Job[], videoId: string) => all.find((job) => job.state === 'racing' && job.episodes.some((ep) => ep.planned.videoId === videoId)) ?? null;
 
 export type { Job, JobEpisode, Show };
-export { startDownload, keepSource, retryElsewhere, undoDownload, useManualDownloads, takeEnded, racingFor };
+export { startDownload, keepSource, retryElsewhere, useManualDownloads, takeEnded, racingFor };

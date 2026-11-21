@@ -37,22 +37,15 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
 
     // A quality row's download control, in a column of its own on every row
     // (so the play buttons stay aligned): ⬇ races this tier and keeps the
-    // fastest; while this episode's own race runs, ✕ cancels it. A tier on
-    // disk, or an episode already downloading, leaves it empty.
+    // fastest. A tier on disk, or an episode already downloading or being
+    // chosen, leaves it empty (downloads are managed on the Downloads screen).
     const renderDownload = (tier: RankedTier) => {
         if (episodeDownload === null) {
             return null;
         }
         const { record, racing } = episodeDownload;
-        if (tier.disk !== null || record !== null || (racing !== null && (racing.quality !== tier.label || racing.kind !== 'episode'))) {
+        if (tier.disk !== null || record !== null || racing !== null) {
             return <div className={styles['download-cell']} />;
-        }
-        if (racing !== null) {
-            return (
-                <Button className={classNames(styles['download'], styles['choosing'])} title={t('SMART_PLAY_MANUAL_CANCEL')} onClick={episodeDownload.cancel}>
-                    <Icon className={styles['icon']} name={'close'} />
-                </Button>
-            );
         }
         return (
             <Button className={styles['download']} title={t('SMART_PLAY_MANUAL_DOWNLOAD_HINT', { quality: tier.label })} onClick={() => episodeDownload.download(tier.key)}>
@@ -77,7 +70,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                 </span>
             );
         }
-        if (racing !== null && racing.quality === tier.label) {
+        if (racing !== null && racing.tierKey === tier.key) {
             return <span className={classNames(styles['download-status'], styles['checking'])}>{t('SMART_PLAY_MANUAL_CHOOSING')}</span>;
         }
         return null;

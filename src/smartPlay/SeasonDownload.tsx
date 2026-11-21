@@ -5,14 +5,14 @@
 // then, once a row's ⬇ is clicked, each episode's race. It opens as a
 // popover by the button, and as a centered dialog when that doesn't fit.
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import classNames from 'classnames';
 import Icon from '@stremio/stremio-icons/react';
 import { useProfile } from 'stremio/common';
 import Button from 'stremio/components/Button';
 import ModalDialog from 'stremio/components/ModalDialog';
-import { groupByQuality, rankTiers } from './groupByQuality';
+import { groupByQuality, rankTiers, WEAK_SEEDERS } from './groupByQuality';
 import type { Tier } from './groupByQuality';
 import useLiveSeeders from './useLiveSeeders';
 import { isComplete, useDownloads } from './downloads';
@@ -80,7 +80,6 @@ const useSeasonTiers = (open: boolean, show: Show, videos: Video[]) => {
 const SeasonDownload = ({ show, season, videos }: Props) => {
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
-    const [asDialog, setAsDialog] = useState(false);
     const [expanded, setExpanded] = useState<string | null>(null);
     const { downloads: records, disk, baseUrl } = useDownloads(POLL);
     const jobs = useManualDownloads();
@@ -88,7 +87,6 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
     const allTiers = useMemo(() => Array.from(fetched.values()).flat(), [fetched]);
     const { live, settled } = useLiveSeeders(allTiers, open ? baseUrl : null);
     const remembered = getQuality(show.id);
-    const menuRef = useRef<HTMLDivElement>(null);
 
     // The season's records, by episode.
     const seasonRecords = useMemo(() => {
@@ -111,7 +109,7 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
     // Qualities with nothing left to fetch aren't offered.
     const rows = useMemo(() => allRows.filter((row) => row.episodes.length > 0), [allRows]);
     const seasonJob = jobs.find((job) => job.kind === 'season' && job.metaId === show.id && job.season === season && job.state === 'racing') ?? null;
-    const lastJob = jobs.filter((job) => job.kind === 'season' && job.metaId === show.id && job.season === season && job.state !== 'undone').pop() ?? null;
+    const lastJob = jobs.filter((job) => job.kind === 'season' && job.metaId === show.id && job.season === season).pop() ?? null;
 
     // The button's status: racing, then progress over the season's records.
     const aired = videos.filter((video) => !video.upcoming).length;
@@ -137,48 +135,20 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
 
     const close = useCallback(() => {
         setOpen(false);
-        setAsDialog(false);
         setExpanded(null);
     }, []);
 
-    // Esc and clicks outside close the popover.
-    useEffect(() => {
-        if (!open || asDialog) {
-            return;
-        }
-        const onKey = (event: KeyboardEvent) => event.key === 'Escape' && close();
-        const onDown = (event: MouseEvent) => {
-            if (menuRef.current !== null && !menuRef.current.parentElement?.contains(event.target as Node)) {
-                close();
-            }
-        };
-        window.addEventListener('keydown', onKey);
-        window.addEventListener('mousedown', onDown);
-        return () => {
-            window.removeEventListener('keydown', onKey);
-            window.removeEventListener('mousedown', onDown);
-        };
-    }, [open, asDialog, close]);
-
-    // The popover becomes the dialog once its content doesn't fit.
-    useLayoutEffect(() => {
-        const menu = menuRef.current;
-        if (open && !asDialog && menu !== null && menu.scrollHeight > menu.clientHeight + 1) {
-            setAsDialog(true);
-        }
-    }, [open, asDialog, rows, expanded, loading, jobs]);
-
     const download = useCallback((row: SeasonRow) => {
         if (baseUrl !== null && row.episodes.length > 0) {
-            startDownload(baseUrl, show, 'season', row.label, row.episodes);
+            startDownload(baseUrl, show, 'season', row.key, row.label, row.episodes);
             setExpanded(row.key);
         }
     }, [baseUrl, show]);
 
     const renderSeeders = (seeders: number | null) => (
         <span className={styles['seeders']}>
-            <span className={classNames(styles['dot'], { [styles['weak']]: seeders !== null && seeders < 10, [styles['unknown']]: seeders === null, [styles['checking']]: !settled })} />
-            {seeders ?? '?'}
+            <span className={classNames(styles['dot'], { [styles['weak']]: seeders !== null && seeders < WEAK_SEEDERS, [styles['unknown']]: seeders === null, [styles['checking']]: !settled })} />
+            {seeders ?? '–'}
         </span>
     );
 
@@ -196,7 +166,7 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
                                 {planned.stepped ? <span className={styles['episode-quality']}>{planned.label}</span> : null}
                                 {releaseOf(shown?.stream.description)}
                             </span>
-                            <span className={styles['episode-size']}>{shown?.size !== null && shown?.size !== undefined ? `${gb(shown.size)} GB` : '?'}</span>
+                            <span className={styles['episode-size']}>{shown?.size !== null && shown?.size !== undefined ? `${gb(shown.size)} GB` : '–'}</span>
                             <span className={styles['episode-state']}>
                                 {
                                     ep === null ?
@@ -222,7 +192,7 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
     );
 
     const renderRow = (row: SeasonRow) => {
-        const job = lastJob !== null && lastJob.quality === row.label ? lastJob : null;
+        const job = lastJob !== null && lastJob.tierKey === row.key ? lastJob : null;
         const fits = disk === null || row.bytes + SPARE <= disk.free;
         const downs = stepDowns(row);
         const busy = seasonJob !== null;
@@ -244,13 +214,19 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
                     </Button>
                     <Button
                         className={classNames(styles['download'], { [styles['disabled']]: !fits || busy || row.episodes.length === 0 })}
-                        title={!fits && disk !== null ? t('SMART_PLAY_SEASON_NO_SPACE', { size: gb(row.bytes), free: gb(disk.free), spare: gb(SPARE) }) : t('SMART_PLAY_SEASON_DOWNLOAD_HINT', { count: row.episodes.length, quality: row.label, size: gb(row.bytes) })}
+                        title={t('SMART_PLAY_SEASON_DOWNLOAD_HINT', { count: row.episodes.length, quality: row.label, size: gb(row.bytes) })}
                         disabled={!fits || busy || row.episodes.length === 0}
                         onClick={() => download(row)}
                     >
                         <Icon className={styles['icon']} name={'download'} />
                     </Button>
                 </div>
+                {
+                    !fits && disk !== null ?
+                        <div className={styles['no-space']}>{t('SMART_PLAY_SEASON_NO_SPACE', { size: gb(row.bytes), free: gb(disk.free), spare: gb(SPARE) })}</div>
+                        :
+                        null
+                }
                 {
                     downs.map((down) => (
                         <div key={down.label} className={styles['step-down']}>{t('SMART_PLAY_SEASON_STEPPED', { episodes: down.episodes, quality: down.label })}</div>
@@ -289,7 +265,7 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
         <div className={styles['season-download']}>
             <Button
                 className={classNames(styles['button'], { [styles['active']]: seasonJob !== null || moving.length > 0, [styles['done']]: aired > 0 && onDisk >= aired })}
-                title={t('SMART_PLAY_SEASON_HINT', { season })}
+                title={status === t('SMART_PLAY_SEASON_DOWNLOAD') ? t('SMART_PLAY_SEASON_HINT', { season }) : status}
                 aria-expanded={open}
                 onClick={() => (open ? close() : setOpen(true))}
             >
@@ -297,16 +273,7 @@ const SeasonDownload = ({ show, season, videos }: Props) => {
                 <span className={classNames(styles['button-label'], { [styles['checking']]: seasonJob !== null })}>{status}</span>
             </Button>
             {
-                open && !asDialog ?
-                    <div ref={menuRef} className={styles['popover']} role={'dialog'} aria-label={t('SMART_PLAY_SEASON_TITLE', { season })}>
-                        <div className={styles['title']}>{t('SMART_PLAY_SEASON_TITLE', { season })}</div>
-                        {content}
-                    </div>
-                    :
-                    null
-            }
-            {
-                open && asDialog ?
+                open ?
                     <ModalDialog className={styles['dialog']} title={t('SMART_PLAY_SEASON_TITLE_SHOW', { name: show.name, season })} onCloseRequest={close}>
                         {content}
                     </ModalDialog>

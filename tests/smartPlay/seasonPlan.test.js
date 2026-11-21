@@ -1,7 +1,7 @@
 // Plan 12's season plan: rows per quality with step-downs and skips, the
 // race's test set (a pack tested once), and the winner rule.
 
-const { seasonRows, stepDowns, episodeRuns, testSet, chooseWinner, orderOf } = require('../../src/smartPlay/seasonPlan');
+const { seasonRows, stepDowns, episodeRuns, testWaves, chooseWinner, orderOf } = require('../../src/smartPlay/seasonPlan');
 
 const GB = 1e9;
 const source = (infoHash, extra = {}) => ({ infoHash, fileIdx: 0, size: 10 * GB, seeders: 10, listedSeeders: null, onDisk: null, trackers: [], stream: {}, addonName: 'T', ...extra });
@@ -63,7 +63,9 @@ describe('test set', () => {
             planned(2, [source('pack', { fileIdx: 2, seeders: 100 }), source('b2', { seeders: 20 })]),
             planned(1, [source('pack', { fileIdx: 1, seeders: 100 }), source('b1', { seeders: 30 })]),
         ];
-        const tests = testSet(eps);
+        const waves = testWaves(eps);
+        expect(waves.length).toBe(1);
+        const tests = waves[0];
         expect(Array.from(tests.keys()).sort()).toEqual(['b1', 'b2', 'pack']);
         expect(tests.get('pack').videoId).toBe('v1');
         expect(tests.get('pack').source.fileIdx).toBe(1);
@@ -71,10 +73,19 @@ describe('test set', () => {
 
     it('keeps every episode its top source under the cap', () => {
         const eps = [1, 2, 3].map((e) => planned(e, [source(`top${e}`, { seeders: 1 }), source(`x${e}`, { seeders: 50 }), source(`y${e}`, { seeders: 40 })]));
-        const tests = testSet(eps, 4);
+        const [tests] = testWaves(eps, 4);
         expect(tests.size).toBe(4);
         ['top1', 'top2', 'top3'].forEach((h) => expect(tests.has(h)).toBe(true));
         expect(tests.has('x1')).toBe(true);
+    });
+
+    it('tests every episode of a long season, in waves', () => {
+        const eps = Array.from({ length: 20 }, (_, i) => planned(i + 1, [source(`top${i + 1}`), source(`alt${i + 1}`, { seeders: 99 })]));
+        const waves = testWaves(eps, 12);
+        expect(waves.map((wave) => wave.size)).toEqual([12, 12]);
+        const tested = waves.flatMap((wave) => Array.from(wave.keys()));
+        eps.forEach((ep) => expect(tested).toContain(ep.sources[0].infoHash));
+        expect(new Set(tested).size).toBe(tested.length);
     });
 });
 
