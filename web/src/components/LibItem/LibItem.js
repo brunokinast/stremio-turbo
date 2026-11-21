@@ -168,4 +168,4 @@ LibItem.propTypes = {
     onDismissClick: PropTypes.func
 };
 
-module.exports = LibItem;
+module.exports = React.memo(LibItem);

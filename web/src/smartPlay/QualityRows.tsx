@@ -25,6 +25,7 @@ type Props = {
     videoId?: string | null,
     videoReleased?: string | null,
     canMarkWatched: boolean,
+    playerType: Settings['playerType'],
     onPlay: (tierKey: string) => void,
     onPlayLeader: () => void,
     onCancel: () => void,
@@ -33,7 +34,7 @@ type Props = {
     episodeDownload?: EpisodeDownloadState | null,
 };
 
-const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleased, canMarkWatched, onPlay, onPlayLeader, onCancel, episodeDownload = null }: Props) => {
+const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleased, canMarkWatched, playerType, onPlay, onPlayLeader, onCancel, episodeDownload = null }: Props) => {
     const { t } = useTranslation();
     const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -260,6 +261,7 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                                                     videoId={videoId}
                                                     videoReleased={videoReleased}
                                                     canMarkWatched={canMarkWatched}
+                                                    playerType={playerType}
                                                 />
                                                 {renderSourceDownload(tier, source)}
                                             </div>

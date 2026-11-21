@@ -4,7 +4,6 @@ import React, { memo, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import classNames from 'classnames';
 import Icon from '@stremio/stremio-icons/react';
-import { useProfile } from 'stremio/common';
 import { getInterfaceRect } from 'stremio/common/interfaceScale';
 import Button from 'stremio/components/Button';
 import Image from 'stremio/components/Image';
@@ -12,14 +11,16 @@ import Popup from 'stremio/components/Popup';
 import ProgressBar from 'stremio/components/ProgressBar';
 import WatchedBadge from 'stremio/components/WatchedBadge';
 import useRowMenu from '../useRowMenu';
-import useEpisodeNavigation from '../useEpisodeNavigation';
-import { formatDate, hidesSpoiler } from '../format';
+import { hidesSpoiler } from '../format';
 import { getScrollParent } from './useScrollMemory';
 import type { EpisodeDownload } from 'stremio/smartPlay';
 import styles from './Video.less';
 
 type Props = {
     video: Video,
+    releasedLabel: string | null,
+    hideSpoilers: boolean,
+    openEpisode: (href: string) => void,
     selected: boolean,
     seasonWatched: boolean,
     minutesLeft: number | null,
@@ -41,17 +42,14 @@ const renderThumbnailFallback = () => (
     </div>
 );
 
-const Video = ({ video, selected, seasonWatched, minutesLeft, onSelect, onMarkVideoWatched, onMarkSeasonWatched, download = null, onRemoveDownload }: Props) => {
-    const { t, i18n } = useTranslation();
-    const profile = useProfile();
-    const { openEpisode } = useEpisodeNavigation();
+const Video = ({ video, releasedLabel, hideSpoilers, openEpisode, selected, seasonWatched, minutesLeft, onSelect, onMarkVideoWatched, onMarkSeasonWatched, download = null, onRemoveDownload }: Props) => {
+    const { t } = useTranslation();
     const { open, closeMenu, labelProps, menuProps } = useRowMenu();
     const rowRef = useRef<HTMLDivElement>(null);
 
     const { id, title, thumbnail, season, episode, released, upcoming, watched, progress, scheduled, deepLinks } = video;
     const hasProgress = typeof progress === 'number' && progress > 0;
-    const blurThumbnail = hidesSpoiler(video, profile.settings.hideSpoilers);
-    const releasedLabel = formatDate(released, i18n.language);
+    const blurThumbnail = hidesSpoiler(video, hideSpoilers);
     const shouldScroll = selected && (!watched || hasProgress);
     const downloadLabel = download === null ? null :
         download.state === 'complete' ? t('SMART_PLAY_DOWNLOAD_ON_DISK') :

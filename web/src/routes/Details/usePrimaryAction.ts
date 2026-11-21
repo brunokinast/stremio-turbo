@@ -31,7 +31,7 @@ const usePrimaryAction = (metaItem: MetaItemMetaDetails | null, video: Video | n
             :
             null;
     }, [video, streams]);
-    const { href, target, download, play } = useStreamPlay(lastUsed, { videoId: video?.id, videoReleased: video?.released, canMarkWatched });
+    const { href, target, download, play } = useStreamPlay(lastUsed, profile.settings.playerType, { videoId: video?.id, videoReleased: video?.released, canMarkWatched });
     const { openEpisode } = useEpisodeNavigation();
     // Smart play: resume with the show's remembered quality when offered.
     const smartResume = useMemo(() => profile.settings.playerType === null && metaItem !== null && (

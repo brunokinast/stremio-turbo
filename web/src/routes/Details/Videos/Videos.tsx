@@ -10,8 +10,9 @@ import EpisodePicker from '../EpisodePicker';
 import Message from '../Message';
 import Panel from '../Panel';
 import Placeholder from '../Placeholder';
-import { formatDate, getMinutesLeft } from '../format';
+import { DATE_FORMAT, getMinutesLeft, parseDate } from '../format';
 import Search from './Search';
+import SeasonsBar from './SeasonsBar';
 import VideoRow from './Video';
 import useScrollMemory from './useScrollMemory';
 import useSeasons from 'stremio/common/useSeasons';
@@ -23,6 +24,8 @@ export type { ScrollMemory };
 
 type Props = {
     hidden: boolean,
+    hideSpoilers: boolean,
+    openEpisode: (href: string) => void,
     metaItem: MetaItemMetaDetails | null,
     error: boolean,
     libraryItem: LibraryItem | null,
@@ -39,6 +42,8 @@ const NO_VIDEOS: Video[] = [];
 
 const Videos = ({
     hidden,
+    hideSpoilers,
+    openEpisode,
     metaItem,
     error,
     libraryItem,
@@ -52,21 +57,30 @@ const Videos = ({
 }: Props) => {
     const { t, i18n } = useTranslation();
     const isMobile = useMediaQuery(`(max-width: ${screenSizes.xxsmall})`);
+    const isTouch = useMediaQuery('(hover: none) and (pointer: coarse)');
     const [search, setSearch] = useState('');
     const listRef = useRef<HTMLDivElement>(null);
 
     const { seasons, selectedSeason, videos, options } = useSeasons(metaItem?.videos ?? NO_VIDEOS, season, libraryItem);
 
+    const datedVideos = useMemo(() => {
+        const formatter = new Intl.DateTimeFormat(i18n.language, DATE_FORMAT);
+        return videos.map((video) => {
+            const released = parseDate(video.released);
+            return { video, releasedLabel: released && formatter.format(released) };
+        });
+    }, [videos, i18n.language]);
+
     const filteredVideos = useMemo(() => {
         const query = search.toLowerCase();
         return query.length === 0 ?
-            videos
+            datedVideos
             :
-            videos.filter((video) => {
+            datedVideos.filter(({ video, releasedLabel }) => {
                 return video.title?.toLowerCase().includes(query) ||
-                    formatDate(video.released, i18n.language)?.toLowerCase().includes(query);
+                    releasedLabel?.toLowerCase().includes(query);
             });
-    }, [videos, search, i18n.language]);
+    }, [datedVideos, search]);
 
     const seasonWatched = useMemo(() => videos.every((video) => video.watched), [videos]);
     // Smart play: episodes downloaded ahead, and how far each download is.
@@ -103,14 +117,21 @@ const Videos = ({
         <Panel
             ariaLabel={t('VIDEOS')}
             header={
-                seasons.length > 1 ?
-                    <SegmentedControl
-                        options={options}
-                        value={selectedSeason !== null ? String(selectedSeason) : null}
-                        ariaLabel={t('SEASON')}
-                        size={isMobile ? 'large' : 'medium'}
-                        onSelect={handleSeasonSelect}
-                    />
+                seasons.length > 1 && !hidden ?
+                    isTouch ?
+                        <SegmentedControl
+                            options={options}
+                            value={selectedSeason !== null ? String(selectedSeason) : null}
+                            ariaLabel={t('SEASON')}
+                            size={isMobile ? 'large' : 'medium'}
+                            onSelect={handleSeasonSelect}
+                        />
+                        :
+                        <SeasonsBar
+                            options={options}
+                            value={selectedSeason !== null ? String(selectedSeason) : null}
+                            onSelect={handleSeasonSelect}
+                        />
                     :
                     options.length === 1 ?
                         <div className={styles['season']}>{options[0].label}</div>
@@ -141,10 +162,13 @@ const Videos = ({
             }
             <div ref={listRef} className={styles['list']}>
                 {
-                    filteredVideos.map((video) => (
+                    filteredVideos.map(({ video, releasedLabel }) => (
                         <VideoRow
                             key={video.id}
                             video={video}
+                            releasedLabel={releasedLabel}
+                            hideSpoilers={hideSpoilers}
+                            openEpisode={openEpisode}
                             selected={video.id === libraryItem?.state.video_id}
                             seasonWatched={seasonWatched}
                             minutesLeft={getMinutesLeft(libraryItem, video.id)}
