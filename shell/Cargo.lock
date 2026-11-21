@@ -1787,8 +1787,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "stremio-shell-ng"
-version = "5.0.28"
+name = "stremio-turbo"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "base64",

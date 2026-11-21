@@ -1,0 +1,58 @@
+{
+  "_comment": "Media binaries the app ships, as Stremio's shell ships them: libmpv (the player) and ffmpeg/ffprobe (Rivulet's transcoding and probing). Pinned to an upstream commit and checked by sha256. Update the commit and hashes when upstream changes them.",
+  "base": "https://raw.githubusercontent.com/Stremio/stremio-shell-ng/e148e2a6801b4af3afd143262f2280a866da7c87/",
+  "files": [
+    {
+      "path": "libmpv-2_x64.zip",
+      "sha256": "1113074d9294d989c784cba5b1ed055644fab07c19b299c9d2febedd510e8ef5"
+    },
+    {
+      "path": "bin/ffmpeg.exe",
+      "sha256": "15a908a1cbacbcdf0463b6094b909c0d776117d91ad9b4aa2724506543bb59b5"
+    },
+    {
+      "path": "bin/ffprobe.exe",
+      "sha256": "4e40b8742d888d2368032b1970dd393dce19a7b893dc5320f64c99a002533da0"
+    },
+    {
+      "path": "bin/avcodec-58.dll",
+      "sha256": "f41dd2559fbe1be81cb21cb4ab51a0340789d4f852ef9f2487a380a0e03c6cf8"
+    },
+    {
+      "path": "bin/avdevice-58.dll",
+      "sha256": "9526d69553766d43e209eaed45a7db9b6acb89a62e39628521c403ea89f12760"
+    },
+    {
+      "path": "bin/avfilter-7.dll",
+      "sha256": "af98ccb5b75c777958d4d41e0193d3b0d62b997625984c589a5051adf1b4960b"
+    },
+    {
+      "path": "bin/avformat-58.dll",
+      "sha256": "b1b9253c338a251036a50caea7bbbcc1ecaffe53fae0534177c74079b4b7719c"
+    },
+    {
+      "path": "bin/avutil-56.dll",
+      "sha256": "54997ee2e402c3c30c476e619920f3981229269e3e7aad224b05881f9d764409"
+    },
+    {
+      "path": "bin/postproc-55.dll",
+      "sha256": "03240c7837b460ab9d57213cf0a3bfc062186af2a80905bfc118a676c74313d8"
+    },
+    {
+      "path": "bin/swresample-3.dll",
+      "sha256": "40b7a2e6014b9a96796123eae3f9a4d2d094e09933d967bd0bd60b59fd0253e4"
+    },
+    {
+      "path": "bin/swscale-5.dll",
+      "sha256": "91396f50e8b3db900e560564df826933ee667e4e9e3a0e0269bbf663a4182ef3"
+    },
+    {
+      "path": "bin/vcruntime140.dll",
+      "sha256": "36848ceed5b52246735c570a51ab3b64c15189e84b0ce90756acd9aa5ecf6c29"
+    },
+    {
+      "path": "bin/vcruntime140_1.dll",
+      "sha256": "a651fb28a2006ade78f57fb7e192c25a6e0ceed1146d3504744d76e65f96493c"
+    }
+  ]
+}
