@@ -70,5 +70,10 @@ jobs:
         run: |
           $notes = @("Includes the latest code of every original project:", "") + (pwsh scripts/check-upstreams.ps1 -Markdown)
           $notes -join "`n" | Set-Content -Encoding utf8 out/notes.md
+          # The installer also goes up under a fixed name, so releases/latest/download/StremioTurbo-x64.exe
+          # (the README's download button) always points at the newest one.
+          $installer = (Get-Item out/StremioTurbo-*-x64.exe).FullName
+          New-Item -ItemType Directory -Force out/latest | Out-Null
+          Copy-Item $installer out/latest/StremioTurbo-x64.exe
           gh release create $env:GITHUB_REF_NAME --title "Stremio Turbo $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file out/notes.md `
-            (Get-Item out/StremioTurbo-*-x64.exe).FullName out/update.json out/descriptor.json out/descriptor.json.sig
+            $installer out/latest/StremioTurbo-x64.exe out/update.json out/descriptor.json out/descriptor.json.sig
