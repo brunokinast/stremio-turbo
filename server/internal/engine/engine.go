@@ -252,7 +252,13 @@ type manager struct {
 	engines   map[string]*engine // keyed by lower-cased infoHash
 	done      chan struct{}      // closed by Close() to stop background goroutines
 	closeOnce sync.Once          // ensures done is closed exactly once (idempotent Close)
-	limitOnce sync.Once          // ensures SetLimitFn goroutine is started at most once
+
+	// Writes that must finish before Close returns (saved metadata), so no
+	// file appears in the cache after shutdown.
+	writesMu     sync.Mutex
+	writesClosed bool
+	writes       sync.WaitGroup
+	limitOnce    sync.Once // ensures SetLimitFn goroutine is started at most once
 
 	// limitMu guards limitFn and softLimitFn below, read once per tick by the
 	// shared background goroutine started by SetLimitFn/SetSoftLimitFn (see
@@ -553,7 +559,8 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	m.scanLeftovers()    // cache folders with no record (earlier runs) get a marker
 	go m.tickDownloads() // resume downloads left incomplete by the last run; drop lapsed temporaries
 	// Data without a saved file list gets one from the swarm (metainfo_fetch.go).
-	go m.fetchMetainfo(m.metainfoTodo())
+	todo := m.metainfoTodo()
+	m.goWrite(func() { m.fetchMetainfo(todo) })
 	return m, nil
 }
 
@@ -721,14 +728,14 @@ func (m *manager) EnsureEngine(infoHash string, opts types.AddOptions) (types.En
 		m.mu.Unlock()
 		m.dials.begin(ih, e.lastAccess)
 		m.trace.begin(ih, e.lastAccess)
-		go func() {
+		m.goWrite(func() {
 			select {
 			case <-t.GotInfo():
 				m.trace.once(ih, "metadata", "", time.Now())
 				m.saveMetainfo(ih, t)
 			case <-t.Closed():
 			}
-		}()
+		})
 
 		// Start from the peers a recent scrape found rather than a cold lookup.
 		m.seedPeerHints(ih, t)
@@ -857,12 +864,32 @@ func (m *manager) AllStats() map[string]*types.Stats {
 func (m *manager) Close() error {
 	m.closeOnce.Do(func() { close(m.done) })
 	m.client.Close()
+	// Closing the client closes every torrent, which ends the waits in goWrite.
+	m.writesMu.Lock()
+	m.writesClosed = true
+	m.writesMu.Unlock()
+	m.writes.Wait()
 	if m.storage != nil {
 		if err := m.storage.Close(); err != nil {
 			logging.For("engine").Error("closing piece storage", "err", err)
 		}
 	}
 	return nil
+}
+
+// goWrite runs f in the background; Close waits for it. After Close, f
+// doesn't run.
+func (m *manager) goWrite(f func()) {
+	m.writesMu.Lock()
+	defer m.writesMu.Unlock()
+	if m.writesClosed {
+		return
+	}
+	m.writes.Add(1)
+	go func() {
+		defer m.writes.Done()
+		f()
+	}()
 }
 
 // StartJanitor launches a background goroutine that evicts least-recently-used
