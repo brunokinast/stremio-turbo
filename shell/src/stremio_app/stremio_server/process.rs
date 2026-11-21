@@ -35,10 +35,30 @@ pub struct ServerProcess {
 }
 
 impl ServerProcess {
+    #[allow(dead_code)] // Stremio's own server; Turbo starts Rivulet detached
     pub fn new(
+        command: impl FnMut() -> Result<Command, String> + Send + 'static,
+        timeout: Duration,
+        notify: impl Fn() + Send + 'static,
+    ) -> Self {
+        Self::spawn_worker(command, timeout, notify, false)
+    }
+
+    /// Like `new`, but a server that started stays running when the shell stops
+    /// it or exits: it decides itself when to exit (Rivulet's owner process).
+    pub fn detached(
+        command: impl FnMut() -> Result<Command, String> + Send + 'static,
+        timeout: Duration,
+        notify: impl Fn() + Send + 'static,
+    ) -> Self {
+        Self::spawn_worker(command, timeout, notify, true)
+    }
+
+    fn spawn_worker(
         mut command: impl FnMut() -> Result<Command, String> + Send + 'static,
         timeout: Duration,
         notify: impl Fn() + Send + 'static,
+        detach: bool,
     ) -> Self {
         let (sender, receiver) = flume::unbounded();
         let (event_sender, events) = flume::unbounded();
@@ -57,6 +77,7 @@ impl ServerProcess {
                             run_server(
                                 &mut command,
                                 timeout,
+                                detach,
                                 &worker_sender,
                                 &receiver,
                                 &logs,
@@ -103,6 +124,7 @@ impl Drop for ServerProcess {
 fn run_server(
     command: &mut Command,
     timeout: Duration,
+    detach: bool,
     sender: &Sender<Message>,
     receiver: &Receiver<Message>,
     logs: &Logs,
@@ -116,12 +138,16 @@ fn run_server(
         .map_err(|error| format!("Cannot execute stremio-runtime: {error}"))?;
 
     #[cfg(windows)]
-    let job = match super::job::ChildJob::assign(&child) {
-        Ok(job) => job,
-        Err(error) => {
-            child.kill().ok();
-            child.wait().ok();
-            return Err(format!("Cannot supervise stremio-runtime: {error}"));
+    let job = if detach {
+        None
+    } else {
+        match super::job::ChildJob::assign(&child) {
+            Ok(job) => Some(job),
+            Err(error) => {
+                child.kill().ok();
+                child.wait().ok();
+                return Err(format!("Cannot supervise stremio-runtime: {error}"));
+            }
         }
     };
 
@@ -174,6 +200,11 @@ fn run_server(
         }
     };
 
+    if detach && result.is_ok() {
+        // Stopped after a successful start: leave the server running. Its
+        // output readers end when it exits.
+        return result;
+    }
     // Finish cleanup before reporting failure, so Retry cannot overlap two servers.
     #[cfg(windows)]
     drop(job);
@@ -258,19 +289,10 @@ mod tests {
         });
     "#;
 
+    // Stremio Turbo doesn't ship stremio-runtime (a renamed Node.js): the test
+    // servers run on the Node.js the build machine has.
     fn runtime() -> PathBuf {
-        if cfg!(windows) {
-            let directory = if cfg!(target_arch = "aarch64") {
-                "bin-arm64"
-            } else {
-                "bin"
-            };
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join(directory)
-                .join("stremio-runtime.exe")
-        } else {
-            PathBuf::from("node")
-        }
+        PathBuf::from("node")
     }
 
     fn script_command(script: &str) -> Command {

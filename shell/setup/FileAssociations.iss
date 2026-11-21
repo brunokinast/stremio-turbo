@@ -1,12 +1,12 @@
 ; Shared by the x64 and ARM64 per-user installers.
-#define AssocCapabilities "Software\Stremio5\Capabilities"
-#define AssocTorrentKey "Stremio5.Torrent"
-#define AssocStremioKey "Stremio5.Url"
-#define AssocMagnetKey "Stremio5.Magnet"
+#define AssocCapabilities "Software\StremioTurbo\Capabilities"
+#define AssocTorrentKey "StremioTurbo.Torrent"
+#define AssocStremioKey "StremioTurbo.Url"
+#define AssocMagnetKey "StremioTurbo.Magnet"
 
 [Registry]
-Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Stremio5"; ValueData: "{#AssocCapabilities}"; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "{#AssocCapabilities}"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Stremio"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "StremioTurbo"; ValueData: "{#AssocCapabilities}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "{#AssocCapabilities}"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Stremio Turbo"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "{#AssocCapabilities}"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Stremio links, torrent files and magnet links"
 Root: HKCU; Subkey: "{#AssocCapabilities}"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\{#MyAppExeName},0"
 Root: HKCU; Subkey: "{#AssocCapabilities}\URLAssociations"; ValueType: string; ValueName: "stremio"; ValueData: "{#AssocStremioKey}"
@@ -95,7 +95,7 @@ begin
   SettingsURL := 'ms-settings:defaultapps';
   GetWindowsVersionEx(Version);
   if (Version.Major >= 10) and (Version.Build >= 22000) then
-    SettingsURL := SettingsURL + '?registeredAppUser=Stremio5';
+    SettingsURL := SettingsURL + '?registeredAppUser=StremioTurbo';
   ShellExecAsOriginalUser('', SettingsURL, '', '', SW_SHOW, ewNoWait, ErrorCode);
 end;
 

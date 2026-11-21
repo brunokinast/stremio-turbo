@@ -64,8 +64,7 @@ impl Updater {
         println!("Using updater endpoint {}", self.endpoint);
         let update_response =
             reqwest::blocking::get(self.endpoint.clone())?.json::<UpdateResponse>()?;
-        let update_descriptor =
-            reqwest::blocking::get(update_response.version_desc)?.json::<Descriptor>()?;
+        let update_descriptor = fetch_signed_descriptor(&update_response.version_desc)?;
 
         if update_response.version != update_descriptor.version {
             return Err(anyhow!("Mismatched update versions"));
@@ -132,5 +131,96 @@ impl Updater {
             file: dest,
         });
         Ok(update)
+    }
+}
+
+/// The public half of the key Stremio Turbo's releases are signed with.
+const UPDATE_PUBLIC_KEY: &str = include_str!("../../update-key.pub");
+
+/// Fetches the update descriptor and its detached signature
+/// (`<descriptor url>.sig`, base64 ed25519 over the descriptor's bytes), and
+/// parses the descriptor only when the signature matches our key. The
+/// descriptor holds the installer's checksum, so this covers the installer.
+fn fetch_signed_descriptor(url: &Url) -> Result<Descriptor, anyhow::Error> {
+    let descriptor = reqwest::blocking::get(url.clone())?
+        .error_for_status()?
+        .bytes()?;
+    let signature_url = Url::parse(&format!("{url}.sig"))?;
+    let signature = reqwest::blocking::get(signature_url)?
+        .error_for_status()?
+        .text()?;
+    verify_descriptor(&descriptor, &signature, UPDATE_PUBLIC_KEY)?;
+    Ok(serde_json::from_slice(&descriptor)?)
+}
+
+fn verify_descriptor(
+    descriptor: &[u8],
+    signature: &str,
+    public_key: &str,
+) -> Result<(), anyhow::Error> {
+    use base64::Engine;
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use std::convert::TryInto;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let key: [u8; 32] = b64
+        .decode(public_key.trim())?
+        .try_into()
+        .map_err(|_| anyhow!("Invalid update public key"))?;
+    let signature: [u8; 64] = b64
+        .decode(signature.trim())?
+        .try_into()
+        .map_err(|_| anyhow!("Invalid update signature"))?;
+    VerifyingKey::from_bytes(&key)?
+        .verify(descriptor, &Signature::from_bytes(&signature))
+        .map_err(|_| anyhow!("Update signature verification failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn keys() -> (SigningKey, String) {
+        let signing = SigningKey::from_bytes(&[7u8; 32]);
+        let public =
+            base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes());
+        (signing, public)
+    }
+
+    fn sign(signing: &SigningKey, data: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(signing.sign(data).to_bytes())
+    }
+
+    #[test]
+    fn signed_descriptor_is_accepted() {
+        let (signing, public) = keys();
+        let descriptor = br#"{"version":"1.0.1","files":[]}"#;
+        assert!(verify_descriptor(descriptor, &sign(&signing, descriptor), &public).is_ok());
+    }
+
+    #[test]
+    fn tampered_descriptor_is_refused() {
+        let (signing, public) = keys();
+        let signature = sign(&signing, br#"{"version":"1.0.1","files":[]}"#);
+        assert!(
+            verify_descriptor(br#"{"version":"9.9.9","files":[]}"#, &signature, &public).is_err()
+        );
+    }
+
+    #[test]
+    fn other_key_is_refused() {
+        let (_, public) = keys();
+        let other = SigningKey::from_bytes(&[9u8; 32]);
+        let descriptor = br#"{"version":"1.0.1","files":[]}"#;
+        assert!(verify_descriptor(descriptor, &sign(&other, descriptor), &public).is_err());
+    }
+
+    #[test]
+    fn shipped_public_key_is_valid() {
+        let key = base64::engine::general_purpose::STANDARD
+            .decode(UPDATE_PUBLIC_KEY.trim())
+            .unwrap();
+        assert_eq!(key.len(), 32);
     }
 }

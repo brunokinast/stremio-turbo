@@ -3,3 +3,7 @@
 *.ico binary
 *.exe binary
 *.dll binary
+
+# Keep the shell's files byte-for-byte as upstream has them (some are CRLF),
+# so upstream merges stay small.
+/shell/** -text

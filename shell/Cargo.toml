@@ -1,6 +1,6 @@
 [package]
-name = "stremio-shell-ng"
-version = "5.0.28"
+name = "stremio-turbo"
+version = "1.0.0"
 edition = "2018"
 
 [dependencies]
@@ -45,6 +45,7 @@ whoami = "1.5"
 anyhow = "1"
 semver = "1"
 sha2 = "0.10"
+ed25519-dalek = "2"
 reqwest = { version = "0.12", features = ["stream", "json", "blocking"] }
 rand = "0.8"
 url = { version = "2", features = ["serde"] }
