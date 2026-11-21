@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1003,5 +1004,28 @@ func TestHLSPersistIdleEvictionDisabled(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "RIVULET_HLS_SESSION_TTL is still the default") {
 		t.Errorf("default-TTL warning logged with idle eviction disabled; logs:\n%s", logs)
+	}
+}
+
+// TestHLSProbeTimeoutNotCached: a probe that times out (a torrent whose index
+// pieces are still arriving) fails the master with ErrHLSDurationUnknown and
+// isn't cached, so the client's retry probes again and gets the session.
+func TestHLSProbeTimeoutNotCached(t *testing.T) {
+	m := newTestPersistManager(t, t.TempDir(), HLSConfig{SegmentTimeout: time.Second}, nil)
+	var probes atomic.Int32
+	m.probe = func(context.Context, string, string, time.Duration) probeMediaResult {
+		if probes.Add(1) == 1 {
+			return probeMediaResult{timedOut: true}
+		}
+		return fakeProbeResult()
+	}
+	if _, err := m.StartHLS("sess-t", testPersistURL, types.HLSSessionOptions{}); !errors.Is(err, types.ErrHLSDurationUnknown) {
+		t.Fatalf("first StartHLS err = %v; want ErrHLSDurationUnknown", err)
+	}
+	if _, err := m.StartHLS("sess-t", testPersistURL, types.HLSSessionOptions{}); err != nil {
+		t.Fatalf("retry StartHLS: %v", err)
+	}
+	if probes.Load() != 2 {
+		t.Fatalf("probes = %d; want 2 (the timeout must not be cached)", probes.Load())
 	}
 }

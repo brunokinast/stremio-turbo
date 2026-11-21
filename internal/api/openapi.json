@@ -3977,7 +3977,7 @@
         "tags": [
           "HLS"
         ],
-        "description": "Segments are transcoded on demand by ffmpeg. Playlists/segments are sent through `http.ServeFile` so Range/conditional requests yield 206/304/416. `/hlsv2/{id}` alone (GET) and any DELETE with two or more segments after `hlsv2` return the plain 404, except `/hlsv2/{id}/prepare` with `RIVULET_HLS_PREPARE` on. Error mapping for non-master files: unknown session or any other failure -> 404; source failure -> 502; timeout -> 504. For `master.m3u8` every failure except an invalid override is a 500 (including a missing/blocked `mediaURL`, an invalid session id and the session limit).",
+        "description": "Segments are transcoded on demand by ffmpeg. Playlists/segments are sent through `http.ServeFile` so Range/conditional requests yield 206/304/416. `/hlsv2/{id}` alone (GET) and any DELETE with two or more segments after `hlsv2` return the plain 404, except `/hlsv2/{id}/prepare` with `RIVULET_HLS_PREPARE` on. Error mapping for non-master files: unknown session or any other failure -> 404; source failure -> 502; timeout -> 504. For `master.m3u8` every failure except an invalid override is a 500 (including a missing/blocked `mediaURL`, an invalid session id and the session limit), except a source that couldn't be probed (no duration; a probe that timed out is retried on the next request): 503.",
         "parameters": [
           {
             "name": "id",
@@ -5631,6 +5631,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorJSON"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenOrigin"
+          }
+        }
+      }
+    },
+    "/subtitleSignature": {
+      "get": {
+        "operationId": "subtitleSignature",
+        "summary": "Embedded-subtitle signature of a video (not computed)",
+        "tags": [
+          "Media"
+        ],
+        "description": "Asked by the web player after a video loads. Its core ignores the value, so the server answers with a null signature without reading the file.",
+        "parameters": [
+          {
+            "name": "videoUrl",
+            "in": "query",
+            "required": false,
+            "description": "Video URL",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "container",
+            "in": "query",
+            "required": false,
+            "description": "Container name from the probe",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Always a null signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "signature": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "videoFpsMilli": {
+                          "type": "integer",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

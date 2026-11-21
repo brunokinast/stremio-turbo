@@ -502,6 +502,9 @@ type probeMediaResult struct {
 	videoEnd    float64
 	isTS        bool
 	seekIndexed bool
+	// timedOut: ffprobe ran out of time (e.g. a torrent whose index pieces
+	// are still arriving), which says nothing about the media itself.
+	timedOut bool
 }
 
 // probeMedia runs a single ffprobe with -show_format -show_streams and returns
@@ -525,7 +528,7 @@ func probeMedia(ctx context.Context, mediaURL, selfBase string, timeout time.Dur
 		"-show_format", "-show_streams",
 		inputURL), ffprobeOutputLimit) // MED-1: bound ffprobe stdout
 	if err != nil {
-		return probeMediaResult{}
+		return probeMediaResult{timedOut: errors.Is(ctx.Err(), context.DeadlineExceeded)}
 	}
 	return parseProbeOutput(out)
 }
@@ -804,6 +807,10 @@ func (m *hlsManager) StartHLSContext(ctx context.Context, id, mediaURL string, o
 				}
 				defer m.g().release()
 				r := m.runProbeCtx(runCtx, mediaURL)
+				if r.timedOut {
+					// Not cached: the next request probes again.
+					return r, nil
+				}
 				ttl := m.cfg.PosProbeTTL
 				if r.duration == 0 {
 					// Negative result: short-circuit future probes.
@@ -864,7 +871,15 @@ func (m *hlsManager) StartHLSContext(ctx context.Context, id, mediaURL string, o
 	subtitleStreams := s.subtitleStreams
 	srcWidth, srcHeight := s.srcWidth, s.srcHeight
 	tc := s.tc
+	duration := s.duration
 	s.mu.RUnlock()
+
+	// Without a duration there's no playlist to serve: say so now instead of
+	// handing out a master whose playlists all fail. The session stays, so a
+	// retry probes again (a timed-out probe isn't cached).
+	if duration == 0 {
+		return "", fmt.Errorf("hls: %w: %s", types.ErrHLSDurationUnknown, id)
+	}
 
 	outW, outH, scaled := computeScaledDims(srcWidth, srcHeight, tc.maxWidth, tc.maxHeight)
 	audioBps, _ := parseDecimalBitrate(m.cfg.AudioBitrate)

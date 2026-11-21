@@ -1756,7 +1756,12 @@ func (s *server) handleHLS(w http.ResponseWriter, r *http.Request, seg []string)
 			BufSize:   q.Get("bufSize"),
 		})
 		if err != nil {
-			http.Error(w, err.Error(), statusFor(err))
+			code := statusFor(err)
+			if errors.Is(err, types.ErrHLSDurationUnknown) {
+				// The source couldn't be probed (yet): retryable.
+				code = http.StatusServiceUnavailable
+			}
+			http.Error(w, err.Error(), code)
 			return
 		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
