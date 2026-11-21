@@ -38,8 +38,7 @@ const (
 	// libtorrent sends everything but MTU probes at its MTU floor, 576-20-8 = 548 bytes or 528 of
 	// payload, until a probe is acked, so a 1 MiB window is ~1990 packets. With 1024 slots, a
 	// sender at the floor ran past the buffer after any loss, and the probes dropped with it made
-	// libtorrent lower its MTU ceiling and stay at the floor (a live peer: 2163 packets dropped in
-	// two minutes; the lab with a 576-byte path: 1935 in 45 s, at 40 % of the full-size rate).
+	// libtorrent lower its MTU ceiling and stay at the floor.
 	reorderBufferMaxSize  = 2016
 	outgoingBufferMaxSize = 1024
 	// Payloads seen before the estimate bounds the window. The first ones are BitTorrent handshake
@@ -347,8 +346,8 @@ func (c *Conn) packetSize() int {
 // The receive window to advertise: the buffer less what is waiting to be read and what is held in
 // the reorder buffer behind a hole, as libtorrent computes it. Counting only the read buffer kept
 // the window fully open while a hole was outstanding (the application drains the read buffer
-// meanwhile), so a fast sender ran past the 1024-packet reorder buffer: one live peer had 793
-// packets dropped that way in two minutes, each to be resent.
+// meanwhile), so a fast sender ran past the reorder buffer and every packet it dropped had to be
+// resent.
 //
 // It is also bounded by the reorder slots left, at the sender's recent payload size, so a sender
 // with packets too small for the byte window to fit the reorder buffer is slowed down instead of
