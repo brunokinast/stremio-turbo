@@ -101,11 +101,12 @@ def save_png(img, rel, size):
 
 
 def save_ico(img, rel, mode=None):
+    # Each size is scaled from the master (the app icon as it scanned clean with Windows
+    # Defender; its machine-learning detection reacts even to how an icon is encoded).
     out = ROOT / rel
-    small = img.resize((256, 256), Image.LANCZOS)
     if mode:
-        small = small.convert(mode)
-    small.save(out, sizes=ICO_SIZES)
+        img = img.convert(mode)
+    img.save(out, sizes=ICO_SIZES)
     print('wrote', rel)
 
 
