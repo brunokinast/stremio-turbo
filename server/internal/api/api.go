@@ -664,6 +664,11 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		first = path[:firstSep]
 	}
 
+	if first == "web" && s.cfg.WebUIDir != "" {
+		s.handleWebUI(w, r)
+		return
+	}
+
 	// infoHash-scoped routes: always need at least seg[1].
 	// Use isInfoHash instead of regexp to avoid regex overhead on every request.
 	if isInfoHash(first) {
@@ -1583,6 +1588,21 @@ func (s *server) handleLanding(w http.ResponseWriter, r *http.Request) {
 	q.Set("streamingServerUrl", base)
 	loc.RawQuery = q.Encode()
 	http.Redirect(w, r, loc.String(), http.StatusTemporaryRedirect)
+}
+
+// handleWebUI serves the bundled web UI (cfg.WebUIDir) at /web/. index.html
+// and the service worker are revalidated on every load, so an update shows at
+// once; the other files have content-hashed paths.
+func (s *server) handleWebUI(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/web" {
+		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/web/")
+	if name == "" || name == "index.html" || name == "service-worker.js" || name == "manifest.json" {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	http.StripPrefix("/web", http.FileServer(http.Dir(s.cfg.WebUIDir))).ServeHTTP(w, r)
 }
 
 // ---- media helpers --------------------------------------------------------

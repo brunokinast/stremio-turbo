@@ -28,6 +28,10 @@ type Config struct {
 	StorageMmap bool
 	ListenPort  int    // BitTorrent peer listen port (0 = random)
 	WebUI       string // redirect target for "GET /" (e.g. https://web.stremio.com/)
+	// WebUIDir is a built stremio-web folder served at /web/
+	// (RIVULET_WEBUI_DIR), so an app can bundle its UI with the server.
+	// Empty: no /web/ route.
+	WebUIDir string
 	// PublicURL is this server's externally reachable base URL behind a
 	// reverse proxy (RIVULET_PUBLIC_URL), e.g. https://stremio.example.com.
 	// When set it is used verbatim for the GET / landing redirect and the

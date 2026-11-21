@@ -142,6 +142,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		StorageMmap:         strings.EqualFold(strings.TrimSpace(getenv(lookup, "TORRENT_STORAGE_DEFAULT_FILE_IO", "")), "mmap"), // default classic pread/pwrite; "mmap" opts in
 		ListenPort:          envInt(lookup, "BT_LISTEN_PORT", 0),
 		WebUI:               getenv(lookup, "WEB_UI_LOCATION", "https://web.stremio.com/"),
+		WebUIDir:            getenv(lookup, "RIVULET_WEBUI_DIR", ""),
 		PublicURL:           publicURL,
 		Version:             version,
 		TrackersMax:         envInt(lookup, "RIVULET_TRACKERS_MAX", 25),
