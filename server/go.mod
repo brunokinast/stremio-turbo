@@ -113,6 +113,6 @@ require (
 	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
 
-replace github.com/anacrolix/torrent => ../anacrolix-torrent
+replace github.com/anacrolix/torrent => ../deps/torrent
 
-replace github.com/anacrolix/go-utp => ../go-utp
+replace github.com/anacrolix/go-utp => ../deps/go-utp
