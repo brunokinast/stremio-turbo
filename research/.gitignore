@@ -1,0 +1,7 @@
+# Large or local-only lab files
+data/
+*.exe
+*.part
+lab/transport/dl/
+lab/testbin/
+*.torrent
