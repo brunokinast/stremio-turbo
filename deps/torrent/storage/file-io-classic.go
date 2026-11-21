@@ -72,9 +72,12 @@ func (me *classicFileIo) rename(from, to string) error {
 		return err
 	}
 	err := me.closeWriterLocked(from)
-	err = errors.Join(err, me.closeWriterLocked(to))
-	err = errors.Join(err, os.Rename(from, to))
-	return err
+	if renameErr := renameNoReplace(from, to); renameErr != nil {
+		// Nothing was moved onto to, so its cached writer is still good, and pieces could be
+		// writing through it right now.
+		return errors.Join(err, renameErr)
+	}
+	return errors.Join(err, me.closeWriterLocked(to))
 }
 
 // Borrows the cached handle for name, or reports that there is none. Fails once closed.

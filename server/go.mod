@@ -8,7 +8,7 @@ go 1.27.4
 
 require (
 	github.com/anacrolix/dht/v2 v2.24.1-0.20260908044610-a669bdd3bdcf
-	github.com/anacrolix/generics v0.2.0
+	github.com/anacrolix/generics v0.2.1-0.20261118011427-05a545e5bbda
 	github.com/anacrolix/go-utp v0.0.0-20260908033909-9f1664acf866
 	github.com/anacrolix/torrent v1.61.1-0.20261105061516-8e67d734514c
 	github.com/bodgit/sevenzip v1.6.5
@@ -32,9 +32,9 @@ require (
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.11.0 // indirect
+	github.com/anacrolix/missinggo/v2 v2.12.0 // indirect
 	github.com/anacrolix/mmsg v1.1.1 // indirect
-	github.com/anacrolix/multiless v0.4.0 // indirect
+	github.com/anacrolix/multiless v0.4.1-0.20261117234141-fbc4e053da19 // indirect
 	github.com/anacrolix/sync v0.6.0 // indirect
 	github.com/anacrolix/upnp v0.1.4 // indirect
 	github.com/andybalholm/brotli v1.2.7 // indirect

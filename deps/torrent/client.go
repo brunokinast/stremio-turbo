@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"expvar"
 	"fmt"
 	"io"
 	"log/slog"
@@ -102,6 +101,8 @@ type Client struct {
 
 	acceptLimiter map[ipStr]int
 	numHalfOpen   int
+	// Accepted connections that are still in the handshake phase.
+	pendingIncomingHandshakes pendingIncomingHandshakes
 
 	websocketTrackers                websocketTrackers
 	regularTrackerAnnounceDispatcher regularTrackerAnnounceDispatcher
@@ -724,9 +725,15 @@ func (cl *Client) acceptConnections(l Listener) {
 					return log.Fmsg("rejecting accepted conn: %v", reject)
 				})
 				conn.Close()
-			} else {
-				go cl.incomingConnection(conn)
+				return
 			}
+			releaseHandshake, ok := cl.reservePendingIncomingHandshake(conn.RemoteAddr())
+			if !ok {
+				torrent.Add("accepted connections dropped at pending handshake limit", 1)
+				conn.Close()
+				return
+			}
+			go cl.incomingConnection(conn, releaseHandshake)
 			cl.logger.LazyLog(log.Debug, func() log.Msg {
 				return log.Fmsg("accepted %q connection at %q from %q",
 					l.Addr().Network(),
@@ -746,7 +753,9 @@ func regularNetConnPeerConnConnString(nc net.Conn) string {
 	return fmt.Sprintf("%s-%s", nc.LocalAddr(), nc.RemoteAddr())
 }
 
-func (cl *Client) incomingConnection(nc net.Conn) {
+// releaseHandshake is called when the handshake phase ends.
+func (cl *Client) incomingConnection(nc net.Conn, releaseHandshake func()) {
+	defer releaseHandshake()
 	defer nc.Close()
 	if tc, ok := nc.(*net.TCPConn); ok {
 		tc.SetLinger(0)
@@ -762,7 +771,7 @@ func (cl *Client) incomingConnection(nc net.Conn) {
 			connString:      regularNetConnPeerConnConnString(nc),
 		})
 	c.Discovery = PeerSourceIncoming
-	cl.runReceivedConn(c)
+	cl.runReceivedConn(c, releaseHandshake)
 
 	cl.lock()
 	c.close()
@@ -1240,7 +1249,8 @@ func (cl *Client) receiveHandshakes(c *PeerConn) (t *Torrent, err error) {
 	return
 }
 
-var successfulPeerWireProtocolHandshakePeerReservedBytes expvar.Map
+// Keyed by the peer's reserved bytes, which it can choose freely.
+var successfulPeerWireProtocolHandshakePeerReservedBytes boundedExpvarMap
 
 func init() {
 	torrent.Set(
@@ -1253,8 +1263,8 @@ func (cl *Client) connBtHandshake(ctx context.Context, c *PeerConn, ih *metainfo
 	if err != nil {
 		return
 	}
-	successfulPeerWireProtocolHandshakePeerReservedBytes.Add(
-		hex.EncodeToString(res.PeerExtensionBits[:]), 1)
+	successfulPeerWireProtocolHandshakePeerReservedBytes.addSafeKey(
+		hex.EncodeToString(res.PeerExtensionBits[:]))
 	ret = res.Hash
 	c.PeerExtensionBytes = res.PeerExtensionBits
 	c.PeerID = res.PeerID
@@ -1265,12 +1275,13 @@ func (cl *Client) connBtHandshake(ctx context.Context, c *PeerConn, ih *metainfo
 	return
 }
 
-func (cl *Client) runReceivedConn(c *PeerConn) {
+func (cl *Client) runReceivedConn(c *PeerConn, releaseHandshake func()) {
 	err := c.conn.SetDeadline(time.Now().Add(cl.config.HandshakesTimeout))
 	if err != nil {
 		panic(err)
 	}
 	t, err := cl.receiveHandshakes(c)
+	releaseHandshake()
 	if err != nil {
 		cl.logger.LazyLog(log.Debug, func() log.Msg {
 			return log.Fmsg(
@@ -1280,9 +1291,11 @@ func (cl *Client) runReceivedConn(c *PeerConn) {
 			)
 		})
 		torrent.Add("error receiving handshake", 1)
-		cl.lock()
-		cl.onBadAccept(c.RemoteAddr)
-		cl.unlock()
+		if acceptedConnSourceVerified(c) {
+			cl.lock()
+			cl.onBadAccept(c.RemoteAddr)
+			cl.unlock()
+		}
 		return
 	}
 	if t == nil {
@@ -1595,6 +1608,10 @@ func (cl *Client) newTorrentOpt(opts AddTorrentOpts) (t *Torrent) {
 		ignoreUnverifiedPieceCompletion: opts.IgnoreUnverifiedPieceCompletion,
 		initialPieceCheckDisabled:       opts.DisableInitialPieceCheck,
 		deferStorageOpen:                opts.DeferStorageOpen,
+		dataUploadDisallowed:            opts.DisallowDataUpload,
+	}
+	if opts.DisallowDataDownload {
+		t.dataDownloadDisallowed.Set()
 	}
 	g.MakeMap(&t.webSeeds)
 	t.closedCtx, t.closedCtxCancel = context.WithCancelCause(context.Background())

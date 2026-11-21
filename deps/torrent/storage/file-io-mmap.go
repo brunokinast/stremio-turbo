@@ -81,7 +81,7 @@ func (me *mmapFileIo) rename(from, to string) (err error) {
 	}
 	me.closeName(from)
 	me.closeName(to)
-	return os.Rename(from, to)
+	return renameNoReplace(from, to)
 }
 
 func (me *mmapFileIo) closeName(name string) {
