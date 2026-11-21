@@ -8,7 +8,7 @@
 //   details page a continue-watching tile opens) and presses its Resume button (smart play's
 //   autoplay of the remembered quality).
 // The shell must have been started with
-//   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222
+//   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 (or set CDP_PORT)
 // Opens the episode, clicks the first stream whose text contains every '|'-separated part of the
 // identifier, mutes with the player's M shortcut (checked against the mute button's title), plays
 // for secs counted from the click, then leaves the player so playback stops. Prints a JSON log.
@@ -34,14 +34,14 @@ const note = (name, extra = {}) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Every locale's "unmute" label: once muted, the mute button's title is one of these.
-const trDir = path.join(import.meta.dirname, '..', '..', '..', 'stremio-web', 'node_modules', 'stremio-translations');
+const trDir = path.join(import.meta.dirname, '..', '..', '..', 'web', 'node_modules', 'stremio-translations');
 const locales = fs.readdirSync(trDir).filter((f) => f.endsWith('.json'))
     .map((f) => JSON.parse(fs.readFileSync(path.join(trDir, f), 'utf8')));
 const unmuteLabels = new Set(locales.map((l) => l.PLAYER_UNMUTE).filter(Boolean));
 const volumeLabels = [...new Set([...unmuteLabels, ...locales.map((l) => l.PLAYER_MUTE).filter(Boolean)])];
 
-const targets = await (await fetch('http://127.0.0.1:9222/json')).json();
-const page = targets.find((t) => t.type === 'page' && t.url.startsWith('http://127.0.0.1:8080'));
+const targets = await (await fetch(`http://127.0.0.1:${process.env.CDP_PORT || 9222}/json`)).json();
+const page = targets.find((t) => t.type === 'page' && (t.url.startsWith('http://127.0.0.1:8080') || t.url.startsWith('http://127.0.0.1:11470/web/')));
 if (!page) throw new Error('no web UI page on the DevTools port: ' + targets.map((t) => t.url).join(', '));
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
