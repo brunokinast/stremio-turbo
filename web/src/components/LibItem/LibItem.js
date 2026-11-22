@@ -9,7 +9,7 @@ const { useCore } = require('stremio/core');
 const { default: getMetaDetailsHref } = require('stremio/common/getMetaDetailsHref');
 const MetaItem = require('stremio/components/MetaItem');
 const { t } = require('i18next');
-const { routesRegexp } = require('stremio/common');
+const routesRegexp = require('stremio/common/routesRegexp');
 const { requestAutoplay } = require('stremio/smartPlay/useSmartPlay');
 
 const LibItem = ({ _id, removable, notifications, watched, detailsVideosFirst, ...props }) => {
