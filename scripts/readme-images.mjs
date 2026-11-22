@@ -1,0 +1,371 @@
+// README images (docs/readme/): rerun after UI changes or a new benchmark.
+//
+//   node scripts/readme-images.mjs bench <healthy bench dir> <thin bench dir>
+//       Summarises two research/lab/bench/compare.py runs into docs/readme/bench.json: medians
+//       and ranges only, no infohashes, addresses or release names.
+//   node scripts/readme-images.mjs capture
+//       Screenshots of the installed app over its DevTools port, into out/readme/ (ignored). Start
+//       the app with WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 first.
+//   node scripts/readme-images.mjs compose
+//       Renders the banner, the download button and the benchmark chart (light and dark) with
+//       headless Edge, from bench.json and the captures.
+//
+// No dependencies: Node 24 (fetch, WebSocket) and the Edge that ships with Windows.
+import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const ROOT = path.join(import.meta.dirname, '..');
+const DOCS = path.join(ROOT, 'docs', 'readme');
+const RAW = path.join(ROOT, 'out', 'readme');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---- DevTools protocol --------------------------------------------------------------------------
+
+async function cdp(wsUrl) {
+    const ws = new WebSocket(wsUrl);
+    await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+    let nextId = 0;
+    const pending = new Map();
+    const listeners = new Set();
+    ws.onmessage = (m) => {
+        const msg = JSON.parse(m.data);
+        if (msg.id && pending.has(msg.id)) {
+            const { resolve, reject } = pending.get(msg.id);
+            pending.delete(msg.id);
+            msg.error ? reject(new Error(`${msg.error.message}`)) : resolve(msg.result);
+        } else if (msg.method) {
+            for (const l of listeners) l(msg);
+        }
+    };
+    const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+        const id = ++nextId;
+        pending.set(id, { resolve, reject });
+        ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+    });
+    return { send, on: (f) => listeners.add(f), close: () => ws.close() };
+}
+
+// Headless Edge, its own throwaway profile, DevTools on a loopback port.
+async function edge() {
+    const exe = ['ProgramFiles(x86)', 'ProgramFiles'].map((v) => process.env[v] && path.join(process.env[v], 'Microsoft', 'Edge', 'Application', 'msedge.exe'))
+        .find((p) => p && fs.existsSync(p));
+    if (!exe) throw new Error('Microsoft Edge not found');
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'readme-edge-'));
+    const port = 9333;
+    const proc = spawn(exe, ['--headless=new', `--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1',
+        `--user-data-dir=${profile}`, '--no-first-run', '--disable-extensions', '--hide-scrollbars', 'about:blank'], { stdio: 'ignore' });
+    let ver;
+    for (let i = 0; i < 50 && !ver; i++) {
+        await sleep(200);
+        ver = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json()).catch(() => null);
+    }
+    if (!ver) throw new Error('Edge DevTools did not come up');
+    const c = await cdp(ver.webSocketDebuggerUrl);
+    return {
+        // Renders HTML at a CSS size and saves a PNG at 2x, with a transparent background unless
+        // the page paints one. A null height fits the page's content.
+        async render(html, width, height, out) {
+            const { targetId } = await c.send('Target.createTarget', { url: 'about:blank' });
+            const { sessionId } = await c.send('Target.attachToTarget', { targetId, flatten: true });
+            const s = (m, p) => c.send(m, p, sessionId);
+            await s('Page.enable');
+            await s('Emulation.setDeviceMetricsOverride', { width, height: height ?? 2000, deviceScaleFactor: 2, mobile: false });
+            await s('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
+            const { frameTree } = await s('Page.getFrameTree');
+            await s('Page.setDocumentContent', { frameId: frameTree.frame.id, html });
+            await s('Runtime.evaluate', { expression: 'document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))))', awaitPromise: true });
+            await sleep(150);
+            if (height == null) {
+                height = Math.ceil((await s('Runtime.evaluate', { expression: 'document.body.getBoundingClientRect().height', returnByValue: true })).result.value);
+                await s('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
+                await sleep(100);
+            }
+            const { data } = await s('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width, height, scale: 1 }, captureBeyondViewport: false });
+            fs.writeFileSync(out, Buffer.from(data, 'base64'));
+            await c.send('Target.closeTarget', { targetId });
+            console.log('wrote', path.relative(ROOT, out));
+        },
+        async close() {
+            c.close();
+            proc.kill();
+            await sleep(500);
+            fs.rmSync(profile, { recursive: true, force: true });
+        },
+    };
+}
+
+// ---- bench: compare.py results -> docs/readme/bench.json ----------------------------------------
+
+function bench(healthyDir, thinDir) {
+    const summarise = (dir) => {
+        const runs = JSON.parse(fs.readFileSync(path.join(dir, 'results.json'), 'utf8')).runs;
+        const out = {};
+        for (const name of [...new Set(runs.map((r) => r.client))]) {
+            const rs = runs.filter((r) => r.client === name);
+            const stat = (k) => {
+                const v = rs.map((r) => r[k]).filter((x) => x != null).sort((a, b) => a - b);
+                if (!v.length) return null;
+                const mid = v.length / 2;
+                const median = v.length % 2 ? v[Math.floor(mid)] : (v[mid - 1] + v[mid]) / 2;
+                return { median: +median.toFixed(2), min: v[0], max: v.at(-1), n: v.length };
+            };
+            out[name] = {
+                runs: rs.length,
+                firstFrameS: stat('firstFrameS'), started: rs.filter((r) => r.firstFrameS != null).length,
+                mbps: stat('mbps'), peersMax: stat('peersMax'), stalls: stat('stalls'),
+            };
+        }
+        return out;
+    };
+    const json = { date: new Date().toISOString().slice(0, 10), secs: 60, healthy: summarise(healthyDir), thin: summarise(thinDir) };
+    fs.mkdirSync(DOCS, { recursive: true });
+    fs.writeFileSync(path.join(DOCS, 'bench.json'), JSON.stringify(json, null, 1) + '\n');
+    console.log(JSON.stringify(json, null, 1));
+}
+
+// ---- capture: the installed app over its DevTools port ------------------------------------------
+
+// Hidden before anything is captured: release names (the expanded source lists and the full
+// stream list) are blurred, the account menu never opens.
+const PRIVACY_CSS = `[class*="sources"], [class*="streams-list"], [class*="stream-container"] { filter: blur(7px) !important; }`;
+const FFMPEG = path.join(process.env.LOCALAPPDATA, 'Programs', 'Stremio Turbo', 'ffmpeg.exe');
+
+async function app() {
+    const port = process.env.CDP_PORT || 9222;
+    const targets = await fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()).catch(() => null);
+    const page = targets?.find((t) => t.type === 'page' && t.url.startsWith('http://127.0.0.1:11470/web/'));
+    if (!page) throw new Error(`no app page on DevTools port ${port}: start the app with WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=${port}`);
+    const c = await cdp(page.webSocketDebuggerUrl);
+    const evaluate = async (expression) => (await c.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result?.value;
+    const privacy = () => evaluate(`(() => { let s = document.getElementById('readme-privacy'); if (!s) { s = document.createElement('style'); s.id = 'readme-privacy'; document.head.append(s); } s.textContent = ${JSON.stringify(PRIVACY_CSS)}; })()`);
+    const waitFor = async (expr, secs = 60) => {
+        for (let i = 0; i < secs * 4; i++) {
+            if (await evaluate(expr)) return true;
+            await sleep(250);
+        }
+        throw new Error('timed out waiting for ' + expr.slice(0, 120));
+    };
+    const go = async (hash) => {
+        await evaluate(`location.hash = ${JSON.stringify(hash)}`);
+        await privacy();
+    };
+    // Mutes the player the moment it can be (its mute button enables with the first frame) and
+    // checks it took; throws, leaving the player, if it didn't. Never record with sound.
+    const trDir = [ROOT, path.join(ROOT, '..', 'stremio-turbo')].map((r) => path.join(r, 'web', 'node_modules', 'stremio-translations')).find((d) => fs.existsSync(d));
+    const locales = fs.readdirSync(trDir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(trDir, f), 'utf8')));
+    const unmute = locales.map((l) => l.PLAYER_UNMUTE).filter(Boolean);
+    const labels = [...new Set([...unmute, ...locales.map((l) => l.PLAYER_MUTE).filter(Boolean)])];
+    const muteTitle = () => evaluate(`(() => { const b = [...document.querySelectorAll('[class*="control-bar-button"]')].find((b) => ${JSON.stringify(labels)}.includes(b.title));
+        return b && !b.className.includes('disabled') ? b.title : null; })()`);
+    const mute = async (secs = 60) => {
+        const end = Date.now() + secs * 1000;
+        while (Date.now() < end) {
+            await sleep(100);
+            const title = await muteTitle();
+            if (title === null) continue;
+            if (unmute.includes(title)) return;
+            for (const type of ['keyDown', 'keyUp']) await c.send('Input.dispatchKeyEvent', { type, key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77 });
+            await sleep(250);
+            if (unmute.includes(await muteTitle())) return;
+        }
+        await evaluate('history.back()');
+        throw new Error('could not mute the player: left it');
+    };
+    return { c, evaluate, privacy, waitFor, go, mute };
+}
+
+// The app window's rectangle on screen, in physical pixels.
+function windowRect() {
+    const ps = `Add-Type -Name W -Namespace R -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r); [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(System.IntPtr h, int a, out RECT r, int s); public struct RECT { public int L, T, R, B; }';
+        $h = (Get-Process stremio-turbo | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1).MainWindowHandle
+        $r = New-Object R.W+RECT; [void][R.W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); "$($r.L) $($r.T) $($r.R) $($r.B)"`;
+    const out = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' }).stdout.trim();
+    const [l, t, r, b] = out.split(/\s+/).map(Number);
+    if (![l, t, r, b].every(Number.isFinite)) throw new Error('app window not found: ' + out);
+    return { x: l, y: t, w: (r - l) & ~1, h: (b - t) & ~1 };
+}
+
+// Records the app window's area of the screen while action runs (the player is mpv's own window
+// behind the web view, so the DevTools screencast would miss the picture), then makes a GIF with
+// Evenly's recipe: 12 fps, a 96-colour palette from the moving parts, Bayer dithering.
+async function record(name, secs, action, width = 640) {
+    fs.mkdirSync(RAW, { recursive: true });
+    const r = windowRect();
+    const mp4 = path.join(RAW, `${name}.mp4`);
+    const ff = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'gdigrab', '-framerate', '24', '-offset_x', r.x, '-offset_y', r.y,
+        '-video_size', `${r.w}x${r.h}`, '-draw_mouse', '0', '-i', 'desktop', '-t', String(secs), '-pix_fmt', 'yuv420p', mp4].map(String), { stdio: ['pipe', 'inherit', 'inherit'] });
+    const done = new Promise((res) => ff.on('exit', res));
+    await sleep(400);
+    await action();
+    await done;
+    const gif = path.join(DOCS, `${name}.gif`);
+    const vf = `fps=12,scale=${width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
+    spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', mp4, '-vf', vf, gif], { stdio: 'inherit' });
+    console.log('wrote', path.relative(ROOT, gif), `${Math.round(fs.statSync(gif).size / 1024)} KB`);
+}
+
+async function capture(which) {
+    fs.mkdirSync(RAW, { recursive: true });
+    const a = await app();
+    const route = process.env.README_ROUTE; // an episode's details page, e.g. #/detail/series/<id>/<id>%3A<season>%3A<episode>
+    if (!route) throw new Error('set README_ROUTE to an episode details route with 4K sources');
+    const rows = `!!document.querySelector('[class*="quality-rows"] [class*="play-"]')`;
+    const leave = async () => { await a.evaluate('history.back()'); await sleep(2500); };
+    const steps = {
+        async banner() {
+            await a.go('#/');
+            await sleep(1500);
+            await a.go(route);
+            await a.waitFor(rows);
+            await sleep(3000);
+            const { data } = await a.c.send('Page.captureScreenshot', { format: 'png' });
+            fs.writeFileSync(path.join(RAW, 'banner-app.png'), Buffer.from(data, 'base64'));
+            console.log('wrote out/readme/banner-app.png');
+        },
+        async race() {
+            await a.go('#/');
+            await sleep(1500);
+            await a.go(route);
+            await a.waitFor(rows);
+            await sleep(2500);
+            await record('feature-race', 12, async () => {
+                await sleep(800);
+                await a.evaluate(`document.querySelector('[class*="quality-rows"] [class*="play-"]').click()`);
+                await a.mute();
+            });
+            await leave();
+        },
+    };
+    for (const name of which.length ? which : Object.keys(steps)) {
+        if (!steps[name]) throw new Error('unknown capture: ' + name);
+        await steps[name]();
+    }
+    a.c.close();
+}
+
+// ---- compose ------------------------------------------------------------------------------------
+
+const BRAND = { top: '#8460ff', bottom: '#2054e0', badge: '#6b5cf0' };
+const FONT = `'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif`;
+// Chart colours: Turbo carries the emphasis, the other clients one neutral. Checked with the
+// dataviz validator: both marks >= 3:1 against GitHub's light and dark page backgrounds.
+const THEMES = {
+    light: { surface: '#ffffff', ink: '#1f2328', muted: '#59636e', faint: '#d1d9e0', turbo: '#6b5cf0', other: '#8c959f' },
+    dark: { surface: '#0d1117', ink: '#f0f6fc', muted: '#9198a1', faint: '#3d444d', turbo: '#8476f7', other: '#6e7681' },
+};
+const CLIENTS = [['official', 'Official Stremio'], ['turbo', 'Stremio Turbo'], ['qbt', 'qBittorrent*']];
+
+function chartHtml(b, theme) {
+    const t = THEMES[theme];
+    const panel = (title, unit, key, fmt, noValue) => {
+        const groups = [['healthy', `Healthy swarm · about 95 seeders`], ['thin', `Thin swarm · about 14 seeders`]];
+        const all = groups.flatMap(([g]) => CLIENTS.map(([c]) => b[g][c]?.[key]?.median)).filter((v) => v != null);
+        const max = Math.max(...all);
+        const rows = groups.map(([g, label]) => `
+            <div class="group">${label}</div>
+            ${CLIENTS.map(([c, name]) => {
+                const s = b[g][c];
+                const v = s?.[key]?.median;
+                const missing = v == null || (key === 'firstFrameS' && s.started < s.runs / 2);
+                const f = missing ? 0 : Math.max(0.005, v / max);
+                return `<div class="row"><div class="name${c === 'turbo' ? ' strong' : ''}">${name}</div>
+                    <div class="track">${f ? `<div class="bar" style="width:calc((100% - 96px) * ${f.toFixed(4)});background:${c === 'turbo' ? t.turbo : t.other}"></div>` : ''}
+                    <div class="val${c === 'turbo' ? ' strong' : ''}">${missing ? noValue : fmt(v)}</div></div></div>`;
+            }).join('')}`).join('');
+        return `<div class="panel"><div class="title">${title}</div><div class="unit">${unit}</div>${rows}</div>`;
+    };
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+        * { box-sizing: border-box; margin: 0; }
+        body { width: 800px; background: ${t.surface}; color: ${t.ink}; font: 15px/1.35 ${FONT}; padding: 28px 32px; }
+        .panels { display: flex; gap: 48px; }
+        .panel { flex: 1; }
+        .title { font-size: 19px; font-weight: 600; }
+        .unit { color: ${t.muted}; margin-bottom: 14px; }
+        .group { color: ${t.muted}; font-size: 13px; margin: 14px 0 6px; padding-bottom: 4px; border-bottom: 1px solid ${t.faint}; }
+        .row { display: flex; align-items: center; height: 34px; }
+        .name { width: 128px; flex: none; }
+        .strong { font-weight: 600; }
+        .track { flex: 1; display: flex; align-items: center; gap: 8px; height: 100%; }
+        .bar { height: 20px; border-radius: 0 4px 4px 0; flex: none; }
+        .val { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .foot { color: ${t.muted}; font-size: 12.5px; margin-top: 22px; }
+    </style></head><body>
+        <div class="panels">
+            ${panel('Click → first frame', 'seconds, median · lower is better', 'firstFrameS', (v) => `${v.toFixed(1)} s`, 'no frame in 60 s')}
+            ${panel('Download speed', 'MB/s over the first minute, median', 'mbps', (v) => v.toFixed(1), '—')}
+        </div>
+        <div class="foot">A fresh 4K HDR episode, nothing cached, ${b.healthy.turbo?.runs ?? 3} runs per client in rotating order (${b.date}).
+            * qBittorrent has no player: its time is until the file's first and last pieces are on disk.</div>
+    </body></html>`;
+}
+
+function buttonHtml() {
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+        * { margin: 0; box-sizing: border-box; }
+        body { width: 300px; height: 64px; display: flex; }
+        a { flex: 1; margin: 4px; border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 12px;
+            background: linear-gradient(135deg, ${BRAND.top}, ${BRAND.bottom}); color: #fff; font: 600 19px ${FONT};
+            box-shadow: 0 2px 8px rgba(40, 30, 120, .35); text-decoration: none; }
+        svg { width: 22px; height: 22px; }
+    </style></head><body><a>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+        Download for Windows</a></body></html>`;
+}
+
+// The banner: the brand on the left, a framed app window on the right (the window frame is CSS,
+// the content is a capture).
+function bannerHtml(appPng, iconPng) {
+    const img = (p) => `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+        * { margin: 0; box-sizing: border-box; }
+        body { width: 1280px; height: 640px; overflow: hidden; font-family: ${FONT}; color: #fff;
+            background: radial-gradient(120% 140% at 0% 0%, #3a2a9e 0%, #1b1550 45%, #0c0b11 100%); position: relative; }
+        .glow { position: absolute; right: -120px; top: -160px; width: 760px; height: 760px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(132,96,255,.45), rgba(32,84,224,0) 65%); }
+        .left { position: absolute; left: 72px; top: 0; bottom: 0; width: 430px; display: flex; flex-direction: column; justify-content: center; }
+        .mark { width: 84px; height: 84px; margin-bottom: 26px; }
+        h1 { font-size: 58px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; }
+        h1 span { background: linear-gradient(90deg, #b7a6ff, #6f9bff); -webkit-background-clip: text; color: transparent; }
+        p { margin-top: 20px; font-size: 25px; line-height: 1.35; color: #d9d4ff; }
+        .win { position: absolute; left: 540px; top: 92px; width: 900px; border-radius: 12px; overflow: hidden;
+            box-shadow: 0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08); background: #0c0b11; }
+        .bar { height: 34px; background: #17151f; display: flex; align-items: center; padding: 0 14px; gap: 10px; font-size: 13px; color: #b9b5c9; }
+        .bar img { width: 16px; height: 16px; }
+        .bar .ctl { margin-left: auto; letter-spacing: 18px; color: #8d8a99; }
+        .win > img { display: block; width: 100%; }
+    </style></head><body><div class="glow"></div>
+        <div class="left">
+            <img class="mark" src="${img(iconPng)}">
+            <h1>Stremio <span>Turbo</span></h1>
+            <p>Stremio for Windows, rebuilt for speed. 4K HDR starts in seconds and doesn't buffer.</p>
+        </div>
+        <div class="win"><div class="bar"><img src="${img(iconPng)}">Stremio Turbo<span class="ctl">–▢✕</span></div><img src="${img(appPng)}"></div>
+    </body></html>`;
+}
+
+async function compose() {
+    fs.mkdirSync(DOCS, { recursive: true });
+    const b = JSON.parse(fs.readFileSync(path.join(DOCS, 'bench.json'), 'utf8'));
+    const e = await edge();
+    try {
+        for (const theme of ['light', 'dark']) await e.render(chartHtml(b, theme), 800, null, path.join(DOCS, `bench-${theme}.png`));
+        await e.render(buttonHtml(), 300, 64, path.join(DOCS, 'button-download.png'));
+        const app = path.join(RAW, 'banner-app.png');
+        const icon = path.join(ROOT, 'shell', 'images', 'stremio.png');
+        if (fs.existsSync(app)) await e.render(bannerHtml(app, fs.existsSync(icon) ? icon : app), 1280, 640, path.join(DOCS, 'banner.png'));
+        else console.log('skipped banner.png: run capture first');
+    } finally {
+        await e.close();
+    }
+}
+
+const [mode, ...args] = process.argv.slice(2);
+if (mode === 'bench' && args.length === 2) bench(...args);
+else if (mode === 'compose') await compose();
+else if (mode === 'capture') await capture(args);
+else {
+    console.error('usage: node scripts/readme-images.mjs bench <healthy dir> <thin dir> | capture | compose');
+    process.exit(2);
+}

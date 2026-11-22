@@ -1,0 +1,166 @@
+{
+ "date": "2026-11-22",
+ "secs": 60,
+ "healthy": {
+  "official": {
+   "runs": 3,
+   "firstFrameS": {
+    "median": 4.33,
+    "min": 3.642,
+    "max": 11.835,
+    "n": 3
+   },
+   "started": 3,
+   "mbps": {
+    "median": 3.33,
+    "min": 3.07,
+    "max": 4.26,
+    "n": 3
+   },
+   "peersMax": {
+    "median": 15,
+    "min": 14,
+    "max": 15,
+    "n": 3
+   },
+   "stalls": {
+    "median": 2,
+    "min": 1,
+    "max": 5,
+    "n": 3
+   }
+  },
+  "turbo": {
+   "runs": 3,
+   "firstFrameS": {
+    "median": 4.17,
+    "min": 3.054,
+    "max": 4.376,
+    "n": 3
+   },
+   "started": 3,
+   "mbps": {
+    "median": 10.18,
+    "min": 9.91,
+    "max": 17.47,
+    "n": 3
+   },
+   "peersMax": {
+    "median": 14,
+    "min": 12,
+    "max": 17,
+    "n": 3
+   },
+   "stalls": {
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "n": 3
+   }
+  },
+  "qbt": {
+   "runs": 3,
+   "firstFrameS": {
+    "median": 30.01,
+    "min": 21.01,
+    "max": 39.01,
+    "n": 2
+   },
+   "started": 2,
+   "mbps": {
+    "median": 10.47,
+    "min": 6.96,
+    "max": 14.88,
+    "n": 3
+   },
+   "peersMax": {
+    "median": 100,
+    "min": 100,
+    "max": 100,
+    "n": 3
+   },
+   "stalls": null
+  }
+ },
+ "thin": {
+  "official": {
+   "runs": 3,
+   "firstFrameS": {
+    "median": 37.04,
+    "min": 37.04,
+    "max": 37.04,
+    "n": 1
+   },
+   "started": 1,
+   "mbps": {
+    "median": 0.07,
+    "min": 0.03,
+    "max": 0.09,
+    "n": 3
+   },
+   "peersMax": {
+    "median": 4,
+    "min": 4,
+    "max": 5,
+    "n": 3
+   },
+   "stalls": {
+    "median": 0,
+    "min": 0,
+    "max": 0,
+    "n": 3
+   }
+  },
+  "turbo": {
+   "runs": 3,
+   "firstFrameS": {
+    "median": 9.71,
+    "min": 4.256,
+    "max": 14.636,
+    "n": 3
+   },
+   "started": 3,
+   "mbps": {
+    "median": 1.02,
+    "min": 0.08,
+    "max": 9.42,
+    "n": 3
+   },
+   "peersMax": {
+    "median": 6,
+    "min": 6,
+    "max": 9,
+    "n": 3
+   },
+   "stalls": {
+    "median": 0,
+    "min": 0,
+    "max": 2,
+    "n": 3
+   }
+  },
+  "qbt": {
+   "runs": 3,
+   "firstFrameS": {
+    "median": 44.52,
+    "min": 38.01,
+    "max": 51.02,
+    "n": 2
+   },
+   "started": 2,
+   "mbps": {
+    "median": 5.66,
+    "min": 0.5,
+    "max": 5.83,
+    "n": 3
+   },
+   "peersMax": {
+    "median": 35,
+    "min": 35,
+    "max": 37,
+    "n": 3
+   },
+   "stalls": null
+  }
+ }
+}
