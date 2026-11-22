@@ -413,10 +413,10 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	// preserving genuine errors and the existing log format.
 	cc.Slogger = slog.New(newReadCancelFilter(logging.For("torrent").Handler()))
 
-	// Connection budgets tuned for streaming: enough peers for full throughput
-	// without excessive MSE/RC4 handshakes and dial churn, which are the dominant
-	// engine CPU cost on large, fast swarms (4K). Scaled by RIVULET_PEERS_PER_TORRENT
-	// (cfg.PeersPerTorrent); default 0 keeps the historical 50/25/500 ratios.
+	// Connection budgets: 100 established, 50 half-open, 1000 known addresses per
+	// torrent by default (peerBudget), scaled by RIVULET_PEERS_PER_TORRENT.
+	// Handshakes and dial churn are the engine's main CPU cost on large 4K
+	// swarms, so the budget is still bounded (see defaultPeersPerTorrent).
 	est, half, high := peerBudget(cfg.PeersPerTorrent)
 	cc.EstablishedConnsPerTorrent = est
 	cc.HalfOpenConnsPerTorrent = half
@@ -1124,7 +1124,7 @@ func (e *engine) enforceSoftLimit(softLimitBytesPerSec int64, minPeers, establis
 			"speed_bytes", int64(speed), "peers", connectedPeers, "soft_limit_bytes", softLimitBytesPerSec)
 	} else {
 		if establishedConnsPerTorrent <= 0 {
-			establishedConnsPerTorrent = 50 // matches peerBudget's own default fallback
+			establishedConnsPerTorrent, _, _ = peerBudget(0)
 		}
 		e.t.SetMaxEstablishedConns(establishedConnsPerTorrent)
 		logging.For("engine").Debug("soft-limit: resuming peer discovery", "info_hash", e.infoHash,
@@ -2796,12 +2796,20 @@ func (e *engine) releasePieces(pieces []int, set func(int, torrent.PiecePriority
 	}
 }
 
+// defaultPeersPerTorrent is the established-connection budget per torrent:
+// qBittorrent's per-torrent default. Interleaved on a healthy 4K swarm with
+// qBittorrent (streaming-research findings/43), 50, 100 and 200 all held about
+// 40 peers, the swarm's reachable set, at 19-26 MB/s against qBittorrent's 20;
+// 100 started fastest (3.0 s median) and most evenly, while 200 used 50% more
+// CPU and started a second later for no reliable gain.
+const defaultPeersPerTorrent = 100
+
 // peerBudget derives the anacrolix per-torrent connection budget from a single
-// knob. n<=0 uses the default 50. half-open = n/2, high-water = n*10 — the same
-// ratios as the historical 50/25/500 defaults (peerBudget(0) == 50,25,500).
+// knob. n<=0 uses defaultPeersPerTorrent. half-open = n/2, high-water = n*10
+// (peerBudget(0) == 100,50,1000).
 func peerBudget(n int) (established, halfOpen, highWater int) {
 	if n <= 0 {
-		n = 50
+		n = defaultPeersPerTorrent
 	}
 	return n, n / 2, n * 10
 }

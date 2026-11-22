@@ -49,7 +49,7 @@ type Config struct {
 	DisableTrackers bool
 	// disable WebTorrent/WebRTC peers (pion); cuts ~60% of goroutines + RAM; RIVULET_DISABLE_WEBTORRENT; default true (disabled)
 	DisableWebtorrent bool
-	// established peer connections per torrent (scales half-open=n/2, high-water=n*10); RIVULET_PEERS_PER_TORRENT; 0 = default 50
+	// established peer connections per torrent (scales half-open=n/2, high-water=n*10); RIVULET_PEERS_PER_TORRENT; 0 = default 100
 	PeersPerTorrent int
 	// outgoing connection attempts per second, client-wide (anacrolix DialRateLimiter, burst equal);
 	// RIVULET_DIAL_RATE; default 30 (libtorrent's connection_speed); 0 keeps anacrolix's 10

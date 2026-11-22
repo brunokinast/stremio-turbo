@@ -11,10 +11,10 @@ func TestPeerBudget(t *testing.T) {
 		n                                int
 		wantEst, wantHalf, wantHighWater int
 	}{
-		{0, 50, 25, 500},
+		{0, 100, 50, 1000},
 		{30, 30, 15, 300},
 		{10, 10, 5, 100},
-		{-5, 50, 25, 500},
+		{-5, 100, 50, 1000},
 	}
 	for _, tc := range cases {
 		est, half, high := peerBudget(tc.n)
