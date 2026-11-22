@@ -90,10 +90,10 @@ def turbo(run):
         last[p['address']] = p
     by = collections.Counter()
     for p in last.values():
-        by[(p.get('source') or '?', 'utp' if 'utp' in (p.get('network') or '') else 'tcp')] += p.get('downloaded') or 0
+        by[(p.get('source') or '?', 'utp' if 'udp' in (p.get('network') or '') else 'tcp')] += p.get('downloaded') or 0
     for c in closes:
         if c.get('address') not in last:
-            by[(c.get('source') or '?', 'utp' if 'utp' in (c.get('network') or '') else 'tcp')] += c.get('downloaded') or 0
+            by[(c.get('source') or '?', 'utp' if 'udp' in (c.get('network') or '') else 'tcp')] += c.get('downloaded') or 0
     out['bytesBy'] = {f'{s}/{n}': round(b / 1e6, 1) for (s, n), b in by.most_common()}
     return out
 
@@ -143,6 +143,8 @@ def qbt(run):
     by = collections.Counter()
     for w in last.values():
         flags = (w.get('flags') or '').split()
+        if not (w.get('client') or w.get('downloaded')):
+            continue  # an attempt still in progress, not a peer
         src = 'dht' if 'H' in flags else 'pex' if 'X' in flags else 'incoming' if 'I' in flags else 'lsd' if 'L' in flags else 'tracker'
         by[(src, 'utp' if 'P' in flags else 'tcp')] += w.get('downloaded') or 0
     out['bytesBy'] = {f'{s}/{n}': round(b / 1e6, 1) for (s, n), b in by.most_common()}

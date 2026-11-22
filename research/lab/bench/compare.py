@@ -5,6 +5,7 @@ usage: python compare.py <infoHash> <fileIdx> [key=value ...]
   rounds=3  secs=60 (per run, from the click)  settle=10 (seconds a client runs before the click,
   as when the app has just opened)  rows=official,turbo,qbt  out=<dir> (default
   research/data/bench-<time>; it holds peer addresses and is never published)
+  turboenv=NAME=value;NAME2=value (extra environment for Turbo's Rivulet, to bench a setting)
 
 Each run starts the client fresh, waits `settle`, then:
 - official / turbo: mpvplay.py plays the file with the shell's libmpv (vo=null, audio off) for
@@ -29,12 +30,14 @@ sys.stdout.reconfigure(encoding='utf-8')
 if len(sys.argv) < 3:
     sys.exit(__doc__)
 IH, IDX = sys.argv[1].lower(), int(sys.argv[2])
-cfg = dict(rounds='3', secs='60', settle='10', rows='official,turbo,qbt,lt', out='')
+cfg = dict(rounds='3', secs='60', settle='10', rows='official,turbo,qbt,lt', out='', turboenv='')
 for a in sys.argv[3:]:
     k, v = a.split('=', 1)
     cfg[k] = v
 ROUNDS, SECS, SETTLE = int(cfg['rounds']), float(cfg['secs']), float(cfg['settle'])
 ROWS = cfg['rows'].split(',')
+# Extra environment for Turbo's Rivulet, to bench a setting: turboenv=NAME=value;NAME2=value
+TURBO_ENV = dict(kv.split('=', 1) for kv in cfg['turboenv'].split(';') if kv)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAB = os.path.dirname(HERE)
@@ -123,8 +126,8 @@ class Turbo:
         self.owner = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(86400)'], creationflags=subprocess.CREATE_NO_WINDOW)
         env = dict(os.environ, BIND_ADDRESS='127.0.0.1', HTTP_PORT='11470', HTTPS_PORT='0', BT_LISTEN_PORT=str(BT_PORT),
                    APP_PATH=TURBO_DATA, RIVULET_OWNER_PID=str(self.owner.pid),
-                   RIVULET_LOG_FILE=os.path.join(run_dir, 'rivulet.log'),
-                   PATH=TURBO_DIR + os.pathsep + os.environ.get('PATH', ''))
+                   RIVULET_LOG_FILE=os.path.join(run_dir, 'rivulet.log'), RIVULET_SPEED_LIMITS='0',
+                   PATH=TURBO_DIR + os.pathsep + os.environ.get('PATH', ''), **TURBO_ENV)
         self.p = subprocess.Popen([os.path.join(TURBO_DIR, 'rivulet-engine.exe')], cwd=TURBO_DIR, env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
         if not wait_up(SERVER + '/heartbeat'):
@@ -281,7 +284,10 @@ def run_qbt(run_dir):
             info = (http(QBT_UI + f'/api/v2/torrents/info?hashes={IH}') or [{}])[0] or {}
             peers = http(QBT_UI + f'/api/v2/sync/torrentPeers?hash={IH}&rid=0').get('peers', {})
             s = dict(t=round(t - t0, 2), downloaded=info.get('downloaded'), rate=info.get('dlspeed'),
-                     peers=len(peers), seeds=info.get('num_seeds'), leechs=info.get('num_leechs'),
+                     # The peer list includes connections still being attempted (no client name, no
+                     # bytes), which made qBittorrent look like it held 100 peers (findings/42).
+                     peers=sum(1 for p in peers.values() if p.get('client') or p.get('downloaded')),
+                     listed=len(peers), seeds=info.get('num_seeds'), leechs=info.get('num_leechs'),
                      metadata=info.get('size', 0) > 0 and info.get('state') != 'metaDL',
                      wires=[dict(address=a, down=p.get('dl_speed'), downloaded=p.get('downloaded'),
                                  kind=p.get('connection'), client=p.get('client'), flags=p.get('flags'))

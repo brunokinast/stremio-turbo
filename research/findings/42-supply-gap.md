@@ -9,7 +9,29 @@ Benches:
 
 The libtorrent reference row is missing: Python 3.13 has no firewall rule yet.
 
-## Results
+## Correction (same day): qBittorrent's peer counts were inflated, and cause 3 is refuted
+qBittorrent's Web API peer list includes connections it is still attempting. They have no client name and no bytes. Counting only peers that completed a handshake:
+
+| Peers held (max) | qBittorrent, listed | qBittorrent, handshaked | Turbo |
+|---|---:|---:|---:|
+| bench-1, healthy | 100 | 31–36 | 10–14 |
+| bench-2, healthy | 100 | 17–28 | 12–17 |
+| bench-2, thin | 35–37 | 7–9 | 6–9 |
+
+So the gap is about 2×, not 7×, and on the thin swarm the peer counts are equal.
+
+**Cause 3 (uTP) is refuted.** go-utp now has socket counters (`purego.Socket.Counters`), and a gated live test, `TestLiveDial` (`UTP_LIVE_PEERS`). In a sandwich test (a qBittorrent run, go-utp dialling from port 49881, then a qBittorrent run):
+- go-utp connected to all 10 uTP peers that qBittorrent completed handshakes with in both runs;
+- every SYN was written without error;
+- no reset or reply from another port arrived.
+
+The 55/194 "both timed out" overlap above counted qBittorrent's attempts, which also never connected.
+
+**The thin swarm is decided by one seeder** (call it S, on port P), which delivers 240–300 MB per run. qBittorrent reached it over uTP in 1–2 s in all 3 runs. Turbo's dials there timed out on TCP and uTP in all 3 runs. Turbo's 9.4 MB/s run reached S through another port it announced on the DHT. The seeder blocks TCP and was offline when it was retested, so this one miss is unexplained. Without it, the medians are luck.
+
+What remains is causes 1, 2 and 4: the soft limit (now removed for Turbo) and the slow ramp.
+
+## Results (as first measured)
 
 | Median of 3 (range) | Official Stremio | Turbo | qBittorrent |
 |---|---:|---:|---:|
@@ -43,7 +65,7 @@ Every healthy run held 12–17 peers, as the official server does (12–15).
 - **Connects that worked took** 1.5–1.9 s at the median, 2.7–3.0 s at the 90th percentile, up to 7.8 s. The 90th percentile sits on the cut-off.
 - **Result:** 8–10 connections at 10 s, against qBittorrent's 76–88.
 
-### 3. Most of Turbo's dials to peers qBittorrent reaches over uTP get no answer at all
+### 3. ~~Most of Turbo's dials to peers qBittorrent reaches over uTP get no answer at all~~ (refuted, see Correction)
 qBittorrent's data comes almost entirely over uTP from DHT-found peers:
 - healthy: 410–846 MB uTP against up to 125 MB TCP;
 - thin: 290–333 MB uTP.
