@@ -101,6 +101,7 @@ Every knob is an environment variable. Unprefixed names (`HTTP_PORT`, `APP_PATH`
 | `RIVULET_TRACKERS_URL` | _(curated list)_ | source URL for the public tracker list fetched + ranked at startup (newline-delimited). Defaults to a curated list; set to empty / `off` to skip the remote fetch entirely (embedded/cached trackers + DHT/PEX only). Drives the `trackersSourceUrl` setting. |
 | `RIVULET_TRACKERS_MAX` | `25` | max number of fastest-probed public trackers retained from the ranked list |
 | `RIVULET_DISABLE_WEBTORRENT` | `on` | WebTorrent/WebRTC (pion) peers are **disabled by default** — cuts ~60% of goroutines & RAM; TCP/uTP/DHT peers unaffected. Set `=0`/`false` to re-enable. |
+| `RIVULET_SPEED_LIMITS` | `on` | The official server's download throttles: the `btDownloadSpeedHardLimit` cap, and the pause in peer discovery once a torrent downloads faster than `btDownloadSpeedSoftLimit` with `btMinPeersForStable` peers connected. Set `=0`/`false` to never apply either, whatever the settings say. Upload is unaffected. |
 | `RIVULET_ENABLE_DLNA` | _(off)_ | enable DLNA/UPnP casting on `/casting` (SSDP discovery + UPnP AVTransport control). **Disabled by default**; set `=1`/`true` to enable. |
 | `RIVULET_CERT_AUTHKEY` | _(unset)_ | Stremio authKey used to auto-provision/renew a trusted HTTPS cert from `api.strem.io`. If unset, a key cached from a prior `/get-https` call is reused. |
 | `RIVULET_CERT_IP` | _(primary IPv4)_ | IP encoded into the provisioned cert's domain; defaults to the first non-loopback IPv4. |

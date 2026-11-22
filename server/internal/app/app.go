@@ -279,6 +279,16 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		j.StartJanitor(func() int64 { return settingBytes(ss.Get("cacheSize")) })
 	}
 
+	// RIVULET_SPEED_LIMITS=0 removes the official server's download throttles:
+	// the btDownloadSpeedHardLimit cap and the btDownloadSpeedSoftLimit pause in
+	// peer discovery are never applied, whatever the settings say (Stremio
+	// Turbo sets it; with them on, a 4K stream stopped at 11-17 peers while 300+
+	// addresses waited, streaming-research findings/42). Upload is unaffected.
+	speedLimitsOn := envBool(lookup, "RIVULET_SPEED_LIMITS", true)
+	if !speedLimitsOn {
+		logging.For("engine").Info("download speed limits off (RIVULET_SPEED_LIMITS)")
+	}
+
 	// Wire live bandwidth limits from settings — no changes to the types interface.
 	// SetLimitFn is detected via structural assertion on the concrete *manager, matching
 	// the pattern used for StartJanitor above.
@@ -288,19 +298,8 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		l.SetLimitFn(func() (int64, int64) {
 			// --- download cap ---
 			var down int64
-			switch n := ss.Get("btDownloadSpeedHardLimit").(type) {
-			case float64:
-				if n > 0 {
-					down = int64(n)
-				}
-			case int:
-				if n > 0 {
-					down = int64(n)
-				}
-			case int64:
-				if n > 0 {
-					down = n
-				}
+			if speedLimitsOn {
+				down = max(0, settingBytes(ss.Get("btDownloadSpeedHardLimit")))
 			}
 
 			// --- upload cap ---
@@ -328,7 +327,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	//     soft limit is allowed to pause discovery.
 	if l, ok := em.(interface {
 		SetSoftLimitFn(func() (int64, int))
-	}); ok {
+	}); ok && speedLimitsOn {
 		l.SetSoftLimitFn(func() (int64, int) {
 			var soft int64
 			switch n := ss.Get("btDownloadSpeedSoftLimit").(type) {

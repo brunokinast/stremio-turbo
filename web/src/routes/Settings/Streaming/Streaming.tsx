@@ -25,7 +25,6 @@ const Streaming = ({ profile, streamingServer }: Props) => {
         cacheLocationSelect,
         cacheLocationError,
         settingsDisabled,
-        torrentProfileSelect,
         transcodingProfileSelect,
     } = useStreamingOptions(streamingServer);
     const aheadToggle = useAheadToggle();
@@ -80,12 +79,6 @@ const Streaming = ({ profile, streamingServer }: Props) => {
                                         <MultiselectMenu className={'multiselect'} portal={true} {...cacheLocationSelect} />
                                         {cacheLocationError && <div className={styles['cache-location-error']} role={'alert'}>{cacheLocationError}</div>}
                                     </div>
-                                </Row>
-                        }
-                        {
-                            torrentProfileSelect !== null &&
-                                <Row rowId={'torrent'} label={t('SETTINGS_SERVER_TORRENT_PROFILE')} control={'wide'}>
-                                    <MultiselectMenu className={'multiselect'} portal={true} {...torrentProfileSelect} disabled={settingsDisabled} />
                                 </Row>
                         }
                         {

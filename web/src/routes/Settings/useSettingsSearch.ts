@@ -102,7 +102,6 @@ const useSettingsSearch = (query: string, groups: SettingsGroup[], profile: Prof
                 ...(serverReady && auth !== null && auth.user !== null && streamingServer.networkInfo?.type === 'Ready' ? [row(PAGES.STREAMING, 'https', t('SETTINGS_STREAMING_HTTPS_ENDPOINT'), 'ssl')] : []),
                 ...(serverReady ? [row(PAGES.STREAMING, 'cache', t('SETTINGS_SERVER_CACHE_SIZE'), 'disk storage')] : []),
                 ...(isCacheLocationSupported(platform, streamingServer) ? [row(PAGES.STREAMING, 'drive', t('SETTINGS_CACHING_DRIVE'), 'disk storage folder')] : []),
-                ...(serverReady ? [row(PAGES.STREAMING, 'torrent', t('SETTINGS_SERVER_TORRENT_PROFILE'), 'peers speed')] : []),
                 ...(serverReady && streamingServer.deviceInfo?.type === 'Ready' ? [row(PAGES.STREAMING, 'transcode', t('SETTINGS_TRANSCODE_PROFILE'), 'video convert')] : []),
             ],
             [PAGES.ACCOUNT]: [

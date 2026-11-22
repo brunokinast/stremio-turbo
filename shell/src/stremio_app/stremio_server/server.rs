@@ -99,6 +99,9 @@ fn server_command() -> Result<Command, String> {
         .env("RIVULET_WEBUI_DIR", dir.join("web"))
         .env("RIVULET_OWNER_PID", std::process::id().to_string())
         .env("RIVULET_LOG_FILE", data.join("rivulet.log"))
+        // No download throttles: the official speed cap and soft limit stopped
+        // 4K streams at 11-17 peers (streaming-research findings/42).
+        .env("RIVULET_SPEED_LIMITS", "0")
         // The development web UI (`--development --webui-url=...`).
         .env("RIVULET_ALLOWED_ORIGINS", "http://127.0.0.1:8080")
         .env("PATH", path)
