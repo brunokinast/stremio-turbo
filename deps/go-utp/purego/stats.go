@@ -99,3 +99,45 @@ func (c *Conn) Stats() ConnStats {
 		ReadBuffered:           c.readBuf.len(),
 	}
 }
+
+// socketCounters are the Socket-wide counters behind Counters, updated under the socket mutex.
+type socketCounters struct {
+	SocketCounters
+	lastWriteErr error
+}
+
+// SocketCounters is a snapshot of a Socket's packet and handshake counters. It is meant for
+// diagnosing outgoing connections that never complete: whether the SYN left, whether anything
+// came back from the peer, and whether a reply arrived that matched no connection.
+type SocketCounters struct {
+	// Datagrams written, and writes that failed (LastWriteError holds the latest error).
+	Writes, WriteErrors uint64
+	LastWriteError      string
+	// uTP datagrams received (anything parsePacket accepted).
+	Received uint64
+	// Outgoing connections started (first SYN), SYNs resent after a timeout, SYN-ACKs that
+	// completed an outgoing connection, and outgoing connections that gave up with no reply.
+	SynsSent, SynResends, SynAcks, SynTimeouts uint64
+	// Resets received, those that matched a connection, and those that refused a connection
+	// still in syn-sent.
+	Resets, ResetsMatched, ResetsRefused uint64
+	// Non-SYN packets matching no connection, and those among them from an IP we have an
+	// outgoing connection in syn-sent to (a reply from another port, or with another ID).
+	Unmatched, UnmatchedFromDialedIP uint64
+	// Packets dropped because their ack number was outside the window, and those dropped
+	// while the connection was still in syn-sent (a SYN-ACK we refused).
+	AckOutOfRange, AckOutOfRangeSynSent uint64
+	// Incoming connections: SYNs that created one.
+	IncomingSyns uint64
+}
+
+// Counters returns a snapshot of the Socket's counters.
+func (s *Socket) Counters() SocketCounters {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.counters.SocketCounters
+	if s.counters.lastWriteErr != nil {
+		c.LastWriteError = s.counters.lastWriteErr.Error()
+	}
+	return c
+}

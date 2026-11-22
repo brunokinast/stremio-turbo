@@ -952,6 +952,9 @@ func (c *Conn) checkTimeouts() {
 		// We opened the connection and they didn't respond, or four consecutive transmissions
 		// have timed out. Give up after only two if we never connected in the first place.
 		if c.retransmitCount >= 4 || (c.state == csSynSent && c.retransmitCount >= 2) {
+			if c.state == csSynSent {
+				c.s.counters.SynTimeouts++
+			}
 			if c.closeRequested {
 				c.state = csDestroy
 			} else {
@@ -963,6 +966,9 @@ func (c *Conn) checkTimeouts() {
 
 		c.retransmitTimeout = newTimeout
 		c.rtoTimeout = currentMS + uint64(newTimeout)
+		if c.state == csSynSent {
+			c.s.counters.SynResends++
+		}
 
 		if !ignoreLoss {
 			c.duplicateAck = 0
@@ -1035,6 +1041,10 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 	if p.h.Type != stSyn || c.state != csSynRecv {
 		if wrappingCompareLess(uint32(c.seqNr-1), uint32(pkAckNr), ackNrMask) ||
 			wrappingCompareLess(uint32(pkAckNr), uint32(c.seqNr-1-currWindow), ackNrMask) {
+			c.s.counters.AckOutOfRange++
+			if c.state == csSynSent {
+				c.s.counters.AckOutOfRangeSynSent++
+			}
 			return
 		}
 	}
@@ -1190,6 +1200,7 @@ func (c *Conn) processIncoming(p *packet, syn bool) {
 
 		if p.h.Type == stState && c.state == csSynSent {
 			// Outgoing connection established.
+			c.s.counters.SynAcks++
 			c.state = csConnected
 			c.connected = true
 			c.cond.Broadcast()

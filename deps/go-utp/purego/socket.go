@@ -98,6 +98,8 @@ type Socket struct {
 
 	logger    *slog.Logger
 	logLevels [numLogLevels]bool
+
+	counters socketCounters
 }
 
 var (
@@ -230,7 +232,10 @@ func (s *Socket) updateCurrentMS() {
 // of reported back, which the discovery search handles either way.
 func (s *Socket) send(b []byte, addr net.Addr, dontFragment bool) {
 	_, err := s.pc.WriteTo(b, addr)
+	s.counters.Writes++
 	if err != nil {
+		s.counters.WriteErrors++
+		s.counters.lastWriteErr = err
 		s.logf(logNormal, "error writing to %v: %v", addr, err)
 	}
 }
@@ -348,6 +353,7 @@ func (s *Socket) processPacket(b []byte, addr net.Addr) bool {
 		return false
 	}
 	s.updateCurrentMS()
+	s.counters.Received++
 	ak := connKey(addr)
 	id := p.h.ConnID
 
@@ -363,7 +369,9 @@ func (s *Socket) processPacket(b []byte, addr net.Addr) bool {
 				c = c2
 			}
 		}
+		s.counters.Resets++
 		if c != nil {
+			s.counters.ResetsMatched++
 			// Read the state before the reset overwrites it. libutp reads it afterwards, so it
 			// never actually reports a refused connection.
 			wasSynSent := c.state == csSynSent
@@ -373,6 +381,7 @@ func (s *Socket) processPacket(b []byte, addr net.Addr) bool {
 				c.state = csReset
 			}
 			if wasSynSent {
+				s.counters.ResetsRefused++
 				c.onError(ErrConnRefused)
 			} else {
 				c.onError(ErrConnReset)
@@ -387,6 +396,10 @@ func (s *Socket) processPacket(b []byte, addr net.Addr) bool {
 			c.processIncoming(&p, false)
 			c.maybeDestroy()
 			return true
+		}
+		s.counters.Unmatched++
+		if s.dialingIP(ak) {
+			s.counters.UnmatchedFromDialedIP++
 		}
 		// Not a connection we know about. Tell the peer, but only once per distinct packet, and
 		// only up to a limit, so this can't be turned into an amplifier.
@@ -426,6 +439,7 @@ func (s *Socket) processPacket(b []byte, addr net.Addr) bool {
 	if s.firewallCallback != nil && s.firewallCallback(addr) {
 		return true
 	}
+	s.counters.IncomingSyns++
 	c := newConn(s, addr)
 	c.initialize(id+1, id)
 	c.ackNr = p.h.SeqNr
@@ -595,8 +609,23 @@ func (s *Socket) newOutgoingConn(addr net.Addr) *Conn {
 	c.seqNr++
 	c.curWindowPackets++
 	c.fastResendSeqNr = c.seqNr
+	s.counters.SynsSent++
 	c.sendPacket(pkt)
 	return c
+}
+
+// Reports whether an outgoing connection in syn-sent goes to the same IP as ak. Only called for
+// packets that matched no connection, so the scan stays off the normal path.
+func (s *Socket) dialingIP(ak connAddrKey) bool {
+	if !ak.ap.IsValid() {
+		return false
+	}
+	for k, c := range s.conns {
+		if c.state == csSynSent && k.addr.ap.Addr() == ak.ap.Addr() {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Conn) waitForConnect(ctx context.Context) error {
