@@ -6,6 +6,7 @@ usage: python compare.py <infoHash> <fileIdx> [key=value ...]
   as when the app has just opened)  rows=official,turbo,qbt  out=<dir> (default
   research/data/bench-<time>; it holds peer addresses and is never published)
   turboenv=NAME=value;NAME2=value (extra environment for Turbo's Rivulet, to bench a setting)
+  variants=turbo-a:NAME=v|turbo-b:NAME=w (Turbo rows with their own environment, interleaved in each round)
 
 Each run starts the client fresh, waits `settle`, then:
 - official / turbo: mpvplay.py plays the file with the shell's libmpv (vo=null, audio off) for
@@ -30,7 +31,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 if len(sys.argv) < 3:
     sys.exit(__doc__)
 IH, IDX = sys.argv[1].lower(), int(sys.argv[2])
-cfg = dict(rounds='3', secs='60', settle='10', rows='official,turbo,qbt,lt', out='', turboenv='')
+cfg = dict(rounds='3', secs='60', settle='10', rows='official,turbo,qbt,lt', out='', turboenv='', variants='')
 for a in sys.argv[3:]:
     k, v = a.split('=', 1)
     cfg[k] = v
@@ -38,6 +39,10 @@ ROUNDS, SECS, SETTLE = int(cfg['rounds']), float(cfg['secs']), float(cfg['settle
 ROWS = cfg['rows'].split(',')
 # Extra environment for Turbo's Rivulet, to bench a setting: turboenv=NAME=value;NAME2=value
 TURBO_ENV = dict(kv.split('=', 1) for kv in cfg['turboenv'].split(';') if kv)
+# Turbo variants benched side by side in the same rounds, each a row of its own:
+# variants=turbo-50:|turbo-200:RIVULET_PEERS_PER_TORRENT=200 (label:env as in turboenv, '|' between)
+VARIANTS = [(v.split(':', 1)[0], dict(kv.split('=', 1) for kv in v.split(':', 1)[1].split(';') if kv))
+            for v in cfg['variants'].split('|') if v]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAB = os.path.dirname(HERE)
@@ -120,6 +125,9 @@ class Official:
 class Turbo:
     name = 'turbo'
 
+    def __init__(self, name='turbo', env=None):
+        self.name, self.env = name, env or {}
+
     def start(self, run_dir):
         # As the shell starts it (shell/src/stremio_app/stremio_server/server.rs), with an owner
         # process of our own: when it ends, Rivulet exits on its own, cleanly.
@@ -127,7 +135,7 @@ class Turbo:
         env = dict(os.environ, BIND_ADDRESS='127.0.0.1', HTTP_PORT='11470', HTTPS_PORT='0', BT_LISTEN_PORT=str(BT_PORT),
                    APP_PATH=TURBO_DATA, RIVULET_OWNER_PID=str(self.owner.pid),
                    RIVULET_LOG_FILE=os.path.join(run_dir, 'rivulet.log'), RIVULET_SPEED_LIMITS='0',
-                   PATH=TURBO_DIR + os.pathsep + os.environ.get('PATH', ''), **TURBO_ENV)
+                   PATH=TURBO_DIR + os.pathsep + os.environ.get('PATH', ''), **{**TURBO_ENV, **self.env})
         self.p = subprocess.Popen([os.path.join(TURBO_DIR, 'rivulet-engine.exe')], cwd=TURBO_DIR, env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
         if not wait_up(SERVER + '/heartbeat'):
@@ -249,7 +257,26 @@ def sample_server(stop, samples):
         stop.wait(max(0.0, 1.0 - (time.time() - t)))
 
 
+def cpu_seconds(proc):
+    """User plus kernel CPU time of a running process (Windows), or None."""
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(0x1000, False, proc.pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return None
+    try:
+        t = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(h, *[ctypes.byref(x) for x in t]):
+            return None
+        ft = lambda f: (f.dwHighDateTime << 32 | f.dwLowDateTime) / 1e7
+        return ft(t[2]) + ft(t[3])
+    finally:
+        k32.CloseHandle(h)
+
+
 def run_player(client, run_dir):
+    cpu0 = cpu_seconds(client.p) if isinstance(client, Turbo) else None
     samples, stop = [], threading.Event()
     th = threading.Thread(target=sample_server, args=(stop, samples), daemon=True)
     th.start()
@@ -265,12 +292,17 @@ def run_player(client, run_dir):
     for s in samples:
         s['t'] = round(s.pop('wall') - t0, 2)
     extra = {}
-    if client.name == 'turbo':
+    head = {}
+    if cpu0 is not None:
+        cpu1 = cpu_seconds(client.p)
+        if cpu1 is not None:
+            head['cpuS'] = round(cpu1 - cpu0, 1)  # Rivulet's CPU time during the run
+    if isinstance(client, Turbo):
         try:
             extra['networkInfo'] = http(SERVER + '/network-info')
         except Exception:
             pass
-    return dict(firstFrameS=play.get('firstFrameS'), stalls=play.get('stallCount'), stallSeconds=play.get('stallSeconds')), samples, extra
+    return dict(firstFrameS=play.get('firstFrameS'), stalls=play.get('stallCount'), stallSeconds=play.get('stallSeconds'), **head), samples, extra
 
 
 def run_qbt(run_dir):
@@ -343,8 +375,9 @@ def summarize(samples, secs):
 
 
 def main():
-    clients = {c.name: c for c in (Official(), Turbo(), Qbt(), Lt()) if c.name in ROWS}
-    order = [n for n in ('official', 'turbo', 'qbt', 'lt') if n in clients]
+    turbos = [Turbo(n, e) for n, e in VARIANTS] or [Turbo()]
+    clients = {c.name: c for c in (Official(), *turbos, Qbt(), Lt()) if c.name in ROWS or (VARIANTS and isinstance(c, Turbo))}
+    order = list(clients)
     results = []
     for rnd in range(ROUNDS):
         rot = order[rnd % len(order):] + order[:rnd % len(order)]
@@ -378,7 +411,7 @@ def main():
     for name in order:
         rs = [r for r in results if r['client'] == name]
         agg[name] = {}
-        for k in ('firstFrameS', 'metadataS', 'firstByteS', 'mbps', 'peakMBps', 'peersMax', 'stalls'):
+        for k in ('firstFrameS', 'metadataS', 'firstByteS', 'mbps', 'peakMBps', 'peersMax', 'stalls', 'cpuS'):
             vals = [r[k] for r in rs if r.get(k) is not None]
             agg[name][k] = dict(median=round(statistics.median(vals), 2), min=min(vals), max=max(vals), n=len(vals)) if vals else None
         agg[name]['failedStarts'] = sum(1 for r in rs if r.get('firstFrameS') is None)

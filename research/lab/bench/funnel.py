@@ -162,7 +162,7 @@ def main():
     per = collections.defaultdict(list)
     for run in runs:
         name = os.path.basename(run).split('-', 1)[1]
-        fn = dict(turbo=turbo, lt=lt, qbt=qbt, official=official).get(name)
+        fn = dict(turbo=turbo, lt=lt, qbt=qbt, official=official).get(name.split('-')[0])
         if fn:
             r = fn(run)
             r['run'] = os.path.basename(run)
@@ -178,7 +178,7 @@ def main():
         return row
 
     print('median over rounds at', MARKS, 's')
-    for name in ('official', 'turbo', 'lt', 'qbt'):
+    for name in sorted(per):
         rs = per.get(name)
         if not rs:
             continue
