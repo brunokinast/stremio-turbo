@@ -5,55 +5,55 @@
   "official": {
    "runs": 3,
    "firstFrameS": {
-    "median": 4.33,
-    "min": 3.642,
-    "max": 11.835,
+    "median": 4.4,
+    "min": 4.343,
+    "max": 4.655,
     "n": 3
    },
    "started": 3,
    "mbps": {
-    "median": 3.33,
-    "min": 3.07,
-    "max": 4.26,
+    "median": 3.78,
+    "min": 3.49,
+    "max": 3.91,
     "n": 3
    },
    "peersMax": {
-    "median": 15,
-    "min": 14,
+    "median": 13,
+    "min": 13,
     "max": 15,
     "n": 3
    },
    "stalls": {
     "median": 2,
-    "min": 1,
-    "max": 5,
+    "min": 2,
+    "max": 2,
     "n": 3
    }
   },
   "turbo": {
    "runs": 3,
    "firstFrameS": {
-    "median": 4.17,
-    "min": 3.054,
-    "max": 4.376,
+    "median": 3.29,
+    "min": 2.729,
+    "max": 3.574,
     "n": 3
    },
    "started": 3,
    "mbps": {
-    "median": 10.18,
-    "min": 9.91,
-    "max": 17.47,
+    "median": 22.24,
+    "min": 19.79,
+    "max": 23.01,
     "n": 3
    },
    "peersMax": {
-    "median": 14,
-    "min": 12,
-    "max": 17,
+    "median": 28,
+    "min": 17,
+    "max": 35,
     "n": 3
    },
    "stalls": {
     "median": 1,
-    "min": 1,
+    "min": 0,
     "max": 1,
     "n": 3
    }
@@ -61,22 +61,22 @@
   "qbt": {
    "runs": 3,
    "firstFrameS": {
-    "median": 30.01,
+    "median": 23.01,
     "min": 21.01,
     "max": 39.01,
-    "n": 2
+    "n": 3
    },
-   "started": 2,
+   "started": 3,
    "mbps": {
-    "median": 10.47,
-    "min": 6.96,
-    "max": 14.88,
+    "median": 29.06,
+    "min": 12.53,
+    "max": 37.44,
     "n": 3
    },
    "peersMax": {
-    "median": 100,
-    "min": 100,
-    "max": 100,
+    "median": 28,
+    "min": 12,
+    "max": 30,
     "n": 3
    },
    "stalls": null
@@ -86,22 +86,50 @@
   "official": {
    "runs": 3,
    "firstFrameS": {
-    "median": 37.04,
-    "min": 37.04,
-    "max": 37.04,
-    "n": 1
+    "median": 16.69,
+    "min": 10.612,
+    "max": 22.759,
+    "n": 2
    },
-   "started": 1,
+   "started": 2,
    "mbps": {
-    "median": 0.07,
-    "min": 0.03,
-    "max": 0.09,
+    "median": 0.22,
+    "min": 0.01,
+    "max": 0.43,
     "n": 3
    },
    "peersMax": {
-    "median": 4,
-    "min": 4,
-    "max": 5,
+    "median": 3,
+    "min": 2,
+    "max": 3,
+    "n": 3
+   },
+   "stalls": {
+    "median": 1,
+    "min": 0,
+    "max": 2,
+    "n": 3
+   }
+  },
+  "turbo": {
+   "runs": 3,
+   "firstFrameS": {
+    "median": 4.99,
+    "min": 4.853,
+    "max": 7.091,
+    "n": 3
+   },
+   "started": 3,
+   "mbps": {
+    "median": 7.35,
+    "min": 1.9,
+    "max": 9.49,
+    "n": 3
+   },
+   "peersMax": {
+    "median": 6,
+    "min": 5,
+    "max": 9,
     "n": 3
    },
    "stalls": {
@@ -111,53 +139,25 @@
     "n": 3
    }
   },
-  "turbo": {
+  "qbt": {
    "runs": 3,
    "firstFrameS": {
-    "median": 9.71,
-    "min": 4.256,
-    "max": 14.636,
-    "n": 3
+    "median": 51.03,
+    "min": 51.03,
+    "max": 51.03,
+    "n": 1
    },
-   "started": 3,
+   "started": 1,
    "mbps": {
-    "median": 1.02,
-    "min": 0.08,
-    "max": 9.42,
+    "median": 4.93,
+    "min": 3.72,
+    "max": 6.57,
     "n": 3
    },
    "peersMax": {
     "median": 6,
-    "min": 6,
-    "max": 9,
-    "n": 3
-   },
-   "stalls": {
-    "median": 0,
-    "min": 0,
-    "max": 2,
-    "n": 3
-   }
-  },
-  "qbt": {
-   "runs": 3,
-   "firstFrameS": {
-    "median": 44.52,
-    "min": 38.01,
-    "max": 51.02,
-    "n": 2
-   },
-   "started": 2,
-   "mbps": {
-    "median": 5.66,
-    "min": 0.5,
-    "max": 5.83,
-    "n": 3
-   },
-   "peersMax": {
-    "median": 35,
-    "min": 35,
-    "max": 37,
+    "min": 5,
+    "max": 8,
     "n": 3
    },
    "stalls": null

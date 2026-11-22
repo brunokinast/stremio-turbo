@@ -190,59 +190,161 @@ function windowRect() {
 // Records the app window's area of the screen while action runs (the player is mpv's own window
 // behind the web view, so the DevTools screencast would miss the picture), then makes a GIF with
 // Evenly's recipe: 12 fps, a 96-colour palette from the moving parts, Bayer dithering.
-async function record(name, secs, action, width = 640) {
-    fs.mkdirSync(RAW, { recursive: true });
+async function record(dir, name, secs, action, width = 640) {
     const r = windowRect();
-    const mp4 = path.join(RAW, `${name}.mp4`);
+    const mp4 = path.join(dir, `${name}.mp4`);
     const ff = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'gdigrab', '-framerate', '24', '-offset_x', r.x, '-offset_y', r.y,
         '-video_size', `${r.w}x${r.h}`, '-draw_mouse', '0', '-i', 'desktop', '-t', String(secs), '-pix_fmt', 'yuv420p', mp4].map(String), { stdio: ['pipe', 'inherit', 'inherit'] });
     const done = new Promise((res) => ff.on('exit', res));
     await sleep(400);
     await action();
     await done;
-    const gif = path.join(DOCS, `${name}.gif`);
+    const gif = path.join(dir, `${name}.gif`);
     const vf = `fps=12,scale=${width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
     spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', mp4, '-vf', vf, gif], { stdio: 'inherit' });
     console.log('wrote', path.relative(ROOT, gif), `${Math.round(fs.statSync(gif).size / 1024)} KB`);
 }
 
-async function capture(which) {
-    fs.mkdirSync(RAW, { recursive: true });
+// What each set of captures shows. "library": the owner's own titles (the next episodes they're
+// on, so plays only move resume points they'd reach anyway). "open": Blender's CC BY films.
+const SETS = {
+    library: {
+        banner: '#/detail/series/tt2442560/tt2442560%3A6%3A5',
+        race: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A6', tier: '4k DV | HDR' },
+        engine: { route: '#/detail/movie/tt15398776/tt15398776', stream: '2160p' },
+        resume: { route: '#/detail/series/tt22202452/tt22202452%3A1%3A9' },
+        download: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A7', tier: '4k DV | HDR' },
+    },
+    open: {
+        banner: '#/detail/movie/tt1727587/tt1727587', // Sintel
+        race: { route: '#/detail/movie/tt1727587/tt1727587', tier: '4k' },
+        engine: { route: '#/detail/movie/tt2285752/tt2285752', stream: '2160p' }, // Tears of Steel
+        resume: { route: '#/detail/movie/tt1727587/tt1727587' },
+        download: { route: '#/detail/movie/tt2285752/tt2285752', tier: '4k' },
+    },
+};
+
+// capture <set> [blur] [step ...]: blur softens mpv's picture (the UI stays sharp), for pages that
+// shouldn't show the footage.
+async function capture(args) {
+    const set = SETS[args[0]];
+    if (!set) throw new Error('capture <' + Object.keys(SETS).join('|') + '> [blur] [banner|race|engine|resume|download ...]');
+    const blur = args[1] === 'blur';
+    const which = args.slice(blur ? 2 : 1);
+    const dir = path.join(RAW, args[0] + (blur ? '-blur' : ''));
+    fs.mkdirSync(dir, { recursive: true });
     const a = await app();
-    const route = process.env.README_ROUTE; // an episode's details page, e.g. #/detail/series/<id>/<id>%3A<season>%3A<episode>
-    if (!route) throw new Error('set README_ROUTE to an episode details route with 4K sources');
-    const rows = `!!document.querySelector('[class*="quality-rows"] [class*="play-"]')`;
-    const leave = async () => { await a.evaluate('history.back()'); await sleep(2500); };
+    const server = 'http://127.0.0.1:11470';
+    const before = new Set((await fetch(`${server}/downloads`).then((r) => r.json())).map((d) => `${d.infoHash}/${d.fileIdx}`));
+    const tierButton = (label) => `[...document.querySelectorAll('[class*="quality-rows"] [title]')].find((b) => b.title === ${JSON.stringify(label)} && /(^|\\s)play-/.test(b.className))`;
+    const open = async (route, ready) => {
+        await a.go('#/');
+        await sleep(1500);
+        await a.go(route);
+        await a.waitFor(ready);
+        await sleep(2500);
+    };
+    const mpv = (prop, value) => a.evaluate(`chrome.webview.postMessage(JSON.stringify({ id: 0, type: 6, args: ['mpv-set-prop', [${JSON.stringify(prop)}, ${JSON.stringify(value)}]] }))`);
+    // Plays from a click: mutes, and keeps the blur filter on until the first frame is past.
+    const play = async (click) => {
+        await a.evaluate(click);
+        if (blur) {
+            for (let i = 0; i < 20; i++) {
+                await mpv('vf', 'lavfi=[gblur=sigma=40]');
+                await sleep(150);
+            }
+        }
+        await a.mute();
+    };
+    const leave = async () => {
+        await a.evaluate('history.back()');
+        await sleep(2500);
+        if (blur) await mpv('vf', '');
+    };
     const steps = {
         async banner() {
-            await a.go('#/');
-            await sleep(1500);
-            await a.go(route);
-            await a.waitFor(rows);
-            await sleep(3000);
+            await open(set.banner, `!!document.querySelector('[class*="quality-rows"] [class*="play-"]')`);
+            await sleep(1000);
             const { data } = await a.c.send('Page.captureScreenshot', { format: 'png' });
-            fs.writeFileSync(path.join(RAW, 'banner-app.png'), Buffer.from(data, 'base64'));
-            console.log('wrote out/readme/banner-app.png');
+            fs.writeFileSync(path.join(dir, 'banner-app.png'), Buffer.from(data, 'base64'));
+            console.log('wrote', path.relative(ROOT, path.join(dir, 'banner-app.png')));
         },
         async race() {
-            await a.go('#/');
-            await sleep(1500);
-            await a.go(route);
-            await a.waitFor(rows);
-            await sleep(2500);
-            await record('feature-race', 12, async () => {
-                await sleep(800);
-                await a.evaluate(`document.querySelector('[class*="quality-rows"] [class*="play-"]').click()`);
-                await a.mute();
+            await open(set.race.route, `!!(${tierButton(set.race.tier)})`);
+            await record(dir, 'feature-race', 14, async () => {
+                await sleep(700);
+                await play(`(${tierButton(set.race.tier)}).click()`);
             });
             await leave();
         },
+        async engine() {
+            // A single source from the full list, with a stopwatch from the click to the first
+            // frame (when the player's mute button enables).
+            await open(set.engine.route, `!!document.querySelector('[class*="all-streams"]')`);
+            await a.evaluate(`document.querySelector('[class*="all-streams"]').click()`);
+            const link = `[...document.querySelectorAll('a')].find((x) => x.innerText.includes(${JSON.stringify(set.engine.stream)}))`;
+            await a.waitFor(`!!(${link})`, 30);
+            await a.privacy();
+            await sleep(1500);
+            await record(dir, 'feature-engine', 12, async () => {
+                await sleep(700);
+                await a.evaluate(`(() => {
+                    const d = document.createElement('div'); d.id = 'readme-clock';
+                    d.style.cssText = 'position:fixed;left:24px;bottom:24px;z-index:99999;padding:10px 16px;border-radius:12px;background:rgba(20,16,40,.82);color:#fff;font:600 30px/1 Segoe UI,sans-serif;font-variant-numeric:tabular-nums;pointer-events:none';
+                    document.documentElement.append(d);
+                    const t0 = performance.now(); let stopped = false;
+                    const tick = () => {
+                        const b = [...document.querySelectorAll('[class*="control-bar-button"]')].find((b) => b.title && !b.className.includes('disabled') && /mute/i.test(b.title));
+                        if (!stopped) d.textContent = ((performance.now() - t0) / 1000).toFixed(1) + ' s';
+                        if (b && !stopped) { stopped = true; d.textContent += ' · first frame'; }
+                        requestAnimationFrame(tick);
+                    };
+                    tick();
+                })()`);
+                await play(`(${link}).click()`);
+            });
+            await a.evaluate(`document.getElementById('readme-clock')?.remove()`);
+            await leave();
+        },
+        async resume() {
+            const resumeBtn = `[...document.querySelectorAll('[class*="action"], button, a, [tabindex]')].filter((b) => /^Resume/.test(b.innerText.trim()) && !/Trailer|Share/.test(b.innerText)).sort((x, y) => x.innerText.length - y.innerText.length)[0]`;
+            await open(set.resume.route, `!!(${resumeBtn})`);
+            await record(dir, 'feature-resume', 10, async () => {
+                await sleep(700);
+                await play(`(${resumeBtn}).click()`);
+            });
+            await leave();
+        },
+        async download() {
+            const dl = `[...document.querySelectorAll('[class*="quality-rows"] [class*="tier"]')].find((t) => [...t.querySelectorAll('[title]')].some((b) => b.title === ${JSON.stringify(set.download.tier)}))?.querySelector('[class*="download"]')`;
+            await open(set.download.route, `!!(${dl})`);
+            await record(dir, 'feature-downloads', 12, async () => {
+                await sleep(800);
+                await a.evaluate(`(${dl}).click()`);
+                await sleep(4500);
+                await a.go('#/downloads');
+            });
+        },
     };
-    for (const name of which.length ? which : Object.keys(steps)) {
-        if (!steps[name]) throw new Error('unknown capture: ' + name);
-        await steps[name]();
+    try {
+        for (const name of which.length ? which : Object.keys(steps)) {
+            if (!steps[name]) throw new Error('unknown capture: ' + name);
+            await steps[name]();
+        }
+    } finally {
+        if (blur) await mpv('vf', '');
+        // Downloads the captures started (the download step, and the plays' own records) are
+        // removed again, so the captures leave the owner's downloads as they were.
+        const now = await fetch(`${server}/downloads`).then((r) => r.json());
+        // DELETE takes the whole torrent: skip one that already held a file of the owner's (a
+        // season pack's other episode).
+        const kept = new Set([...before].map((k) => k.split('/')[0]));
+        for (const d of now.filter((d) => !before.has(`${d.infoHash}/${d.fileIdx}`) && !kept.has(d.infoHash))) {
+            await fetch(`${server}/downloads/${d.infoHash}`, { method: 'DELETE' });
+            console.log('removed a download the capture started:', d.infoHash.slice(0, 8));
+        }
+        a.c.close();
     }
-    a.c.close();
 }
 
 // ---- compose ------------------------------------------------------------------------------------
@@ -272,7 +374,7 @@ function chartHtml(b, theme) {
                 const f = missing ? 0 : Math.max(0.005, v / max);
                 return `<div class="row"><div class="name${c === 'turbo' ? ' strong' : ''}">${name}</div>
                     <div class="track">${f ? `<div class="bar" style="width:calc((100% - 96px) * ${f.toFixed(4)});background:${c === 'turbo' ? t.turbo : t.other}"></div>` : ''}
-                    <div class="val${c === 'turbo' ? ' strong' : ''}">${missing ? noValue : fmt(v)}</div></div></div>`;
+                    <div class="val${c === 'turbo' ? ' strong' : ''}">${missing ? (c === 'qbt' && key === 'firstFrameS' ? 'not ready in 60 s' : noValue) : fmt(v)}${!missing && key === 'firstFrameS' && s.started < s.runs ? `<span class="note"> · ${s.started} of ${s.runs} started</span>` : ''}</div></div></div>`;
             }).join('')}`).join('');
         return `<div class="panel"><div class="title">${title}</div><div class="unit">${unit}</div>${rows}</div>`;
     };
@@ -290,6 +392,7 @@ function chartHtml(b, theme) {
         .track { flex: 1; display: flex; align-items: center; gap: 8px; height: 100%; }
         .bar { height: 20px; border-radius: 0 4px 4px 0; flex: none; }
         .val { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .note { color: ${t.muted}; font-size: 13px; }
         .foot { color: ${t.muted}; font-size: 12.5px; margin-top: 22px; }
     </style></head><body>
         <div class="panels">
@@ -324,24 +427,26 @@ function bannerHtml(appPng, iconPng) {
             background: radial-gradient(120% 140% at 0% 0%, #3a2a9e 0%, #1b1550 45%, #0c0b11 100%); position: relative; }
         .glow { position: absolute; right: -120px; top: -160px; width: 760px; height: 760px; border-radius: 50%;
             background: radial-gradient(circle, rgba(132,96,255,.45), rgba(32,84,224,0) 65%); }
-        .left { position: absolute; left: 72px; top: 0; bottom: 0; width: 430px; display: flex; flex-direction: column; justify-content: center; }
+        .left { position: absolute; left: 72px; top: 0; bottom: 0; width: 420px; display: flex; flex-direction: column; justify-content: center; }
         .mark { width: 84px; height: 84px; margin-bottom: 26px; }
         h1 { font-size: 58px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; }
         h1 span { background: linear-gradient(90deg, #b7a6ff, #6f9bff); -webkit-background-clip: text; color: transparent; }
         p { margin-top: 20px; font-size: 25px; line-height: 1.35; color: #d9d4ff; }
-        .win { position: absolute; left: 540px; top: 92px; width: 900px; border-radius: 12px; overflow: hidden;
+        .win { position: absolute; left: 530px; top: 58px; width: 700px; border-radius: 12px; overflow: hidden;
             box-shadow: 0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08); background: #0c0b11; }
         .bar { height: 34px; background: #17151f; display: flex; align-items: center; padding: 0 14px; gap: 10px; font-size: 13px; color: #b9b5c9; }
         .bar img { width: 16px; height: 16px; }
         .bar .ctl { margin-left: auto; letter-spacing: 18px; color: #8d8a99; }
-        .win > img { display: block; width: 100%; }
+        /* The right side of the page: the cast art and the quality rows. */
+        .shot { height: 490px; overflow: hidden; position: relative; }
+        .shot img { position: absolute; right: 0; top: 0; height: 100%; }
     </style></head><body><div class="glow"></div>
         <div class="left">
             <img class="mark" src="${img(iconPng)}">
             <h1>Stremio <span>Turbo</span></h1>
             <p>Stremio for Windows, rebuilt for speed. 4K HDR starts in seconds and doesn't buffer.</p>
         </div>
-        <div class="win"><div class="bar"><img src="${img(iconPng)}">Stremio Turbo<span class="ctl">–▢✕</span></div><img src="${img(appPng)}"></div>
+        <div class="win"><div class="bar"><img src="${img(iconPng)}">Stremio Turbo<span class="ctl">–▢✕</span></div><div class="shot"><img src="${img(appPng)}"></div></div>
     </body></html>`;
 }
 

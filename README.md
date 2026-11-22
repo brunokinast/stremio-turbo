@@ -1,5 +1,4 @@
-<!-- DRAFT (branch `readme`): images come from scripts/readme-images.mjs (not written yet);
-     every number marked TBD comes from research/lab/bench once Turbo leads it. -->
+<!-- DRAFT (branch `readme`): images from scripts/readme-images.mjs; numbers from research/lab/bench (2026-11-22). -->
 
 <p align="center">
   <img src="docs/readme/banner.png" alt="Stremio Turbo: Stremio for Windows, rebuilt for speed. The episode page with its quality rows, in an app window." width="100%">
@@ -41,7 +40,7 @@
     <td width="50%" valign="top">
       <img src="docs/readme/feature-engine.gif" alt="A fresh 4K HDR episode starting: the first frame appears a few seconds after Play." width="100%"><br><br>
       <b>A faster torrent engine</b><br>
-      Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. A fresh 4K HDR start went from 72 s to TBD s, and freezes during play from 2 to 0.
+      Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. A fresh 4K HDR episode downloads 6× faster than in the official app, and on a thin swarm it starts in 5 s where the official app took 17 s or never started.
     </td>
   </tr>
   <tr>
@@ -64,14 +63,19 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/bench-dark.png">
-  <img src="docs/readme/bench-light.png" alt="Click to first frame on a fresh 4K HDR episode: official Stremio TBD s, Stremio Turbo TBD s, qBittorrent TBD s." width="100%">
+  <img src="docs/readme/bench-light.png" alt="Click to first frame on a fresh 4K HDR episode, healthy swarm: official Stremio 4.4 s, Stremio Turbo 3.3 s. Thin swarm: official 16.7 s (2 of 3 started), Turbo 5.0 s. Download speed, healthy: official 3.8 MB/s, Turbo 22.2, qBittorrent 29.1; thin: 0.2, 7.3 and 4.9." width="100%">
 </picture>
 
-| A fresh 4K HDR episode (9 GB), median of TBD runs | Official Stremio | Stremio Turbo | qBittorrent* |
-| ------------------------------------------------- | ---------------: | ------------: | -----------: |
-| Click → first frame                               |            TBD s |         TBD s |        TBD s |
-| Download speed, first 60 s                        |       TBD MB/s |      TBD MB/s |     TBD MB/s |
-| Freezes in the first minute                       |              TBD |           TBD |            — |
+| A fresh 4K HDR episode, median of 3 runs (range) | Official Stremio | Stremio Turbo | qBittorrent* |
+| ------------------------------------------------ | ---------------: | ------------: | -----------: |
+| **Healthy swarm** (9.0 GB, about 95 seeders) | | | |
+| Click → first frame | 4.4 s (4.3–4.7) | **3.3 s** (2.7–3.6) | 23 s (21–39) |
+| Download speed, first 60 s | 3.8 MB/s | **22.2 MB/s** (19.8–23.0) | 29.1 MB/s (12.5–37.4) |
+| Time frozen in the first minute | 7.2 s (4.1–9.3) | **0.5 s** (0–0.6) | — |
+| **Thin swarm** (8.6 GB, about 14 seeders) | | | |
+| Click → first frame | 16.7 s; 1 of 3 never | **5.0 s** (4.9–7.1) | 51 s; 2 of 3 never |
+| Download speed, first 60 s | 0.2 MB/s | **7.3 MB/s** (1.9–9.5) | 4.9 MB/s (3.7–6.6) |
+| Time frozen in the first minute | 6.4 s (0–13.1) | **0 s** | — |
 
 <sub>* qBittorrent has no player: its time is until the first and last pieces are on disk, what a player needs before its first frame. Each client starts fresh with nothing cached, in rotating order; the same player (the app's mpv) plays for Stremio and Turbo. Script and raw numbers: [research/lab/bench](research/lab/bench).</sub>
 
@@ -100,7 +104,7 @@ flowchart LR
 
 **Always ahead of the official app.** A release can't be built until the latest code of every original project is merged and every test passes ([scripts/release.ps1](scripts/release.ps1)). A daily job opens an issue when one of them moves.
 
-**Quality.** TBD tests across the web UI (Jest), the server and libraries (Go) and the app (Rust), run before every commit. TBD findings documents record each change with numbers from before and after. Built with Claude Code from written plans, one measured step at a time.
+**Quality.** About 2,200 tests across the web UI (Jest), the server and libraries (Go) and the app (Rust), run before every commit. 43 findings documents record each change with numbers from before and after. Built with Claude Code from written plans, one measured step at a time.
 
 **Stack.** Go · Rust · React · TypeScript · WebView2 · mpv · anacrolix/torrent · Inno Setup · GitHub Actions
 
