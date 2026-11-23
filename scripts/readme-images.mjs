@@ -8,7 +8,7 @@
 //       the app with WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 first.
 //   node scripts/readme-images.mjs compose
 //       Renders the banner, the download button and the benchmark chart (light and dark) with
-//       headless Edge, from bench.json and the captures.
+//       headless Chrome (or Edge), from bench.json and the captures.
 //
 // No dependencies: Node 24 (fetch, WebSocket) and the Edge that ships with Windows.
 import { spawn, spawnSync } from 'node:child_process';
@@ -51,9 +51,14 @@ async function cdp(wsUrl) {
 
 // Headless Edge, its own throwaway profile, DevTools on a loopback port.
 async function edge() {
-    const exe = ['ProgramFiles(x86)', 'ProgramFiles'].map((v) => process.env[v] && path.join(process.env[v], 'Microsoft', 'Edge', 'Application', 'msedge.exe'))
-        .find((p) => p && fs.existsSync(p));
-    if (!exe) throw new Error('Microsoft Edge not found');
+    // Chrome first: Edge registers its tabs with Windows even when headless, and they stay in
+    // Alt+Tab as blank entries until Explorer restarts. Edge only as a fallback.
+    const exe = [
+        ...['ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'].map((v) => process.env[v] && path.join(process.env[v], 'Google', 'Chrome', 'Application', 'chrome.exe')),
+        ...['ProgramFiles(x86)', 'ProgramFiles'].map((v) => process.env[v] && path.join(process.env[v], 'Microsoft', 'Edge', 'Application', 'msedge.exe')),
+    ].find((p) => p && fs.existsSync(p));
+    if (!exe) throw new Error('neither Chrome nor Edge found');
+    if (exe.endsWith('msedge.exe')) console.log('rendering with Edge (no Chrome found): it may leave blank Alt+Tab entries until Explorer restarts');
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'readme-edge-'));
     const port = 9333;
     const proc = spawn(exe, ['--headless=new', `--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1',
@@ -63,7 +68,7 @@ async function edge() {
         await sleep(200);
         ver = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json()).catch(() => null);
     }
-    if (!ver) throw new Error('Edge DevTools did not come up');
+    if (!ver) throw new Error('browser DevTools did not come up');
     const c = await cdp(ver.webSocketDebuggerUrl);
     return {
         // Renders HTML at a CSS size and saves a PNG at 2x, with a transparent background unless
@@ -90,8 +95,7 @@ async function edge() {
             console.log('wrote', path.relative(ROOT, out));
         },
         async close() {
-            // A clean shutdown: killing Edge leaves its tabs registered with Windows, and they
-            // linger in Alt+Tab as blank entries until Explorer restarts.
+            // A clean shutdown, then a kill if the browser hasn't exited.
             const exited = new Promise((res) => proc.once('exit', res));
             await c.send('Browser.close').catch(() => {});
             await Promise.race([exited, sleep(5000)]);
