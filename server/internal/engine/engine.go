@@ -453,7 +453,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	// peers held 1.2-2.9 s, which every newly urgent chunk (a seek, mpv's Cues) waited behind.
 	// The chunks a blocked reader needs next (1 MiB) go first and move to a peer expected to
 	// deliver them at least twice as soon (research/findings/15).
-	cc.RequestQueueRTTs = 4
+	cc.RequestQueueRTTs = requestQueueRTTs(cfg.RequestQueueRTTs)
 	cc.RequestQueueMinTime = 500 * time.Millisecond
 	cc.PeerConnRTT = connRTT
 	cc.ReaderCriticalBytes = 1 << 20
@@ -2803,6 +2803,21 @@ func (e *engine) releasePieces(pieces []int, set func(int, torrent.PiecePriority
 // 100 started fastest (3.0 s median) and most evenly, while 200 used 50% more
 // CPU and started a second later for no reliable gain.
 const defaultPeersPerTorrent = 100
+
+// defaultRequestQueueRTTs is the per-peer request queue in round trips (Config.RequestQueueRTTs).
+const defaultRequestQueueRTTs = 4
+
+// requestQueueRTTs maps Config.RequestQueueRTTs to the library's setting: 0 is the default, and a
+// negative value turns the round-trip rule off (every queue is RequestQueueTime of the peer's rate).
+func requestQueueRTTs(n float64) float64 {
+	switch {
+	case n == 0:
+		return defaultRequestQueueRTTs
+	case n < 0:
+		return 0
+	}
+	return n
+}
 
 // peerBudget derives the anacrolix per-torrent connection budget from a single
 // knob. n<=0 uses defaultPeersPerTorrent. half-open = n/2, high-water = n*10

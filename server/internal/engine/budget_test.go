@@ -55,3 +55,11 @@ func TestMaxInt(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestQueueRTTs(t *testing.T) {
+	for _, tc := range []struct{ in, want float64 }{{0, defaultRequestQueueRTTs}, {-1, 0}, {8, 8}} {
+		if got := requestQueueRTTs(tc.in); got != tc.want {
+			t.Errorf("requestQueueRTTs(%v) = %v; want %v", tc.in, got, tc.want)
+		}
+	}
+}

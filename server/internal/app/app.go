@@ -168,6 +168,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		EnableDLNA:          envBool(lookup, "RIVULET_ENABLE_DLNA", false),                  // default disabled; set =1/true to enable /casting DLNA discovery + control
 		PeersPerTorrent:     envInt(lookup, "RIVULET_PEERS_PER_TORRENT", 0),                 // 0 = default 100/50/1000; lower (e.g. 30) trims peer goroutines & RAM
 		DialRate:            envInt(lookup, "RIVULET_DIAL_RATE", defaultDialRate),           // outgoing connection attempts/s, client-wide; 0 keeps anacrolix's 10
+		RequestQueueRTTs:    envFloat(lookup, "RIVULET_REQUEST_QUEUE_RTTS", 0),              // per-peer queue in round trips; 0 = default, -1 = always 3 s (bench knob)
 		TrackersURL:         trackersURL(lookup),                                            // remote tracker list; "" disables remote fetch (RIVULET_TRACKERS_URL)
 		LocalIMDB:           envBool(lookup, "RIVULET_LOCAL_IMDB", true),                    // local-files addon IMDB resolution; default on
 		LocalFilesPublicURL: localFilesPublicURL,

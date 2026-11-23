@@ -54,6 +54,10 @@ type Config struct {
 	// outgoing connection attempts per second, client-wide (anacrolix DialRateLimiter, burst equal);
 	// RIVULET_DIAL_RATE; default 30 (libtorrent's connection_speed); 0 keeps anacrolix's 10
 	DialRate int
+	// per-peer request queue in round trips (at least 0.5 s, at most 3 s of the peer's rate);
+	// RIVULET_REQUEST_QUEUE_RTTS, a bench knob; 0 = default (engine.DefaultRequestQueueRTTs),
+	// negative = always 3 s (libtorrent's request_queue_time)
+	RequestQueueRTTs float64
 	// enable DLNA/UPnP casting discovery + control on /casting; RIVULET_ENABLE_DLNA; default false (disabled)
 	EnableDLNA bool
 
