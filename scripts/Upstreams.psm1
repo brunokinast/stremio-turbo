@@ -142,6 +142,8 @@ function Invoke-AllTests {
     Push-Location (Join-Path $script:root 'deps/torrent')
     try { go test . } finally { Pop-Location }
     Get-MediaBinaries | Out-Null # the shell's build.rs needs libmpv's zip
+    # rustup's installer adds cargo to the user PATH, which a pwsh started from an older session lacks.
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { $env:PATH = "$HOME\.cargo\bin;$env:PATH" }
     Push-Location (Join-Path $script:root 'shell')
     try { cargo test --release --target x86_64-pc-windows-msvc } finally { Pop-Location }
 }
