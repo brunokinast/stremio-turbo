@@ -32,6 +32,7 @@ $cargo = Join-Path $root 'shell/Cargo.toml'
 $text = [IO.File]::ReadAllText($cargo)
 $text = [regex]::new('(?m)^version = "[^"]+"').Replace($text, "version = `"$Version`"", 1)
 [IO.File]::WriteAllText($cargo, $text)
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { $env:PATH = "$HOME\.cargo\bin;$env:PATH" }
 Push-Location (Join-Path $root 'shell')
 try { cargo update --workspace --offline } finally { Pop-Location }
 git -C $root add shell/Cargo.toml shell/Cargo.lock
