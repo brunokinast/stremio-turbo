@@ -25,6 +25,6 @@ if ($core.Used -ne $core.Latest) { $behind += $coreLine }
 if ($Markdown) { Write-Output "- $coreLine" } else { Write-Host $coreLine }
 
 if ($behind.Count) {
-    if (-not $Markdown) { Write-Host "`nBehind upstream: run scripts/sync-upstreams.ps1." -ForegroundColor Yellow }
+    if (-not $Markdown) { Write-Host "`nBehind upstream: run mise run sync." -ForegroundColor Yellow }
     exit 1
 }

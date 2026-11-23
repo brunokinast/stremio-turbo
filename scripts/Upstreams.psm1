@@ -22,7 +22,8 @@ $script:Upstreams = @(
 $script:ShellFilter = @(
     '--invert-paths',
     '--path', 'bin/', '--path', 'bin-arm64/', '--path', 'mpv-arm64/', '--path', 'server.js',
-    '--path-glob', '*.zip', '--path-glob', '*.dll',
+    # Regexes, not globs: pwsh on Linux (CI) expands a bare '*.zip' against the working directory.
+    '--path-regex', '\.zip$', '--path-regex', '\.dll$',
     '--path', 'mpv.lib', '--path', 'mpv.exp', '--path', 'mpv.def'
 )
 
