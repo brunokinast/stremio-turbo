@@ -364,15 +364,50 @@ async function capture(args) {
         async race() {
             // Cropped to the panel's top: the quality rows, then the race in their place.
             await open(set.race.route, `!!(${tierButton(set.race.tier)})`);
+            // Filmed from the page (DevTools screenshots of the panel), not the screen: the panel is
+            // all web content, and a screen grab sometimes catches the web view mid-composition
+            // over mpv's window, so the panel blinks out for a frame. Ends at the switch to the player.
             const p = await rectOf(PANEL, 8);
-            await record(dir, 'feature-race', 40, async () => {
-                await sleep(900);
-                await watchFirstFrame();
-                await play(`(${tierButton(set.race.tier)}).click()`);
-                await firstFrame();
-                return a.evaluate('window.__readmeFF.player');
-            }, { crop: { ...p, height: 440 }, tail: 1.5, endAtCut: true });
+            const clip = { x: p.x, y: p.y, width: p.width, height: 440, scale: 2 };
+            const frames = path.join(dir, 'race-frames');
+            fs.rmSync(frames, { recursive: true, force: true });
+            fs.mkdirSync(frames);
+            await watchFirstFrame();
+            const shots = [];
+            let stop = false;
+            const filming = (async () => {
+                const t0 = Date.now();
+                while (!stop && Date.now() - t0 < 40000) {
+                    const at = Date.now();
+                    const { data } = await a.c.send('Page.captureScreenshot', { format: 'png', clip });
+                    if (stop) break;
+                    const racing = await a.evaluate(`[...document.querySelectorAll('[class*="racing-cancel"]')].some((b) => b.getBoundingClientRect().width > 0)`);
+                    const file = `f${String(shots.length).padStart(4, '0')}.png`;
+                    fs.writeFileSync(path.join(frames, file), Buffer.from(data, 'base64'));
+                    shots.push({ file, at, racing });
+                    if (shots.length % 3 === 0 && await a.evaluate(`location.hash.startsWith('#/player')`)) break;
+                    await sleep(Math.max(0, 70 - (Date.now() - at)));
+                }
+            })();
+            await sleep(900);
+            // Stop filming as soon as the page leaves for the player (the poll above is a backstop).
+            const playing = play(`(${tierButton(set.race.tier)}).click()`);
+            await a.waitFor(`location.hash.startsWith('#/player')`, 40);
+            stop = true;
+            await filming;
+            await playing;
+            await firstFrame();
             await leave();
+            // The race panel closes a moment before the player opens: end on its last frame.
+            if (shots.some((s) => s.racing)) while (!shots.at(-1).racing) shots.pop();
+            // The frames with their real timing, then the clip at 12 fps.
+            const list = shots.map((s, i) => `file ${s.file}\nduration ${(((shots[i + 1]?.at ?? s.at + 700) - s.at) / 1000).toFixed(3)}`).join('\n');
+            fs.writeFileSync(path.join(frames, 'list.txt'), `ffconcat version 1.0\n${list}\nfile ${shots.at(-1).file}\n`);
+            const mp4 = path.join(dir, 'feature-race.mp4');
+            spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(frames, 'list.txt'),
+                '-vf', 'fps=12,scale=trunc(iw/2)*2:trunc(ih/2)*2', '-pix_fmt', 'yuv444p', '-crf', '8', mp4], { stdio: 'inherit' });
+            makeGif(mp4, path.join(dir, 'feature-race.gif'), '', Math.round(clip.width * 1.3) & ~1);
+            console.log('wrote', path.relative(ROOT, mp4), shots.length, 'frames');
         },
         async engine() {
             // A single source from the full list, with a stopwatch from the click to the first
@@ -739,7 +774,7 @@ function bannerHtml(appPng, iconPng) {
 const CARD = { w: 640, h: 340, pad: 30, gap: 26, bleed: 26, radius: 18 };
 const PAGE = { light: '#ffffff', dark: '#0d1117' };
 const FEATURES = [
-    { name: 'race', side: 'right', screen: [260, 286], bleed: 10, src: 'feature-race.gif',
+    { name: 'race', side: 'right', screen: [260, 286], bleed: 10, src: 'feature-race.mp4',
         eyebrow: 'Smart play', title: 'Races the sources',
         body: 'Press Play on a quality and its top three sources are tested live. The best one that keeps up plays; if none does, it steps down a quality and says why.',
         stat: '≥ 1.25×', statLabel: 'the speed the video needs, or it doesn’t play' },
