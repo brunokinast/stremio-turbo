@@ -95,14 +95,14 @@ def drain(handle):
             vals = a.values
             last_counters = {m: (vals[m] if isinstance(vals, dict) else vals[metric_index[m]]) for m in METRICS}
         elif isinstance(a, lt.peer_connect_alert):
-            ev('connect', peer=endpoint(a), socket=str(a.socket_type), direction=str(getattr(a, 'direction', '')))
+            ev('connect', peer=endpoint(a), socket=str(getattr(a, 'socket_type', '')), direction=str(getattr(a, 'direction', '')))
         elif isinstance(a, lt.peer_disconnected_alert):
-            ev('disconnect', peer=endpoint(a), socket=str(a.socket_type), op=str(a.op), error=a.error.message(),
+            ev('disconnect', peer=endpoint(a), socket=str(getattr(a, 'socket_type', '')), op=str(a.op), error=a.error.message(),
                reason=str(a.reason))
         elif isinstance(a, lt.peer_error_alert):
             ev('peer-error', peer=endpoint(a), op=str(a.op), error=a.error.message())
         elif isinstance(a, lt.incoming_connection_alert):
-            ev('incoming', peer=endpoint(a), socket=str(a.socket_type))
+            ev('incoming', peer=endpoint(a), socket=str(getattr(a, 'socket_type', '')))
         elif isinstance(a, lt.dht_get_peers_reply_alert):
             ev('dht-reply', peers=a.num_peers())
         elif isinstance(a, lt.dht_reply_alert):
@@ -121,7 +121,7 @@ def drain(handle):
         elif isinstance(a, lt.listen_failed_alert):
             ev('listen-failed', error=a.error.message(), address=str(a.address), port=a.port)
         elif isinstance(a, lt.listen_succeeded_alert):
-            ev('listen', address=str(a.address), port=a.port, socket=str(a.socket_type))
+            ev('listen', address=str(a.address), port=a.port, socket=str(getattr(a, 'socket_type', '')))
 
 
 WATCH = set()

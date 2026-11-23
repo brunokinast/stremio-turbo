@@ -6,7 +6,9 @@ usage: python compare.py <infoHash> <fileIdx> [key=value ...]
   as when the app has just opened)  rows=official,turbo,qbt  out=<dir> (default
   research/data/bench-<time>; it holds peer addresses and is never published)
   turboenv=NAME=value;NAME2=value (extra environment for Turbo's Rivulet, to bench a setting)
-  variants=turbo-a:NAME=v|turbo-b:NAME=w (Turbo rows with their own environment, interleaved in each round)
+  variants=turbo-a:NAME=v|turbo-b:NAME=w (Turbo rows with their own environment, interleaved in each round;
+  @EXE=<path> in a variant copies that rivulet-engine build into Turbo's install first, to compare builds
+  from the one firewall-allowed path)
 
 Each run starts the client fresh, waits `settle`, then:
 - official / turbo: mpvplay.py plays the file with the shell's libmpv (vo=null, audio off) for
@@ -129,13 +131,17 @@ class Turbo:
         self.name, self.env = name, env or {}
 
     def start(self, run_dir):
+        env_extra = dict(self.env)
+        exe = env_extra.pop('@EXE', None)
+        if exe:
+            shutil.copyfile(exe, os.path.join(TURBO_DIR, 'rivulet-engine.exe'))
         # As the shell starts it (shell/src/stremio_app/stremio_server/server.rs), with an owner
         # process of our own: when it ends, Rivulet exits on its own, cleanly.
         self.owner = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(86400)'], creationflags=subprocess.CREATE_NO_WINDOW)
         env = dict(os.environ, BIND_ADDRESS='127.0.0.1', HTTP_PORT='11470', HTTPS_PORT='0', BT_LISTEN_PORT=str(BT_PORT),
                    APP_PATH=TURBO_DATA, RIVULET_OWNER_PID=str(self.owner.pid),
                    RIVULET_LOG_FILE=os.path.join(run_dir, 'rivulet.log'), RIVULET_SPEED_LIMITS='0',
-                   PATH=TURBO_DIR + os.pathsep + os.environ.get('PATH', ''), **{**TURBO_ENV, **self.env})
+                   PATH=TURBO_DIR + os.pathsep + os.environ.get('PATH', ''), **{**TURBO_ENV, **env_extra})
         self.p = subprocess.Popen([os.path.join(TURBO_DIR, 'rivulet-engine.exe')], cwd=TURBO_DIR, env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
         if not wait_up(SERVER + '/heartbeat'):

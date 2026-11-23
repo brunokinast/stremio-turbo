@@ -29,10 +29,10 @@ Where two findings disagree, the higher number wins.
 
 **Closing out, and parity with qBittorrent**
 - [38](findings/38-review-fixes-and-cleanup.md) review fixes · [39](findings/39-live-checks.md) live checks · [40](findings/40-plan10-closed.md), [41](findings/41-plan9-closed.md) the last plans closed
-- [42](findings/42-supply-gap.md) why Turbo got fewer peers · [43](findings/43-supply-parity.md) supply parity · [44](findings/44-mid-file-starts.md) mid-file starts
+- [42](findings/42-supply-gap.md) why Turbo got fewer peers · [43](findings/43-supply-parity.md) supply parity · [44](findings/44-mid-file-starts.md) mid-file starts · [45](findings/45-steady-state-speed.md) steady-state speed: one seedbox, not the engine
 
 ## Lab
-- [`lab/bench`](lab/bench): the benchmark behind the README's numbers (Turbo, official Stremio and qBittorrent on the same torrent, fresh each run).
+- [`lab/bench`](lab/bench): the benchmark behind the README's numbers (Turbo, official Stremio and qBittorrent on the same torrent, fresh each run), and `ceiling.py`, one connection from a local libtorrent seeder with an optional delay.
 - [`lab/player`](lab/player): mpv-driven plays and a smart-play emulator with its tests.
 - [`lab/addons`](lab/addons): a local add-on serving season packs for tests.
 - [`lab/tools`](lab/tools): `goexec`, which runs every `go test` binary from a fixed, firewall-allowed slot (set with `GOFLAGS=-exec=…\goexec.exe`), and the script that allows those slots.
@@ -43,5 +43,4 @@ The transport lab of findings 10–15 (a latency relay, uTP downloaders, a swarm
 - Player buffer: count pauses before and after the mpv buffer settings on a thin swarm.
 - The next-day check: the next episode on disk, a start under 2 s, no pauses.
 - A libtorrent-based engine as an alternative to anacrolix, if supply parity regresses (findings 42–43).
-- Bench a fresh 4K HDR episode from the start with finding 44's change.
 - Prepare more than the first Continue Watching card, measured against the data it costs.
