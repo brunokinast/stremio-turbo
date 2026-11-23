@@ -10,6 +10,8 @@ Every folder below holds an original project with its full history, plus our cha
 | `deps/go-utp/` | [anacrolix/go-utp](https://github.com/anacrolix/go-utp) | `master` | MPL-2.0 | Used by `deps/torrent/` and `server/` through `replace`s. |
 | `shell/` | [Stremio/stremio-shell-ng](https://github.com/Stremio/stremio-shell-ng) | `main` | none stated | Filtered: binaries (libmpv, ffmpeg, `server.js` and its runtime) are left out; `scripts/build.ps1` downloads the media binaries we ship, pinned in `scripts/binaries.json`. The filter is deterministic, so later syncs merge normally. Files keep upstream's line endings (some are CRLF). |
 
+Upstream's own `.github/` folders (`web/.github`, `server/.github`) and `server/.agents` are kept so syncs merge cleanly, but they're dormant here: GitHub runs only the root `.github`.
+
 ## Syncing by hand
 A folder is merged with a subtree merge, which keeps the upstream history and lands its tree under the folder:
 
