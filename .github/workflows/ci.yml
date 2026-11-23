@@ -92,7 +92,6 @@ jobs:
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: ${{ env.MISE_VERSION }}
-          mise_dir: D:\mise
           install_args: go
       - run: pwsh -NoProfile -File scripts/test.ps1 ${{ matrix.module }}
 
@@ -111,7 +110,6 @@ jobs:
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: ${{ env.MISE_VERSION }}
-          mise_dir: D:\mise
           install_args: rust
       - run: pwsh -NoProfile -File scripts/test.ps1 shell
 
@@ -133,7 +131,6 @@ jobs:
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: ${{ env.MISE_VERSION }}
-          mise_dir: D:\mise
       - name: Inno Setup
         run: choco install innosetup --version 6.7.1 --no-progress -y
       - run: mise run build -NoSign
