@@ -97,7 +97,7 @@ pwsh scripts/dev.ps1             # the app against the web dev server
 pwsh scripts/sync-upstreams.ps1  # merge every original project's latest code
 ```
 
-Each folder keeps its project's licence: `web/` GPL-2.0, `server/` MIT, `deps/` MPL-2.0; `shell/` comes from Stremio's stremio-shell-ng, which states none. Upstreams and how to sync them: [UPSTREAMS.md](UPSTREAMS.md).
+Each folder keeps its project's licence (`web/` GPL-2.0, `server/` MIT, `deps/` MPL-2.0; Stremio's shell states none), and the rest of the repository is GPL-2.0: see [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE). Upstreams and how to sync them: [UPSTREAMS.md](UPSTREAMS.md).
 
 <br>
 
