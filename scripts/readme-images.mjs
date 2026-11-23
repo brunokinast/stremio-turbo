@@ -849,13 +849,13 @@ function engineChart(b) {
         ${speedPanelSvg(b, 'healthy', t, w - 28 - CARD.bleed, h - 52, 0.95)}</div>`;
 }
 
-// Lays a clip under the card's hole and writes an animated GIF (2x, 12 fps).
+// Lays a clip under the card's hole and writes an animated GIF (2x, 10 fps).
 function cardGif(topPng, clip, f, gif) {
     const r = cardScreen(f);
     const S = 2;
-    const vf = `color=c=#0c0b11:s=${CARD.w * S}x${CARD.h * S}:r=12[bg];[1:v]${f.cropTop ? `crop=iw:ih-${f.cropTop}:0:${f.cropTop},` : ''}fps=12,scale=${r.w * S}:${r.h * S}:flags=lanczos[m];` +
+    const vf = `color=c=#0c0b11:s=${CARD.w * S}x${CARD.h * S}:r=10[bg];[1:v]${f.cropTop ? `crop=iw:ih-${f.cropTop}:0:${f.cropTop},` : ''}fps=10,scale=${r.w * S}:${r.h * S}:flags=lanczos[m];` +
         `[bg][m]overlay=${r.x * S}:${r.y * S}:shortest=1[v];[v][0:v]overlay=0:0:shortest=1,split[a][b];` +
-        `[a]palettegen=max_colors=160:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
+        `[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
     spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-loop', '1', '-i', topPng, '-i', clip, '-filter_complex', vf, gif], { stdio: 'inherit' });
 }
 
