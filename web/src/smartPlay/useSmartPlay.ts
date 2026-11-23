@@ -24,6 +24,7 @@ import { getLastQuality, getQuality, qualityLabel, setQuality } from './qualityM
 import { setState, useSmartPlayState } from './session';
 import { addDownload, removeDownload, useDownloads } from './downloads';
 import { qualitySteps } from './candidates';
+import type { Step } from './candidates';
 import { withDisk } from './withDisk';
 import { pick } from './picker';
 import type { PickResult, Progress } from './picker';
@@ -55,11 +56,16 @@ type Picking = {
 // The running or finished pick, keyed by the quality it started from.
 type Run = {
     key: string,
+    // The sources its first step tests (sourcesOf), to tell whether the
+    // ranking has moved on since it started.
+    sources: string,
     controller: AbortController,
     progress: Progress | null,
     result: PickResult | null,
     done: Promise<PickResult | null>,
 };
+
+const sourcesOf = (steps: Step[]) => (steps[0]?.sources ?? []).map((source) => `${source.infoHash}:${source.fileIdx}`).join(',');
 
 // How long the ranking must hold still before the background pick starts
 // (live counts can still reorder it).
@@ -139,7 +145,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
         }
         run.current?.controller.abort();
         const controller = new AbortController();
-        const current: Run = { key: tierKey, controller, progress: null, result: null, done: Promise.resolve(null) };
+        const current: Run = { key: tierKey, sources: sourcesOf(steps), controller, progress: null, result: null, done: Promise.resolve(null) };
         current.done = pick({
             baseUrl,
             steps,
@@ -268,7 +274,12 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
             return;
         }
         playStarted.current = true;
-        const current = run.current !== null && run.current.key === tierKey ? run.current : startPick(tierKey);
+        // The background pick for this quality, unless the live counts have
+        // since changed which sources it should test: it starts once the
+        // first counts arrive, and a well-seeded source still unanswered then
+        // ranks last (a race of 3, 2 and 2 seeders skipped one with 92).
+        const background = run.current !== null && run.current.key === tierKey && (run.current.result !== null || run.current.sources === sourcesOf(qualitySteps(tiers, tierKey))) ? run.current : null;
+        const current = background ?? startPick(tierKey);
         if (current === null) {
             playStarted.current = false;
             return;
