@@ -19,7 +19,7 @@ import (
 // The DHT routing table is kept across restarts (RIVULET_DHT_NODES_FILE).
 // Started empty, the DHT needs one to three seconds of bootstrap traversal
 // before a torrent's get_peers finds anyone, and on a 4K swarm the DHT is where
-// the productive peers come from (streaming-research findings/16). The
+// the productive peers come from (research/findings/16). The
 // launcher force-stops the server, so the table is saved periodically rather
 // than at exit.
 const (

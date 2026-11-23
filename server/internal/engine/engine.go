@@ -428,7 +428,7 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	// together (the web client's preload and race) queued 64 attempts in the
 	// first 0.5 s whose results then arrived every 0.1 s until 9.5 s; the peers
 	// that later delivered most had been dialled at 0.2 s and connected at
-	// 3.6-5.2 s (streaming-research findings/18-19). 30/s with an equal burst
+	// 3.6-5.2 s (research/findings/18-19). 30/s with an equal burst
 	// is libtorrent's connection_speed default (qBittorrent's engine).
 	if cfg.DialRate > 0 {
 		cc.DialRateLimiter = rate.NewLimiter(rate.Limit(cfg.DialRate), cfg.DialRate)
@@ -440,19 +440,19 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	// Request queue per peer: 32 requests (512 KiB) at once, growing per block until the peer's
 	// rate levels off, refilled at half rather than when empty. The library default doubles from
 	// 2 only when the queue drains: ~15 s to reach ~200 requests at 300 ms RTT, with the sender
-	// idle for a round trip per batch (streaming-research findings/10, findings/13).
+	// idle for a round trip per batch (research/findings/10, findings/13).
 	cc.InitialRequestQueue = 32
 	cc.RequestLowWater = 0.5
 	// Request a reader's piece from its offset, and interleave the pieces two
 	// readers are on: with responsive readers, mpv's head and Cues reads get
 	// their few chunks first instead of waiting for whole 16 MiB pieces
-	// (streaming-research findings/14).
+	// (research/findings/14).
 	cc.ReaderOffsetFirst = true
 	// Size each peer's queue to 4 round trips (at least 0.5 s, at most RequestQueueTime) instead
 	// of 3 s of its rate: a µTorrent peer delivered 6 MiB/s with a 0.33 s queue while libtorrent
 	// peers held 1.2-2.9 s, which every newly urgent chunk (a seek, mpv's Cues) waited behind.
 	// The chunks a blocked reader needs next (1 MiB) go first and move to a peer expected to
-	// deliver them at least twice as soon (streaming-research findings/15).
+	// deliver them at least twice as soon (research/findings/15).
 	cc.RequestQueueRTTs = 4
 	cc.RequestQueueMinTime = 500 * time.Millisecond
 	cc.PeerConnRTT = connRTT
@@ -1601,7 +1601,7 @@ func (e *engine) NewReader(idx int) (io.ReadSeekCloser, int64, error) {
 // (the player's own reader releases them), no next-episode prefetch starts, and
 // closing it doesn't demote the file. Without this the race's winner reached
 // the player with its tail unpinned and the file demoted, and mpv's Cues read
-// waited 0.7-1.4 s (streaming-research findings/16).
+// waited 0.7-1.4 s (research/findings/16).
 func (e *engine) NewProbeReader(idx int) (io.ReadSeekCloser, int64, error) {
 	return e.newReader(idx, true)
 }
@@ -1648,7 +1648,7 @@ func (e *engine) newReader(idx int, probe bool) (io.ReadSeekCloser, int64, error
 	r := f.NewReader()
 	// Return each chunk as soon as it is written rather than once its whole
 	// 16 MiB piece is verified: mpv needs 32 KiB of head and the ~100 KiB of
-	// Cues at the end before its first frame (streaming-research findings/14).
+	// Cues at the end before its first frame (research/findings/14).
 	// A chunk from a piece that then fails its hash shows as a glitch; the
 	// piece is fetched again and the peer that sent it is banned.
 	r.SetResponsive()
@@ -2339,7 +2339,7 @@ func applyBoundaryPriorities(e *engine) {
 		}
 		// The trace counts downloaded bytes per file from here, before any
 		// reader: a preloaded or racing torrent's download is part of choosing
-		// a source (streaming-research findings/20).
+		// a source (research/findings/20).
 		if e.trace != nil {
 			e.trace.setFiles(e.infoHash, fileBeginPieces(e.t.Files()))
 		}
@@ -2412,7 +2412,7 @@ func (e *engine) PrimeFile(idx int, startFraction float64) {
 
 // resumeWindowBytes is how much of a file around a resume point is primed:
 // mpv's first reads at a resume landed 13 MB either side of the client's
-// linear estimate, fraction x length (streaming-research findings/17).
+// linear estimate, fraction x length (research/findings/17).
 const resumeWindowBytes int64 = 32 << 20
 
 // resumeSpan returns the pieces covering resumeWindowBytes centred on frac of
@@ -2798,7 +2798,7 @@ func (e *engine) releasePieces(pieces []int, set func(int, torrent.PiecePriority
 
 // defaultPeersPerTorrent is the established-connection budget per torrent:
 // qBittorrent's per-torrent default. Interleaved on a healthy 4K swarm with
-// qBittorrent (streaming-research findings/43), 50, 100 and 200 all held about
+// qBittorrent (research/findings/43), 50, 100 and 200 all held about
 // 40 peers, the swarm's reachable set, at 19-26 MB/s against qBittorrent's 20;
 // 100 started fastest (3.0 s median) and most evenly, while 200 used 50% more
 // CPU and started a second later for no reliable gain.

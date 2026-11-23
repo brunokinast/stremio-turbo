@@ -283,7 +283,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	// the btDownloadSpeedHardLimit cap and the btDownloadSpeedSoftLimit pause in
 	// peer discovery are never applied, whatever the settings say (Stremio
 	// Turbo sets it; with them on, a 4K stream stopped at 11-17 peers while 300+
-	// addresses waited, streaming-research findings/42). Upload is unaffected.
+	// addresses waited, research/findings/42). Upload is unaffected.
 	speedLimitsOn := envBool(lookup, "RIVULET_SPEED_LIMITS", true)
 	if !speedLimitsOn {
 		logging.For("engine").Info("download speed limits off (RIVULET_SPEED_LIMITS)")

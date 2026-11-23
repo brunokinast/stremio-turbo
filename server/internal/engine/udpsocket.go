@@ -16,7 +16,7 @@ import (
 // the socket reader is busy: the lost packets then cost a round trip each to
 // repair. In the lab, loss clumps after the relay appeared in 9 of 13 runs with
 // the default buffer and in none of 8 with 4 MiB, and Windows did not count the
-// drops as receive errors (streaming-research findings/10 §C).
+// drops as receive errors (research/findings/10 §C).
 const udpReadBuffer = 4 << 20
 
 // readBufferSetter is the part of *net.UDPConn the buffer needs.
