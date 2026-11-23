@@ -155,7 +155,7 @@ const useSmartPlay = ({ groups, streamsLoading, metaId, videoId, libraryItem, ru
                 setPicking((p) => p !== null && p.tierKey === tierKey ? { ...p, progress } : p);
             },
             onStepDown: (from, best, to) => {
-                toast.show({ type: 'info', title: t('SMART_PLAY_STEP_DOWN', { from: from.label, best: times(best), to: to.label }), timeout: 6000 });
+                toast.show({ type: 'info', title: best === null ? t('SMART_PLAY_STEP_DOWN_NONE', { from: from.label, to: to.label }) : t('SMART_PLAY_STEP_DOWN', { from: from.label, best: times(best), to: to.label }), timeout: 6000 });
             },
         }).then((result) => {
             current.result = result;

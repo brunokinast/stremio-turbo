@@ -19,8 +19,8 @@ import { addDownload, hasKept, removeDownload } from './downloads';
 import type { Download, DownloadMeta } from './downloads';
 import { stats } from './serverApi';
 import { knownRate, RateMeter } from './supply';
-import { healthRatio, need } from './health';
-import { decide } from './pickDecision';
+import { healthRatio, isHealthy, need } from './health';
+import { decide, HEALTHY_FOR } from './pickDecision';
 import type { Candidate } from './pickDecision';
 import type { RankedSource } from './groupByQuality';
 import type { Step } from './candidates';
@@ -108,6 +108,8 @@ const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, met
         register();
         const renew = setInterval(register, RENEW);
         const started = Date.now();
+        // Since when some source in the step has kept up, without a break.
+        let healthySince: number | null = null;
         let decision: Candidate | 'none' | null = null;
         try {
             for (;;) {
@@ -131,7 +133,9 @@ const pick = async ({ baseUrl, steps, startFraction, runtime, records, meta, met
                     overall = { candidate: leader, step };
                 }
                 progress.steps[i].best = leader?.ratio ?? null;
-                decision = decide(candidates, Date.now() - started >= STEP_TIMEOUT);
+                const anyHealthy = candidates.some((c) => c.live && c.need !== null && c.need > 0 && isHealthy(c.rate, c.need));
+                healthySince = anyHealthy ? healthySince ?? now : null;
+                decision = decide(candidates, Date.now() - started >= STEP_TIMEOUT, healthySince !== null && Date.now() - healthySince >= HEALTHY_FOR);
                 report();
                 if (decision !== null) {
                     break;

@@ -19,21 +19,28 @@ type Candidate = {
 
 // A copy on disk wins at once. Otherwise, once every candidate has a live
 // rate (or the time is up), the healthiest healthy one; 'none' when nobody is
-// healthy then; null while it should keep measuring.
-const decide = (candidates: Candidate[], timeUp: boolean): Candidate | 'none' | null => {
+// healthy then; null while it should keep measuring. A step needn't wait for
+// its slowest source either: once one has kept up for HEALTHY_FOR
+// (healthyLongEnough), the healthiest healthy one plays. All of a step's
+// sources are the same quality, so waiting longer only changes which healthy
+// source wins; it cost up to the whole step timeout when one never connected.
+const decide = (candidates: Candidate[], timeUp: boolean, healthyLongEnough = false): Candidate | 'none' | null => {
     const onDisk = candidates.find((c) => c.need === 0);
     if (onDisk !== undefined) {
         return onDisk;
     }
-    if (!timeUp && !candidates.every((c) => c.live)) {
+    const healthy = candidates.filter((c) => c.live && isHealthy(c.rate, c.need));
+    if (!timeUp && !candidates.every((c) => c.live) && !(healthyLongEnough && healthy.length > 0)) {
         return null;
     }
-    const healthy = candidates.filter((c) => c.live && isHealthy(c.rate, c.need));
     if (healthy.length === 0) {
         return 'none';
     }
     return healthy.reduce((best, c) => (c.ratio ?? 0) > (best.ratio ?? 0) ? c : best);
 };
 
+// How long a source must keep up before a step stops waiting for the rest.
+const HEALTHY_FOR = 3000;
+
 export type { Candidate };
-export { decide };
+export { decide, HEALTHY_FOR };

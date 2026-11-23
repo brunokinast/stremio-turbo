@@ -94,6 +94,14 @@ describe('step decision', () => {
         expect(decide([a, candidate()], true)).toBe(a);
         expect(decide([candidate()], true)).toBe('none');
     });
+    it("stops waiting for a slow source once one has kept up long enough", () => {
+        const fast = candidate({ rate: 3, ratio: 3, live: true });
+        expect(decide([fast, candidate()], false, false)).toBe(null);
+        expect(decide([fast, candidate()], false, true)).toBe(fast);
+    });
+    it("keeps waiting when nobody has kept up, however long", () => {
+        expect(decide([candidate({ rate: 1.1, ratio: 1.1, live: true }), candidate()], false, true)).toBe(null);
+    });
     it("doesn't take a remembered rate as live", () => {
         expect(decide([candidate({ rate: 9, ratio: 9, live: false })], true)).toBe('none');
     });

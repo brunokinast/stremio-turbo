@@ -14,6 +14,10 @@ import type { Picking } from './useSmartPlay';
 import type { EpisodeDownloadState } from './useEpisodeDownload';
 import styles from './QualityRows.less';
 import { gb, times, UNKNOWN } from './format';
+import { MARGIN } from './health';
+
+// A race row's speed bar is full at this many times the speed playback needs.
+const RACE_BAR_FULL = 3;
 
 type Props = {
     tiers: RankedTier[],
@@ -139,16 +143,32 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
 
     const timesX = (ratio: number | null) => ratio === null ? UNKNOWN : `${times(ratio)}×`;
 
-    // One candidate of the step being tested: size, live seeders, and how many
-    // times the speed it needs it downloads (or what it's waiting for).
+    // One candidate of the step being tested: how many times the speed it
+    // needs it downloads (or what it's waiting for), short for the row and in
+    // full for its tooltip.
     const candidateStatus = (candidate: Candidate) => {
         if (candidate.need === 0) {
-            return t('SMART_PLAY_DOWNLOAD_ON_DISK');
+            return { short: t('SMART_PLAY_DOWNLOAD_ON_DISK'), full: t('SMART_PLAY_DOWNLOAD_ON_DISK') };
         }
         if (candidate.ratio === null) {
-            return t('SMART_PLAY_DOWNLOADS_CONNECTING');
+            return { short: t('SMART_PLAY_DOWNLOADS_CONNECTING'), full: t('SMART_PLAY_DOWNLOADS_CONNECTING') };
         }
-        return candidate.live ? t('SMART_PLAY_CANDIDATE_HEALTH', { ratio: timesX(candidate.ratio) }) : t('SMART_PLAY_CANDIDATE_REMEMBERED', { ratio: timesX(candidate.ratio) });
+        const full = candidate.live ? t('SMART_PLAY_CANDIDATE_HEALTH', { ratio: timesX(candidate.ratio) }) : t('SMART_PLAY_CANDIDATE_REMEMBERED', { ratio: timesX(candidate.ratio) });
+        return { short: timesX(candidate.ratio), full };
+    };
+
+    // The candidate's speed against what playback needs, as a bar: full at
+    // RACE_BAR_FULL times, with a tick at the health margin.
+    const renderRaceBar = (candidate: Candidate) => {
+        const ratio = candidate.need === 0 ? RACE_BAR_FULL : candidate.ratio;
+        const fill = ratio === null ? 0 : Math.min(1, ratio / RACE_BAR_FULL);
+        const healthy = ratio !== null && ratio >= MARGIN;
+        return (
+            <span className={styles['race-bar']}>
+                <span className={classNames(styles['race-fill'], { [styles['healthy']]: healthy, [styles['remembered']]: !candidate.live })} style={{ width: `${(fill * 100).toFixed(1)}%` }} />
+                <span className={styles['race-tick']} style={{ left: `${(MARGIN / RACE_BAR_FULL * 100).toFixed(1)}%` }} title={t('SMART_PLAY_RACE_MARGIN', { ratio: `${times(MARGIN)}×` })} />
+            </span>
+        );
     };
 
     if (picking !== null) {
@@ -184,13 +204,17 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
                                     result === 'testing' && progress !== null ?
                                         <div className={styles['racers']}>
                                             {
-                                                progress.candidates.map((candidate) => (
-                                                    <div key={`${candidate.source.infoHash}:${candidate.source.fileIdx}`} className={classNames(styles['racer'], { [styles['leader']]: progress.leader === candidate })}>
-                                                        <span className={styles['racer-size']}>{candidate.source.size !== null ? `${gb(candidate.source.size)} GB` : UNKNOWN}</span>
-                                                        {candidate.need === 0 ? null : renderSeeders(candidate.source.seeders)}
-                                                        <span className={styles['racer-status']}>{candidateStatus(candidate)}</span>
-                                                    </div>
-                                                ))
+                                                progress.candidates.map((candidate) => {
+                                                    const status = candidateStatus(candidate);
+                                                    return (
+                                                        <div key={`${candidate.source.infoHash}:${candidate.source.fileIdx}`} className={classNames(styles['racer'], { [styles['leader']]: progress.leader === candidate })} title={status.full}>
+                                                            <span className={styles['racer-size']}>{candidate.source.size !== null ? `${gb(candidate.source.size)} GB` : UNKNOWN}</span>
+                                                            <span className={styles['racer-seeders']}>{candidate.need === 0 ? null : renderSeeders(candidate.source.seeders)}</span>
+                                                            {renderRaceBar(candidate)}
+                                                            <span className={classNames(styles['racer-status'], { [styles['pending']]: candidate.ratio === null && candidate.need !== 0 })}>{status.short}</span>
+                                                        </div>
+                                                    );
+                                                })
                                             }
                                         </div>
                                         :
