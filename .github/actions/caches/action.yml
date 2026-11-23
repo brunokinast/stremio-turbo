@@ -15,8 +15,11 @@ inputs:
   media:
     description: Restore the pinned media binaries (out/cache)
     default: 'false'
+  pnpm:
+    description: Restore the web's pnpm store
+    default: 'false'
   save:
-    description: Save the Go and cargo caches at the end of the job
+    description: Save the Go and cargo caches at the end of the job (the pnpm store and media binaries save when missing)
     default: 'false'
 
 runs:
@@ -66,3 +69,14 @@ runs:
       with:
         path: out/cache
         key: media-${{ hashFiles('scripts/binaries.json') }}
+
+    - name: pnpm store location
+      if: inputs.pnpm == 'true'
+      shell: pwsh
+      run: '"npm_config_store_dir=D:\pnpm-store" >> $env:GITHUB_ENV'
+    - name: pnpm store
+      if: inputs.pnpm == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: D:\pnpm-store
+        key: pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
