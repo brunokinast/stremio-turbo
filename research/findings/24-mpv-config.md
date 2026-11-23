@@ -36,7 +36,7 @@
 - **Side effects of the installer:**
   - It relaunched plain Stremio, with Stremio's `server.js`. I closed it.
   - It rewrote the Start menu `Stremio.lnk` (standard target, the plain shell). The fork never
-    managed a shortcut; it starts with `scripts/start-stremio.ps1`.
+    managed a shortcut; it started from a launcher script (now `scripts/dev.ps1`).
 - **Re-created** `mpv.conf` and `mpv-config.txt`. Settings → Device now shows "Custom mpv config:
   …\Stremio\mpv.conf". The launcher works unchanged on 5.0.28 (Rivulet plus `--development
   --webui-url`).

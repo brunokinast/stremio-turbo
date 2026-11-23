@@ -5,7 +5,7 @@ usage: mpvplay.py <infoHash> <fileIdx> <label> [key=value ...]
   server=http://127.0.0.1:11470  secs=120  start=0 (seconds; resume with start=+N)
   remove=1 (remove the torrent and its cache after capturing, so the next play is cold)
   mpvconf=1 (apply %APPDATA%/Stremio/mpv.conf after the shell's options, as the shell does)
-  hwdec=auto-copy  out=<dir> (default: streaming-research/data/play-<time>-<label>)
+  hwdec=auto-copy  out=<dir> (default: research/data/play-<time>-<label>)
   trackers=<file> (one announce URL per line; default ../transport/trackers.txt)
   seek=AT:PCT (one seek, AT seconds into the run and after the first frame, to PCT % of the file;
   play.json gets seekRestartS, the seek's time to its playback-restart)

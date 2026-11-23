@@ -65,7 +65,7 @@
 - **Fallback outside the shell** (reopen the player at the position) isn't built: the app only runs in the shell. In a browser, nowWatch does nothing.
 
 ## Torrentio limit 3 → 10 (account change)
-- **Backup:** `C:\Users\bruno\stremio-addons-backup-2026-11-20-before-limit10.json` (7 add-ons).
+- **Backup:** the 7 add-ons were exported to a local file first.
 - **Change:** installed `https://torrentio.strem.fun/limit=10/manifest.json` through core, then uninstalled the `limit=3` entry. Core keys add-ons by URL, so the install added a second copy rather than replacing it.
 - **Measured:**
 

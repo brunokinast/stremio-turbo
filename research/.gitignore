@@ -2,6 +2,7 @@
 data/
 *.exe
 *.part
-lab/transport/dl/
+# Local leftovers of the transport lab, removed from the repository (see README.md)
+lab/transport/
 lab/testbin/
 *.torrent

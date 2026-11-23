@@ -1,6 +1,6 @@
 # Stremio Turbo: project directives
 
-One repository holding the owner's Stremio: `web/` (stremio-web fork), `server/` (Rivulet Engine fork, the streaming server), `shell/` (stremio-shell-ng fork, the Windows app), `deps/` (anacrolix torrent and go-utp forks), `research/` (findings and plans; start at `research/plans/00-START-HERE.md`). Each folder keeps its own `CLAUDE.md`/`AGENTS.md` for project-specific rules; this file holds what applies everywhere.
+One repository holding the owner's Stremio: `web/` (stremio-web fork), `server/` (Rivulet Engine fork, the streaming server), `shell/` (stremio-shell-ng fork, the Windows app), `deps/` (anacrolix torrent and go-utp forks), `research/` (the measured findings behind every change; start at `research/README.md`). Each folder keeps its own `CLAUDE.md`/`AGENTS.md` for project-specific rules; this file holds what applies everywhere.
 
 ## Principles
 - **Proper implementations.** Fix root causes where they belong, in whichever folder that is. No patch scripts, runtime monkey-patching or env-var workarounds standing in for a real change.

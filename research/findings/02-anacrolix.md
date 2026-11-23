@@ -1,6 +1,6 @@
 # anacrolix/torrent: how Rivulet's engine library requests, dials and reads
 
-Source: the fork at `C:\Users\bruno\Documents\git\anacrolix-torrent` (`main` = upstream `master` 753d7120, 2026-11-16, plus our uncommitted `request-health.go`). Line numbers are from that tree.
+Source: the fork (then its own repository, now `deps/torrent/`) (`main` = upstream `master` 753d7120, 2026-11-16, plus our uncommitted `request-health.go`). Line numbers are from that tree.
 
 ## 1. Which pieces are wanted, and in what order
 **Priority of a piece** (`piece.go:381`, `purePriority`) = the highest of:
