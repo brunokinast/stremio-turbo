@@ -1,0 +1,569 @@
+{
+ "disk": {
+  "total": 2000000000000,
+  "free": 1210000000000,
+  "used": 790000000000
+ },
+ "downloads": [
+  {
+   "infoHash": "0101010101010101010101010101010101010101",
+   "fileIdx": 1,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:1",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 1,
+    "title": "A Son for a Son",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E01 2160p DV HDR.mkv",
+   "size": 7400000000,
+   "bytesCompleted": 7400000000,
+   "bytesOnDisk": 7400000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-11T20:00:00Z",
+   "order": 2001,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "0202020202020202020202020202020202020202",
+   "fileIdx": 2,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:2",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 2,
+    "title": "Rhaenyra the Cruel",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E02 2160p DV HDR.mkv",
+   "size": 7400000000,
+   "bytesCompleted": 7400000000,
+   "bytesOnDisk": 7400000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-12T20:00:00Z",
+   "order": 2002,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "0303030303030303030303030303030303030303",
+   "fileIdx": 3,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:3",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 3,
+    "title": "The Burning Mill",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E03 2160p DV HDR.mkv",
+   "size": 7400000000,
+   "bytesCompleted": 7400000000,
+   "bytesOnDisk": 7400000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-13T20:00:00Z",
+   "order": 2003,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "0404040404040404040404040404040404040404",
+   "fileIdx": 4,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:4",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 4,
+    "title": "The Red Dragon and the Gold",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E04 2160p DV HDR.mkv",
+   "size": 7400000000,
+   "bytesCompleted": 7400000000,
+   "bytesOnDisk": 7400000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-14T20:00:00Z",
+   "order": 2004,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "0505050505050505050505050505050505050505",
+   "fileIdx": 5,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:5",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 5,
+    "title": "Regent",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E05 2160p DV HDR.mkv",
+   "size": 7400000000,
+   "bytesCompleted": 7400000000,
+   "bytesOnDisk": 7400000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": false,
+   "addedAt": "2026-11-15T20:00:00Z",
+   "order": 2005,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "0606060606060606060606060606060606060606",
+   "fileIdx": 6,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:6",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 6,
+    "title": "Smallfolk",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E06 2160p DV HDR.mkv",
+   "size": 7900000000,
+   "bytesCompleted": 5056000000,
+   "bytesOnDisk": 5056000000,
+   "rate": 18600000.0,
+   "state": "downloading",
+   "watched": false,
+   "addedAt": "2026-11-16T20:00:00Z",
+   "order": 2006,
+   "first": true,
+   "peers": 42
+  },
+  {
+   "infoHash": "0707070707070707070707070707070707070707",
+   "fileIdx": 7,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:7",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 7,
+    "title": "The Red Sowing",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E07 2160p DV HDR.mkv",
+   "size": 8199999999,
+   "bytesCompleted": 1721999999,
+   "bytesOnDisk": 1721999999,
+   "rate": 9400000.0,
+   "state": "downloading",
+   "watched": false,
+   "addedAt": "2026-11-17T20:00:00Z",
+   "order": 2007,
+   "first": false,
+   "peers": 42
+  },
+  {
+   "infoHash": "0808080808080808080808080808080808080808",
+   "fileIdx": 8,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt11198330",
+    "videoId": "tt11198330:2:8",
+    "type": "series",
+    "name": "House of the Dragon",
+    "poster": "https://images.metahub.space/poster/small/tt11198330/img",
+    "season": 2,
+    "episode": 8,
+    "title": "The Queen Who Ever Was",
+    "runtime": 3600
+   },
+   "name": "House of the Dragon S02E08 2160p DV HDR.mkv",
+   "size": 9100000000,
+   "bytesCompleted": 0,
+   "bytesOnDisk": 0,
+   "rate": 0,
+   "state": "queued",
+   "watched": false,
+   "addedAt": "2026-11-18T20:00:00Z",
+   "order": 2008,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "0909090909090909090909090909090909090909",
+   "fileIdx": 1,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2442560",
+    "videoId": "tt2442560:6:1",
+    "type": "series",
+    "name": "Peaky Blinders",
+    "poster": "https://images.metahub.space/poster/small/tt2442560/img",
+    "season": 6,
+    "episode": 1,
+    "title": "Black Day",
+    "runtime": 3600
+   },
+   "name": "Peaky Blinders S06E01 2160p DV HDR.mkv",
+   "size": 5600000000,
+   "bytesCompleted": 5600000000,
+   "bytesOnDisk": 5600000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-19T20:00:00Z",
+   "order": 6001,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1010101010101010101010101010101010101010",
+   "fileIdx": 2,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2442560",
+    "videoId": "tt2442560:6:2",
+    "type": "series",
+    "name": "Peaky Blinders",
+    "poster": "https://images.metahub.space/poster/small/tt2442560/img",
+    "season": 6,
+    "episode": 2,
+    "title": "Black Shirt",
+    "runtime": 3600
+   },
+   "name": "Peaky Blinders S06E02 2160p DV HDR.mkv",
+   "size": 5600000000,
+   "bytesCompleted": 5600000000,
+   "bytesOnDisk": 5600000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-20T20:00:00Z",
+   "order": 6002,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1111111111111111111111111111111111111111",
+   "fileIdx": 3,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2442560",
+    "videoId": "tt2442560:6:3",
+    "type": "series",
+    "name": "Peaky Blinders",
+    "poster": "https://images.metahub.space/poster/small/tt2442560/img",
+    "season": 6,
+    "episode": 3,
+    "title": "Gold",
+    "runtime": 3600
+   },
+   "name": "Peaky Blinders S06E03 2160p DV HDR.mkv",
+   "size": 5600000000,
+   "bytesCompleted": 5600000000,
+   "bytesOnDisk": 5600000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-21T20:00:00Z",
+   "order": 6003,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1212121212121212121212121212121212121212",
+   "fileIdx": 4,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2442560",
+    "videoId": "tt2442560:6:4",
+    "type": "series",
+    "name": "Peaky Blinders",
+    "poster": "https://images.metahub.space/poster/small/tt2442560/img",
+    "season": 6,
+    "episode": 4,
+    "title": "Sapphire",
+    "runtime": 3600
+   },
+   "name": "Peaky Blinders S06E04 2160p DV HDR.mkv",
+   "size": 5600000000,
+   "bytesCompleted": 5600000000,
+   "bytesOnDisk": 5600000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-22T20:00:00Z",
+   "order": 6004,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1313131313131313131313131313131313131313",
+   "fileIdx": 5,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2442560",
+    "videoId": "tt2442560:6:5",
+    "type": "series",
+    "name": "Peaky Blinders",
+    "poster": "https://images.metahub.space/poster/small/tt2442560/img",
+    "season": 6,
+    "episode": 5,
+    "title": "The Road to Hell",
+    "runtime": 3600
+   },
+   "name": "Peaky Blinders S06E05 2160p DV HDR.mkv",
+   "size": 5600000000,
+   "bytesCompleted": 5600000000,
+   "bytesOnDisk": 5600000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": true,
+   "addedAt": "2026-11-23T20:00:00Z",
+   "order": 6005,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1414141414141414141414141414141414141414",
+   "fileIdx": 6,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2442560",
+    "videoId": "tt2442560:6:6",
+    "type": "series",
+    "name": "Peaky Blinders",
+    "poster": "https://images.metahub.space/poster/small/tt2442560/img",
+    "season": 6,
+    "episode": 6,
+    "title": "Lock and Key",
+    "runtime": 3600
+   },
+   "name": "Peaky Blinders S06E06 2160p DV HDR.mkv",
+   "size": 5600000000,
+   "bytesCompleted": 5600000000,
+   "bytesOnDisk": 5600000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": false,
+   "addedAt": "2026-11-24T20:00:00Z",
+   "order": 6006,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1515151515151515151515151515151515151515",
+   "fileIdx": 1,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2788316",
+    "videoId": "tt2788316:1:1",
+    "type": "series",
+    "name": "Shōgun",
+    "poster": "https://images.metahub.space/poster/small/tt2788316/img",
+    "season": 1,
+    "episode": 1,
+    "title": "Anjin",
+    "runtime": 3600
+   },
+   "name": "Shōgun S01E01 2160p DV HDR.mkv",
+   "size": 6200000000,
+   "bytesCompleted": 6200000000,
+   "bytesOnDisk": 6200000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": false,
+   "addedAt": "2026-11-25T20:00:00Z",
+   "order": 1001,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1616161616161616161616161616161616161616",
+   "fileIdx": 2,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2788316",
+    "videoId": "tt2788316:1:2",
+    "type": "series",
+    "name": "Shōgun",
+    "poster": "https://images.metahub.space/poster/small/tt2788316/img",
+    "season": 1,
+    "episode": 2,
+    "title": "Servants of Two Masters",
+    "runtime": 3600
+   },
+   "name": "Shōgun S01E02 2160p DV HDR.mkv",
+   "size": 6200000000,
+   "bytesCompleted": 6200000000,
+   "bytesOnDisk": 6200000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": false,
+   "addedAt": "2026-11-26T20:00:00Z",
+   "order": 1002,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1717171717171717171717171717171717171717",
+   "fileIdx": 3,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt2788316",
+    "videoId": "tt2788316:1:3",
+    "type": "series",
+    "name": "Shōgun",
+    "poster": "https://images.metahub.space/poster/small/tt2788316/img",
+    "season": 1,
+    "episode": 3,
+    "title": "Tomorrow Is Tomorrow",
+    "runtime": 3600
+   },
+   "name": "Shōgun S01E03 2160p DV HDR.mkv",
+   "size": 6200000000,
+   "bytesCompleted": 2914000000,
+   "bytesOnDisk": 2914000000,
+   "rate": 0,
+   "state": "paused",
+   "watched": false,
+   "addedAt": "2026-11-27T20:00:00Z",
+   "order": 1003,
+   "first": false,
+   "peers": 0
+  },
+  {
+   "infoHash": "1818181818181818181818181818181818181818",
+   "fileIdx": 0,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt15398776",
+    "videoId": "tt15398776",
+    "type": "movie",
+    "name": "Oppenheimer",
+    "poster": "https://images.metahub.space/poster/small/tt15398776/img",
+    "runtime": 10800
+   },
+   "name": "Oppenheimer 2160p DV HDR.mkv",
+   "size": 21400000000,
+   "bytesCompleted": 21400000000,
+   "bytesOnDisk": 21400000000,
+   "rate": 0,
+   "state": "complete",
+   "watched": false,
+   "addedAt": "2026-11-28T20:00:00Z",
+   "peers": 0
+  },
+  {
+   "infoHash": "1919191919191919191919191919191919191919",
+   "fileIdx": 0,
+   "kind": "kept",
+   "origins": [
+    "manual"
+   ],
+   "meta": {
+    "metaId": "tt15239678",
+    "videoId": "tt15239678",
+    "type": "movie",
+    "name": "Dune: Part Two",
+    "poster": "https://images.metahub.space/poster/small/tt15239678/img",
+    "runtime": 10800
+   },
+   "name": "Dune: Part Two 2160p DV HDR.mkv",
+   "size": 24800000000,
+   "bytesCompleted": 9424000000,
+   "bytesOnDisk": 9424000000,
+   "rate": 21200000.0,
+   "state": "downloading",
+   "watched": false,
+   "addedAt": "2026-11-29T20:00:00Z",
+   "peers": 61
+  }
+ ]
+}
