@@ -5,3 +5,10 @@ node_modules/
 /shell/libmpv-2_x64.zip
 /research/lab/bench/.pylib/
 __pycache__/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

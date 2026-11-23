@@ -1,0 +1,23 @@
+# The toolchains every folder's checks need: Node (web), Go (server, deps), Rust (shell).
+name: Set up the toolchains
+description: Node 24 with corepack, Go from server/go.mod, the Rust MSVC target
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 24
+    - run: corepack enable
+      shell: pwsh
+
+    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      with:
+        go-version-file: server/go.mod
+        cache-dependency-path: |
+          server/go.sum
+          deps/torrent/go.sum
+
+    - name: Rust
+      run: rustup target add x86_64-pc-windows-msvc
+      shell: pwsh

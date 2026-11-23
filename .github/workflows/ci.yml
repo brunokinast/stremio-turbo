@@ -1,0 +1,24 @@
+# Runs every folder's checks (web lint and tests, Go vet and tests, Rust tests) on each push to
+# main and on pull requests, the same checks the release runs.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/setup
+      - name: Tests
+        run: pwsh -Command "Import-Module ./scripts/Upstreams.psm1; Invoke-AllTests"
