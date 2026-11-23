@@ -1,6 +1,6 @@
 # Upstreams
 
-Every folder below holds an original project with its full history, plus our changes. `scripts/sync-upstreams.ps1` merges each one's latest code; `scripts/check-upstreams.ps1` reports what isn't merged yet, and `scripts/release.ps1` refuses to release until everything is.
+Every folder below holds an original project with its full history, plus our changes. `mise run sync` (`scripts/sync-upstreams.ps1`) merges each one's latest code; `mise run check-upstreams` reports what isn't merged yet, and the Release workflow refuses to release until everything is.
 
 | Folder | Original project | Branch | Licence | Notes |
 |---|---|---|---|---|

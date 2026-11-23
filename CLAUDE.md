@@ -11,8 +11,8 @@ One repository holding the owner's Stremio: `web/` (stremio-web fork), `server/`
 
 ## Workflow
 - Commit straight to `main` (LF line endings, `core.autocrlf=false`). Push to `origin` (brunokinast/stremio-turbo) once a change works. Never push to the original projects or force-push.
-- Before committing, the touched folder's checks pass: web `corepack pnpm run lint`, `pnpm test`, `pnpm run build`; Go `gofmt -s -l`, `go vet`, `go test -p 1` with `GOWORK=off` (the owner's `GOFLAGS=-exec=…goexec.exe`, from `research/lab/tools/goexec`, runs test binaries from a firewall-allowed slot; never run binaries from other paths); shell `cargo test`. `Invoke-AllTests` in `scripts/Upstreams.psm1` runs them all.
-- Original projects' updates: `scripts/sync-upstreams.ps1`. Releases: `scripts/release.ps1` (refuses while any upstream is unmerged), then the Release workflow publishes; installed apps update themselves.
+- Toolchains and commands come from `mise.toml` (pinned node, pnpm, go, rust; `GOWORK=off`): `mise tasks` lists them. Before committing, the touched folder's checks pass: `mise run test:web` (lint, tests, build), `test:go` (gofmt -s, vet, `go test -p 1`), `test:shell` (cargo test), or `mise run test` for all (`scripts/test.ps1`). The owner's `GOFLAGS=-exec=…goexec.exe`, from `research/lab/tools/goexec`, runs test binaries from a firewall-allowed slot; never run binaries from other paths.
+- CI (`.github/workflows/ci.yml`) runs the areas a push touches, in parallel, plus an unsigned installer; docs-only pushes don't run it. Original projects' updates: `mise run sync`. Releases: `mise run release x.y.z` starts the Release workflow, which refuses unless CI passed on main's HEAD and every upstream is merged, then builds that commit with the version stamped, signs and publishes; installed apps update themselves. Nothing release-related runs on the PC.
 - User-facing text in the web UI goes through `web/src/smartPlay/i18n.en.json`.
 - README images come from `node scripts/readme-images.mjs` (bench, capture, compose): rerun it after UI changes or a new benchmark.
 

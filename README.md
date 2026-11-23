@@ -81,9 +81,9 @@ Every layer of Stremio, forked, improved and bundled into one installer.
 - **Only the player's bytes are urgent.** The chunks mpv needs are asked for first, by deadline, and taken from a slow peer once overdue. ([start-up reads](research/findings/14-startup-reads.md), [critical chunks](research/findings/15-critical-chunks.md))
 - **One health rule for every choice.** 1.25× playback speed picks the source, prepares the next episode, triggers a switch and chooses download sources. ([the picker](research/findings/36-one-picker-next-slot-switching.md))
 
-**Always ahead of the official app.** A release can't be built until every original project's latest code is merged and every test passes ([scripts/release.ps1](scripts/release.ps1)).
+**Always ahead of the official app.** A release can't be built until every original project's latest code is merged and CI has passed on that exact code ([release workflow](.github/workflows/release.yml)).
 
-**Quality.** About 2,200 tests (Jest, Go, Rust) before every commit; 44 findings documents with before-and-after numbers.
+**Quality.** About 2,200 tests (Jest, Go, Rust) on every change, run by CI for the folders it touches; 44 findings documents with before-and-after numbers.
 
 **Stack.** Go · Rust · React · TypeScript · WebView2 · mpv · anacrolix/torrent · Inno Setup · GitHub Actions
 
@@ -91,12 +91,15 @@ Every layer of Stremio, forked, improved and bundled into one installer.
 
 ## Build it
 
-Needs Node.js 24 (corepack), Go, Rust (MSVC) and Inno Setup 6.
+Needs [mise](https://mise.jdx.dev) (it installs the pinned Node, pnpm, Go and Rust from `mise.toml`), the MSVC build tools and Inno Setup 6.
 
 ```
-pwsh scripts/build.ps1           # installer and signed update files in out/
-pwsh scripts/dev.ps1             # the app against the web dev server
-pwsh scripts/sync-upstreams.ps1  # merge every original project's latest code
+mise install         # the pinned toolchains
+mise run test        # every folder's checks (test:web, test:go, test:shell)
+mise run build       # installer in out/ (-Version x.y.z, -NoSign)
+mise run dev         # the app against the web dev server
+mise run sync        # merge every original project's latest code
+mise run release x.y.z  # CI-checked main, built and published by the Release workflow
 ```
 
 Each folder keeps its project's licence (`web/` GPL-2.0, `server/` MIT, `deps/` MPL-2.0; Stremio's shell states none), and the rest of the repository is GPL-2.0: see [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE). Upstreams and how to sync them: [UPSTREAMS.md](UPSTREAMS.md).
