@@ -3,7 +3,7 @@
 # registry, and the pinned media binaries. Only jobs on pushes to main save, so caches roll forward
 # with main and every branch can read them.
 name: Build caches
-description: Go, cargo and media-binary caches on D:
+description: 'Go, cargo and media-binary caches on D:'
 
 inputs:
   go:
