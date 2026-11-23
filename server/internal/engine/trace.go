@@ -5,6 +5,7 @@
 package engine
 
 import (
+	"net"
 	"slices"
 	"sort"
 	"strings"
@@ -373,6 +374,8 @@ func (tr *tracer) samplePeers(ih string, t *torrent.Torrent, now time.Time) {
 		}
 		if isUTP {
 			s.UTP = utpSample(uc.Stats())
+		} else if tc, ok := pc.NetConn().(*net.TCPConn); ok {
+			s.TCP = tcpSample(tc)
 		}
 		samples = append(samples, s)
 	}

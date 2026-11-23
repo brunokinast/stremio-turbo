@@ -2807,14 +2807,12 @@ const defaultPeersPerTorrent = 100
 // defaultRequestQueueRTTs is the per-peer request queue in round trips (Config.RequestQueueRTTs).
 const defaultRequestQueueRTTs = 4
 
-// requestQueueRTTs maps Config.RequestQueueRTTs to the library's setting: 0 is the default, and a
-// negative value turns the round-trip rule off (every queue is RequestQueueTime of the peer's rate).
+// requestQueueRTTs maps Config.RequestQueueRTTs to the library's setting: 0 is the default. A
+// large value (100) reaches the 3 s ceiling, libtorrent's request_queue_time: on a healthy 4K swarm
+// that started 1.75 s later for no reliable steady-state gain (research/findings/45).
 func requestQueueRTTs(n float64) float64 {
-	switch {
-	case n == 0:
+	if n <= 0 {
 		return defaultRequestQueueRTTs
-	case n < 0:
-		return 0
 	}
 	return n
 }

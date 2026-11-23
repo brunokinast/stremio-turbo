@@ -55,8 +55,8 @@ type Config struct {
 	// RIVULET_DIAL_RATE; default 30 (libtorrent's connection_speed); 0 keeps anacrolix's 10
 	DialRate int
 	// per-peer request queue in round trips (at least 0.5 s, at most 3 s of the peer's rate);
-	// RIVULET_REQUEST_QUEUE_RTTS, a bench knob; 0 = default (engine.DefaultRequestQueueRTTs),
-	// negative = always 3 s (libtorrent's request_queue_time)
+	// RIVULET_REQUEST_QUEUE_RTTS, a bench knob; 0 = default (4), 100 = always the 3 s ceiling
+	// (libtorrent's request_queue_time)
 	RequestQueueRTTs float64
 	// enable DLNA/UPnP casting discovery + control on /casting; RIVULET_ENABLE_DLNA; default false (disabled)
 	EnableDLNA bool
@@ -619,6 +619,21 @@ type PeerSample struct {
 	QueueMs        int64      `json:"queueMs"` // the queue time the request limit is sized to
 	RTTMs          int64      `json:"rttMs"`   // round-trip estimate, 0 until known
 	UTP            *UTPSample `json:"utp,omitempty"`
+	TCP            *TCPSample `json:"tcp,omitempty"`
+}
+
+// TCPSample is a TCP connection's kernel state (Windows SIO_TCP_INFO; counters
+// cumulative): whether the receive window, the path or the sender limits it.
+type TCPSample struct {
+	RTTMs          int64  `json:"rttMs"`
+	MinRTTMs       int64  `json:"minRttMs"`
+	RcvWnd         uint32 `json:"rcvWnd"` // window we advertise
+	RcvBuf         uint32 `json:"rcvBuf"` // receive buffer (auto-tuned)
+	BytesIn        uint64 `json:"bytesIn"`
+	BytesReordered uint32 `json:"bytesReordered"`
+	DupAcksIn      uint32 `json:"dupAcksIn"`
+	BytesRetrans   uint32 `json:"bytesRetrans"` // ours (requests), for completeness
+	Timeouts       uint32 `json:"timeouts"`
 }
 
 // UTPSample is a uTP connection's transport state (cumulative counters).

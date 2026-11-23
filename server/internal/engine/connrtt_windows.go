@@ -10,6 +10,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/rivulet-kodi/rivulet-engine/internal/types"
 )
 
 // SIO_TCP_INFO (mstcpip.h, Windows 10 1703 and later): _WSAIORW(IOC_VENDOR, 39).
@@ -40,11 +42,38 @@ type tcpInfoV0 struct {
 
 // tcpRTT reads the socket's smoothed RTT with SIO_TCP_INFO.
 func tcpRTT(c *net.TCPConn) (time.Duration, bool) {
-	raw, err := c.SyscallConn()
-	if err != nil {
+	info, ok := tcpInfo(c)
+	if !ok || info.RttUs == 0 {
 		return 0, false
 	}
+	return time.Duration(info.RttUs) * time.Microsecond, true
+}
+
+// tcpSample is the trace's view of the socket's kernel state.
+func tcpSample(c *net.TCPConn) *types.TCPSample {
+	info, ok := tcpInfo(c)
+	if !ok {
+		return nil
+	}
+	return &types.TCPSample{
+		RTTMs:          int64(info.RttUs / 1000),
+		MinRTTMs:       int64(info.MinRttUs / 1000),
+		RcvWnd:         info.RcvWnd,
+		RcvBuf:         info.RcvBuf,
+		BytesIn:        info.BytesIn,
+		BytesReordered: info.BytesReordered,
+		DupAcksIn:      info.DupAcksIn,
+		BytesRetrans:   info.BytesRetrans,
+		Timeouts:       info.TimeoutEpisodes,
+	}
+}
+
+func tcpInfo(c *net.TCPConn) (tcpInfoV0, bool) {
 	var info tcpInfoV0
+	raw, err := c.SyscallConn()
+	if err != nil {
+		return info, false
+	}
 	var ioErr error
 	err = raw.Control(func(fd uintptr) {
 		version := uint32(0)
@@ -53,8 +82,5 @@ func tcpRTT(c *net.TCPConn) (time.Duration, bool) {
 			(*byte)(unsafe.Pointer(&version)), uint32(unsafe.Sizeof(version)),
 			(*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), &n, nil, 0)
 	})
-	if err != nil || ioErr != nil || info.RttUs == 0 {
-		return 0, false
-	}
-	return time.Duration(info.RttUs) * time.Microsecond, true
+	return info, err == nil && ioErr == nil
 }

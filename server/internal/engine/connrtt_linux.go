@@ -9,7 +9,12 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/rivulet-kodi/rivulet-engine/internal/types"
 )
+
+// tcpSample: the trace's kernel TCP state is read on Windows only (the owner's platform).
+func tcpSample(*net.TCPConn) *types.TCPSample { return nil }
 
 // tcpRTT reads the socket's smoothed RTT with TCP_INFO.
 func tcpRTT(c *net.TCPConn) (time.Duration, bool) {
