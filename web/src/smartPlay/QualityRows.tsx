@@ -154,7 +154,8 @@ const QualityRows = ({ tiers, settled, remembered, picking, videoId, videoReleas
             return { short: t('SMART_PLAY_DOWNLOADS_CONNECTING'), full: t('SMART_PLAY_DOWNLOADS_CONNECTING') };
         }
         const full = candidate.live ? t('SMART_PLAY_CANDIDATE_HEALTH', { ratio: timesX(candidate.ratio) }) : t('SMART_PLAY_CANDIDATE_REMEMBERED', { ratio: timesX(candidate.ratio) });
-        return { short: timesX(candidate.ratio), full };
+        // A remembered rate says so: it isn't this play's measurement.
+        return { short: candidate.live ? timesX(candidate.ratio) : full, full };
     };
 
     // The candidate's speed against what playback needs, as a bar: full at
