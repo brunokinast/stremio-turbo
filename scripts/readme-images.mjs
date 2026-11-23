@@ -39,9 +39,11 @@ async function cdp(wsUrl) {
             for (const l of listeners) l(msg);
         }
     };
+    // A call that gets no answer in 30 s fails instead of hanging the run.
     const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
         const id = ++nextId;
-        pending.set(id, { resolve, reject });
+        const timer = setTimeout(() => { pending.delete(id); reject(new Error(`DevTools ${method} got no answer in 30 s`)); }, 30000);
+        pending.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
         ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
     return { send, on: (f) => listeners.add(f), close: () => ws.close() };
@@ -127,9 +129,9 @@ function bench(healthyDir, thinDir) {
 
 // ---- capture: the installed app over its DevTools port ------------------------------------------
 
-// Hidden before anything is captured: release names (the expanded source lists and the full
-// stream list) are blurred, the account menu never opens.
-const PRIVACY_CSS = `[class*="sources"], [class*="streams-list"], [class*="stream-container"] { filter: blur(7px) !important; }`;
+// Hidden before anything is captured: release names (the expanded source lists, the full
+// stream list and the Downloads page's file names) are blurred, the account menu never opens.
+const PRIVACY_CSS = `[class*="sources"], [class*="streams-list"], [class*="stream-container"], [class^="file-"], [class*=" file-"] { filter: blur(7px) !important; }`;
 const FFMPEG = path.join(process.env.LOCALAPPDATA, 'Programs', 'Stremio Turbo', 'ffmpeg.exe');
 
 async function app() {
@@ -176,10 +178,13 @@ async function app() {
     return { c, evaluate, privacy, waitFor, go, mute };
 }
 
-// The app window's rectangle on screen, in physical pixels.
+// The app window's rectangle on screen, in physical pixels. The window is brought to the front
+// first (a key tap lets a background process take the foreground; F24, as Alt would put the
+// window in menu mode and stall the web view), since the recording films whatever is on top.
 function windowRect() {
-    const ps = `Add-Type -Name W -Namespace R -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r); [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(System.IntPtr h, int a, out RECT r, int s); public struct RECT { public int L, T, R, B; }';
+    const ps = `Add-Type -Name W -Namespace R -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r); [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(System.IntPtr h, int a, out RECT r, int s); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c); [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, int f, int e); [DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h); public struct RECT { public int L, T, R, B; }';
         $h = (Get-Process stremio-turbo | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1).MainWindowHandle
+        [R.W]::keybd_event(0x87, 0, 0, 0); [R.W]::keybd_event(0x87, 0, 2, 0); if ([R.W]::IsIconic($h)) { [void][R.W]::ShowWindow($h, 9) }; [void][R.W]::SetForegroundWindow($h); Start-Sleep -Milliseconds 300
         $r = New-Object R.W+RECT; [void][R.W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); "$($r.L) $($r.T) $($r.R) $($r.B)"`;
     const out = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' }).stdout.trim();
     const [l, t, r, b] = out.split(/\s+/).map(Number);
@@ -189,8 +194,10 @@ function windowRect() {
 
 // Records the app window's area of the screen while action runs (the player is mpv's own window
 // behind the web view, so the DevTools screencast would miss the picture), then makes a GIF with
-// Evenly's recipe: 12 fps, a 96-colour palette from the moving parts, Bayer dithering.
-async function record(dir, name, secs, action, width = 640) {
+// Evenly's recipe: 12 fps, a 96-colour palette from the moving parts, Bayer dithering. The
+// recording stops tail seconds after action finishes (a play's action ends at the first frame;
+// footage costs a lot of GIF), or at secs at the latest.
+async function record(dir, name, secs, action, { width = 640, tail = 2.5 } = {}) {
     const r = windowRect();
     const mp4 = path.join(dir, `${name}.mp4`);
     const ff = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'gdigrab', '-framerate', '24', '-offset_x', r.x, '-offset_y', r.y,
@@ -198,29 +205,31 @@ async function record(dir, name, secs, action, width = 640) {
     const done = new Promise((res) => ff.on('exit', res));
     await sleep(400);
     await action();
+    const stop = setTimeout(() => ff.stdin.write('q'), tail * 1000);
     await done;
+    clearTimeout(stop);
     const gif = path.join(dir, `${name}.gif`);
-    const vf = `fps=12,scale=${width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
-    spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', mp4, '-vf', vf, gif], { stdio: 'inherit' });
+    makeGif(mp4, gif, '', width);
     console.log('wrote', path.relative(ROOT, gif), `${Math.round(fs.statSync(gif).size / 1024)} KB`);
 }
 
 // What each set of captures shows. "library": the owner's own titles (the next episodes they're
-// on, so plays only move resume points they'd reach anyway). "open": Blender's CC BY films.
+// on, so plays only move resume points they'd reach anyway). "open": public-domain films with
+// healthy swarms (Night of the Living Dead 1968, Charade 1963, Bonanza's The Gunmen 1960).
 const SETS = {
     library: {
         banner: '#/detail/series/tt2442560/tt2442560%3A6%3A5',
         race: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A6', tier: '4k DV | HDR' },
-        engine: { route: '#/detail/movie/tt15398776/tt15398776', stream: '2160p' },
-        resume: { route: '#/detail/series/tt22202452/tt22202452%3A1%3A9' },
+        engine: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A8', tier: '4k DV | HDR' }, // the next, unplayed episode
+        resume: { tile: 'tt15398776' }, // Oppenheimer, top of Continue Watching
         download: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A7', tier: '4k DV | HDR' },
     },
     open: {
-        banner: '#/detail/movie/tt1727587/tt1727587', // Sintel
-        race: { route: '#/detail/movie/tt1727587/tt1727587', tier: '4k' },
-        engine: { route: '#/detail/movie/tt2285752/tt2285752', stream: '2160p' }, // Tears of Steel
-        resume: { route: '#/detail/movie/tt1727587/tt1727587' },
-        download: { route: '#/detail/movie/tt2285752/tt2285752', tier: '4k' },
+        banner: '#/detail/movie/tt0063350/tt0063350', // Night of the Living Dead
+        race: { route: '#/detail/movie/tt0063350/tt0063350', tier: '1080p' }, // its 4k remuxes test at 1.0x
+        engine: { route: '#/detail/movie/tt0056923/tt0056923', tier: '1080p' }, // Charade
+        resume: { tile: 'tt0063350' }, // in Continue Watching after the race step
+        download: { route: '#/detail/series/tt0052451/tt0052451%3A1%3A19', tier: 'TVRip' }, // Bonanza, The Gunmen (downloads are offered on episodes)
     },
 };
 
@@ -246,8 +255,9 @@ async function capture(args) {
     };
     const mpv = (prop, value) => a.evaluate(`chrome.webview.postMessage(JSON.stringify({ id: 0, type: 6, args: ['mpv-set-prop', [${JSON.stringify(prop)}, ${JSON.stringify(value)}]] }))`);
     // Plays from a click: mutes, and keeps the blur filter on until the first frame is past.
-    const play = async (click) => {
+    const play = async (click, input) => {
         await a.evaluate(click);
+        if (input) await input();
         if (blur) {
             for (let i = 0; i < 20; i++) {
                 await mpv('vf', 'lavfi=[gblur=sigma=40]');
@@ -271,7 +281,7 @@ async function capture(args) {
         },
         async race() {
             await open(set.race.route, `!!(${tierButton(set.race.tier)})`);
-            await record(dir, 'feature-race', 14, async () => {
+            await record(dir, 'feature-race', 40, async () => {
                 await sleep(700);
                 await play(`(${tierButton(set.race.tier)}).click()`);
             });
@@ -279,22 +289,33 @@ async function capture(args) {
         },
         async engine() {
             // A single source from the full list, with a stopwatch from the click to the first
-            // frame (when the player's mute button enables).
-            await open(set.engine.route, `!!document.querySelector('[class*="all-streams"]')`);
-            await a.evaluate(`document.querySelector('[class*="all-streams"]').click()`);
-            const link = `[...document.querySelectorAll('a')].find((x) => x.innerText.includes(${JSON.stringify(set.engine.stream)}))`;
-            await a.waitFor(`!!(${link})`, 30);
-            await a.privacy();
-            await sleep(1500);
-            await record(dir, 'feature-engine', 12, async () => {
+            // frame (when the player's backdrop and loading layers go).
+            // A quality row's Play (the race, then the stream), or one source from the full list.
+            let link;
+            if (set.engine.tier) {
+                link = tierButton(set.engine.tier);
+                await open(set.engine.route, `!!(${link})`);
+            } else {
+                await open(set.engine.route, `!!document.querySelector('[class*="all-streams"]')`);
+                await a.evaluate(`document.querySelector('[class*="all-streams"]').click()`);
+                link = `[...document.querySelectorAll('a')].filter((x) => x.innerText.includes(${JSON.stringify(set.engine.stream)}) && x.getBoundingClientRect().width > 0)[0]`;
+                await a.waitFor(`!!(${link})`, 30);
+                await a.privacy();
+                await sleep(1500);
+            }
+            await record(dir, 'feature-engine', 45, async () => {
                 await sleep(700);
                 await a.evaluate(`(() => {
                     const d = document.createElement('div'); d.id = 'readme-clock';
                     d.style.cssText = 'position:fixed;left:24px;bottom:24px;z-index:99999;padding:10px 16px;border-radius:12px;background:rgba(20,16,40,.82);color:#fff;font:600 30px/1 Segoe UI,sans-serif;font-variant-numeric:tabular-nums;pointer-events:none';
                     document.documentElement.append(d);
-                    const t0 = performance.now(); let stopped = false;
+                    const t0 = performance.now(); let stopped = false; let seen = false;
                     const tick = () => {
-                        const b = [...document.querySelectorAll('[class*="control-bar-button"]')].find((b) => b.title && !b.className.includes('disabled') && /mute/i.test(b.title));
+                        // The first frame: the player's backdrop and loading layers, seen once, are gone.
+                        const shown = (sel) => [...document.querySelectorAll(sel)].some((e) => e.getBoundingClientRect().width > 0);
+                        const loading = location.hash.startsWith('#/player') && (shown('[class*="background-layer"]') || shown('[class*="buffering-layer"]'));
+                        if (loading) seen = true;
+                        const b = seen && location.hash.startsWith('#/player') && !loading;
                         if (!stopped) d.textContent = ((performance.now() - t0) / 1000).toFixed(1) + ' s';
                         if (b && !stopped) { stopped = true; d.textContent += ' · first frame'; }
                         requestAnimationFrame(tick);
@@ -302,28 +323,40 @@ async function capture(args) {
                     tick();
                 })()`);
                 await play(`(${link}).click()`);
+                await a.waitFor(`!!document.getElementById('readme-clock')?.textContent.includes('first frame')`, 40);
             });
             await a.evaluate(`document.getElementById('readme-clock')?.remove()`);
             await leave();
         },
         async resume() {
-            const resumeBtn = `[...document.querySelectorAll('[class*="action"], button, a, [tabindex]')].filter((b) => /^Resume/.test(b.innerText.trim()) && !/Trailer|Share/.test(b.innerText)).sort((x, y) => x.innerText.length - y.innerText.length)[0]`;
-            await open(set.resume.route, `!!(${resumeBtn})`);
-            await record(dir, 'feature-resume', 10, async () => {
+            // The play icon on the board's Continue Watching card.
+            // The visible copy: routes left behind stay in the page, hidden.
+            const card = `[...document.querySelectorAll('[class*="continue"] [data-board-tile="${set.resume.tile}"] [class*="play-icon-layer"]')].find((e) => e.getBoundingClientRect().width > 0)`;
+            await open('#/', `!!(${card})`);
+            await record(dir, 'feature-resume', 20, async () => {
                 await sleep(700);
-                await play(`(${resumeBtn}).click()`);
+                // A real mouse click: the icon reacts to pointer events, not to element.click().
+                const at = await a.evaluate(`(() => { const r = (${card}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+                await play(`void 0`, async () => {
+                    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.c.send('Input.dispatchMouseEvent', { type, x: at[0], y: at[1], button: 'left', clickCount: 1 });
+                });
             });
             await leave();
         },
         async download() {
             const dl = `[...document.querySelectorAll('[class*="quality-rows"] [class*="tier"]')].find((t) => [...t.querySelectorAll('[title]')].some((b) => b.title === ${JSON.stringify(set.download.tier)}))?.querySelector('[class*="download"]')`;
+            const downloading = `[...document.querySelectorAll('[class*="downloads"] [tabindex], [class*="downloads"] button')].find((b) => /^Downloading/.test(b.innerText.trim()) && b.getBoundingClientRect().width > 0)`;
             await open(set.download.route, `!!(${dl})`);
-            await record(dir, 'feature-downloads', 12, async () => {
+            await record(dir, 'feature-downloads', 20, async () => {
                 await sleep(800);
                 await a.evaluate(`(${dl}).click()`);
                 await sleep(4500);
                 await a.go('#/downloads');
-            });
+                // Only what is downloading now, so the new download is in view.
+                await a.waitFor(`!!${downloading}`, 10);
+                await sleep(1200);
+                await a.evaluate(`${downloading}.click()`);
+            }, { tail: 4 });
         },
     };
     try {
@@ -334,14 +367,28 @@ async function capture(args) {
     } finally {
         if (blur) await mpv('vf', '');
         // Downloads the captures started (the download step, and the plays' own records) are
-        // removed again, so the captures leave the owner's downloads as they were.
-        const now = await fetch(`${server}/downloads`).then((r) => r.json());
-        // DELETE takes the whole torrent: skip one that already held a file of the owner's (a
-        // season pack's other episode).
-        const kept = new Set([...before].map((k) => k.split('/')[0]));
-        for (const d of now.filter((d) => !before.has(`${d.infoHash}/${d.fileIdx}`) && !kept.has(d.infoHash))) {
-            await fetch(`${server}/downloads/${d.infoHash}`, { method: 'DELETE' });
-            console.log('removed a download the capture started:', d.infoHash.slice(0, 8));
+        // removed again, so the captures leave the owner's downloads as they were. A play's
+        // record and a manual download's record appear seconds after the click (after the race),
+        // so the list is read until it stops changing.
+        const list = () => fetch(`${server}/downloads`).then((r) => r.json());
+        let now = await list();
+        for (let i = 0; i < 6; i++) {
+            await sleep(5000);
+            const next = await list();
+            if (next.length === now.length) break;
+            now = next;
+        }
+        const owned = new Set([...before].map((k) => k.split('/')[0]));
+        const added = now.filter((d) => !before.has(`${d.infoHash}/${d.fileIdx}`));
+        for (const ih of new Set(added.filter((d) => !owned.has(d.infoHash)).map((d) => d.infoHash))) {
+            await fetch(`${server}/downloads/${ih}`, { method: 'DELETE' });
+            console.log('removed a torrent the capture added:', ih.slice(0, 8));
+        }
+        // A torrent that already held one of the owner's files (a season pack's other episode)
+        // keeps it: only the capture's own files go, one by one.
+        for (const d of added.filter((d) => owned.has(d.infoHash) && d.kind === 'kept')) {
+            await fetch(`${server}/downloads/${d.infoHash}/${d.fileIdx}`, { method: 'DELETE' });
+            console.log('removed a file the capture kept:', d.infoHash.slice(0, 8), d.fileIdx);
         }
         a.c.close();
     }
@@ -450,27 +497,65 @@ function bannerHtml(appPng, iconPng) {
     </body></html>`;
 }
 
-async function compose() {
+// The time of the clip's last scene cut: where the page gives way to the player.
+function playerCut(mp4) {
+    const r = spawnSync(FFMPEG, ['-hide_banner', '-i', mp4, '-vf', "select='gt(scene,0.25)',showinfo", '-f', 'null', '-'], { encoding: 'utf8' });
+    const cuts = [...r.stderr.matchAll(/pts_time:([0-9.]+)/g)].map((m) => Number(m[1]));
+    return cuts.length ? cuts[cuts.length - 1] : null;
+}
+
+function makeGif(mp4, gif, pre = '', width = 640) {
+    const vf = `${pre}fps=12,scale=${width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
+    spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', mp4, '-vf', vf, gif], { stdio: 'inherit' });
+}
+
+// compose [set]: the chart, the button, and the set's banner and GIFs into docs/readme. A set
+// named "<set>-blur" is made from <set>'s clips with the picture blurred from the cut to the
+// player on (the pages stay sharp, and so does the engine clip's stopwatch).
+async function compose(set = 'library') {
     fs.mkdirSync(DOCS, { recursive: true });
+    const blur = set.endsWith('-blur');
+    const src = path.join(RAW, blur ? set.slice(0, -5) : set);
+    if (!fs.existsSync(src)) throw new Error(`no captures in ${path.relative(ROOT, src)}: run capture first`);
     const b = JSON.parse(fs.readFileSync(path.join(DOCS, 'bench.json'), 'utf8'));
     const e = await edge();
     try {
         for (const theme of ['light', 'dark']) await e.render(chartHtml(b, theme), 800, null, path.join(DOCS, `bench-${theme}.png`));
         await e.render(buttonHtml(), 300, 64, path.join(DOCS, 'button-download.png'));
-        const app = path.join(RAW, 'banner-app.png');
+        const app = path.join(src, 'banner-app.png');
         const icon = path.join(ROOT, 'shell', 'images', 'stremio.png');
         if (fs.existsSync(app)) await e.render(bannerHtml(app, fs.existsSync(icon) ? icon : app), 1280, 640, path.join(DOCS, 'banner.png'));
-        else console.log('skipped banner.png: run capture first');
+        else console.log('skipped banner.png: no banner-app.png in', path.relative(ROOT, src));
     } finally {
         await e.close();
+    }
+    const out = path.join(RAW, set);
+    fs.mkdirSync(out, { recursive: true });
+    for (const name of ['feature-race', 'feature-engine', 'feature-resume', 'feature-downloads']) {
+        let gif = path.join(src, `${name}.gif`);
+        const cut = blur && name !== 'feature-downloads' ? playerCut(path.join(src, `${name}.mp4`)) : null;
+        if (cut !== null) {
+            const on = `enable='gte(t,${cut})'`;
+            const pre = name === 'feature-engine'
+                ? `split[s][c];[s]gblur=sigma=70:steps=3:${on}[b];[c]crop=iw*0.32:ih*0.09:0:ih*0.91[k];[b][k]overlay=0:H*0.91:${on},`
+                : `gblur=sigma=70:steps=3:${on},`;
+            gif = path.join(out, `${name}.gif`);
+            makeGif(path.join(src, `${name}.mp4`), gif, pre);
+        }
+        if (!fs.existsSync(gif)) {
+            console.log('skipped', name, '(not captured)');
+            continue;
+        }
+        fs.copyFileSync(gif, path.join(DOCS, `${name}.gif`));
+        console.log('wrote', `docs/readme/${name}.gif`, `${Math.round(fs.statSync(gif).size / 1024)} KB`, cut !== null ? `(blurred from ${cut.toFixed(1)} s)` : '');
     }
 }
 
 const [mode, ...args] = process.argv.slice(2);
 if (mode === 'bench' && args.length === 2) bench(...args);
-else if (mode === 'compose') await compose();
+else if (mode === 'compose') await compose(...args);
 else if (mode === 'capture') await capture(args);
 else {
-    console.error('usage: node scripts/readme-images.mjs bench <healthy dir> <thin dir> | capture | compose');
+    console.error('usage: node scripts/readme-images.mjs bench <healthy dir> <thin dir> | capture <set> [blur] [step ...] | compose [library|library-blur|open]');
     process.exit(2);
 }
