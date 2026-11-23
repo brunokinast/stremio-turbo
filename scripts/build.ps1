@@ -41,28 +41,10 @@ New-Item -ItemType Directory -Force $out, $cache | Out-Null
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
-# Media binaries, pinned by sha256 (scripts/binaries.json).
+# Media binaries, pinned by sha256 (scripts/binaries.json): ffmpeg and ffprobe go in the stage.
 Step 'Media binaries'
-$manifest = Get-Content (Join-Path $PSScriptRoot 'binaries.json') -Raw | ConvertFrom-Json
-foreach ($file in $manifest.files) {
-    $dest = Join-Path $cache ($file.path -replace '/', '_')
-    $ok = (Test-Path $dest) -and ((Get-FileHash $dest -Algorithm SHA256).Hash -eq $file.sha256)
-    if (-not $ok) {
-        Write-Host "download $($file.path)"
-        Invoke-WebRequest -Uri ($manifest.base + $file.path) -OutFile $dest
-        $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
-        if ($hash -ne $file.sha256) {
-            Remove-Item $dest
-            throw "$($file.path): sha256 $hash, expected $($file.sha256)"
-        }
-    }
-    if ($file.path -like 'bin/*') {
-        Copy-Item $dest (Join-Path $stage (Split-Path -Leaf $file.path))
-    } else {
-        # The shell's build.rs links against libmpv and extracts the DLL from this zip.
-        Copy-Item $dest (Join-Path $root "shell/$($file.path)")
-    }
-}
+Import-Module (Join-Path $PSScriptRoot 'Upstreams.psm1') -Force
+foreach ($bin in Get-MediaBinaries) { Copy-Item $bin (Join-Path $stage ((Split-Path -Leaf $bin) -replace '^bin_', '')) }
 
 if (-not $SkipWeb) {
     Step 'Web UI'

@@ -1,5 +1,6 @@
 # The original projects each folder follows, and how to read their latest
-# code. Used by sync-upstreams.ps1, check-upstreams.ps1 and release.ps1.
+# code, plus the shared build and test helpers. Used by sync-upstreams.ps1,
+# check-upstreams.ps1, release.ps1, build.ps1 and CI.
 
 $ErrorActionPreference = 'Stop'
 $script:root = Split-Path -Parent $PSScriptRoot
@@ -89,6 +90,30 @@ function Get-CoreWebVersions {
 }
 
 # Runs every project's checks; throws on the first failure.
+# The media binaries the app ships, pinned by sha256 in binaries.json, downloaded once into
+# out/cache. libmpv's zip is copied into shell/ (its build.rs links against libmpv and extracts the
+# DLL from it); returns the cached paths of the bin/ files (ffmpeg, ffprobe) for the installer.
+function Get-MediaBinaries {
+    $cache = Join-Path $script:root 'out/cache'
+    New-Item -ItemType Directory -Force $cache | Out-Null
+    $manifest = Get-Content (Join-Path $PSScriptRoot 'binaries.json') -Raw | ConvertFrom-Json
+    foreach ($file in $manifest.files) {
+        $dest = Join-Path $cache ($file.path -replace '/', '_')
+        $ok = (Test-Path $dest) -and ((Get-FileHash $dest -Algorithm SHA256).Hash -eq $file.sha256)
+        if (-not $ok) {
+            Write-Host "download $($file.path)"
+            Invoke-WebRequest -Uri ($manifest.base + $file.path) -OutFile $dest
+            $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
+            if ($hash -ne $file.sha256) {
+                Remove-Item $dest
+                throw "$($file.path): sha256 $hash, expected $($file.sha256)"
+            }
+        }
+        if ($file.path -like 'bin/*') { $dest }
+        else { Copy-Item $dest (Join-Path $script:root "shell/$($file.path)") }
+    }
+}
+
 function Invoke-AllTests {
     $PSNativeCommandUseErrorActionPreference = $true
     $env:GOWORK = 'off'
@@ -116,8 +141,9 @@ function Invoke-AllTests {
     } finally { Pop-Location }
     Push-Location (Join-Path $script:root 'deps/torrent')
     try { go test . } finally { Pop-Location }
+    Get-MediaBinaries | Out-Null # the shell's build.rs needs libmpv's zip
     Push-Location (Join-Path $script:root 'shell')
     try { cargo test --release --target x86_64-pc-windows-msvc } finally { Pop-Location }
 }
 
-Export-ModuleMember -Function Get-UpstreamHead, Get-UpstreamBehind, Get-CoreWebVersions, Invoke-AllTests, Invoke-Git -Variable Upstreams
+Export-ModuleMember -Function Get-UpstreamHead, Get-UpstreamBehind, Get-CoreWebVersions, Get-MediaBinaries, Invoke-AllTests, Invoke-Git -Variable Upstreams
