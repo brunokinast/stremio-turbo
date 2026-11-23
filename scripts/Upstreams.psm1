@@ -1,6 +1,6 @@
 # The original projects each folder follows, and how to read their latest
-# code, plus the shared build and test helpers. Used by sync-upstreams.ps1,
-# check-upstreams.ps1, release.ps1, build.ps1 and CI.
+# code, plus the media binaries the build and the shell's tests need. Used by
+# sync-upstreams.ps1, check-upstreams.ps1, build.ps1, test.ps1 and CI.
 
 $ErrorActionPreference = 'Stop'
 $script:root = Split-Path -Parent $PSScriptRoot
@@ -89,7 +89,6 @@ function Get-CoreWebVersions {
     [pscustomobject]@{ Used = $used; Latest = $latest }
 }
 
-# Runs every project's checks; throws on the first failure.
 # The media binaries the app ships, pinned by sha256 in binaries.json, downloaded once into
 # out/cache. libmpv's zip is copied into shell/ (its build.rs links against libmpv and extracts the
 # DLL from it); returns the cached paths of the bin/ files (ffmpeg, ffprobe) for the installer.
@@ -102,7 +101,7 @@ function Get-MediaBinaries {
         $ok = (Test-Path $dest) -and ((Get-FileHash $dest -Algorithm SHA256).Hash -eq $file.sha256)
         if (-not $ok) {
             Write-Host "download $($file.path)"
-            Invoke-WebRequest -Uri ($manifest.base + $file.path) -OutFile $dest
+            Invoke-WebRequest -Uri ($manifest.base + $file.path) -OutFile $dest -MaximumRetryCount 4 -RetryIntervalSec 5
             $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
             if ($hash -ne $file.sha256) {
                 Remove-Item $dest
@@ -114,38 +113,4 @@ function Get-MediaBinaries {
     }
 }
 
-function Invoke-AllTests {
-    $PSNativeCommandUseErrorActionPreference = $true
-    $env:GOWORK = 'off'
-    # cmd/librivulet-engine is a cgo library (built by Rivulet's own release
-    # tooling, not here); the symlink test needs the privilege to create
-    # symlinks, which only an elevated or developer-mode Windows has.
-    $serverPackages = @(go -C (Join-Path $script:root 'server') list ./... | Where-Object { $_ -notmatch '/cmd/librivulet-engine$' })
-    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    $skip = if ($admin) { @() } else { @('-skip', 'TestArchiveResolveLocalPath_SymlinkEscape') }
-    Push-Location (Join-Path $script:root 'web')
-    try {
-        corepack pnpm install --frozen-lockfile
-        corepack pnpm run lint
-        corepack pnpm test
-    } finally { Pop-Location }
-    Push-Location (Join-Path $script:root 'server')
-    try {
-        go vet @serverPackages
-        go test -p 1 @skip @serverPackages
-    } finally { Pop-Location }
-    Push-Location (Join-Path $script:root 'deps/go-utp')
-    try {
-        go vet ./...
-        go test ./...
-    } finally { Pop-Location }
-    Push-Location (Join-Path $script:root 'deps/torrent')
-    try { go test . } finally { Pop-Location }
-    Get-MediaBinaries | Out-Null # the shell's build.rs needs libmpv's zip
-    # rustup's installer adds cargo to the user PATH, which a pwsh started from an older session lacks.
-    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { $env:PATH = "$HOME\.cargo\bin;$env:PATH" }
-    Push-Location (Join-Path $script:root 'shell')
-    try { cargo test --release --target x86_64-pc-windows-msvc } finally { Pop-Location }
-}
-
-Export-ModuleMember -Function Get-UpstreamHead, Get-UpstreamBehind, Get-CoreWebVersions, Get-MediaBinaries, Invoke-AllTests, Invoke-Git -Variable Upstreams
+Export-ModuleMember -Function Get-UpstreamHead, Get-UpstreamBehind, Get-CoreWebVersions, Get-MediaBinaries, Invoke-Git -Variable Upstreams

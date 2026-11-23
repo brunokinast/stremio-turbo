@@ -1,6 +1,6 @@
 <#
   Development run: the shell with the web UI from the dev server
-  (http://127.0.0.1:8080/, `corepack pnpm exec webpack serve --mode development
+  (http://127.0.0.1:8080/, `pnpm exec webpack serve --mode development
   --config webpack.local.config.js` in web/) and a Rivulet built from server/.
 
   The shell runs with --development, so it starts no server itself: this

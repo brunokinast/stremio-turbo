@@ -1,0 +1,49 @@
+# The toolchains and commands for every folder, the same on a PC and in CI (https://mise.jdx.dev).
+# Install mise once (winget install jdx.mise), activate it in your shell, then `mise install` here.
+# `mise tasks` lists the commands; CI runs the same ones (.github/workflows).
+
+[tools]
+node = "24.22.3"
+pnpm = "11.8.0"     # web/package.json's packageManager
+go = "1.27.4"       # server/go.mod's go line
+# Pinned here over shell/rust-toolchain.toml (upstream's file, "stable"): mise sets RUSTUP_TOOLCHAIN.
+rust = { version = "1.100.0", profile = "minimal", targets = "x86_64-pc-windows-msvc" }
+
+[env]
+GOWORK = "off"      # each Go module builds on its own, with the replace directives in its go.mod
+
+[tasks."test:web"]
+description = "web: lint, tests, production build"
+run = "pwsh -NoProfile -File scripts/test.ps1 web"
+
+[tasks."test:go"]
+description = "server, deps/torrent, deps/go-utp: gofmt, vet, tests"
+run = "pwsh -NoProfile -File scripts/test.ps1 go"
+
+[tasks."test:shell"]
+description = "shell: cargo tests (fetches the pinned media binaries first)"
+run = "pwsh -NoProfile -File scripts/test.ps1 shell"
+
+[tasks.test]
+description = "every folder's checks"
+run = "pwsh -NoProfile -File scripts/test.ps1"
+
+[tasks.build]
+description = "installer and update files in out/ (scripts/build.ps1; pass -NoSign, -Version x.y.z, -Skip*)"
+run = "pwsh -NoProfile -File scripts/build.ps1"
+
+[tasks.sync]
+description = "merge every original project's latest code, then test"
+run = "pwsh -NoProfile -File scripts/sync-upstreams.ps1"
+
+[tasks.check-upstreams]
+description = "list original projects with unmerged code (exit 1 if any)"
+run = "pwsh -NoProfile -File scripts/check-upstreams.ps1"
+
+[tasks.release]
+description = "release x.y.z: the Release workflow builds and publishes main's green HEAD"
+run = "pwsh -NoProfile -File scripts/release.ps1"
+
+[tasks.dev]
+description = "web dev server against the installed shell and a local Rivulet"
+run = "pwsh -NoProfile -File scripts/dev.ps1"

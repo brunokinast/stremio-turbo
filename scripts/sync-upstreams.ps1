@@ -1,11 +1,11 @@
 <#
   Merges every original project's latest code into its folder, moves the web
-  UI to the latest Stremio core, then runs all tests.
+  UI to the latest Stremio core, then runs all tests (scripts/test.ps1).
 
   A merge conflict stops the script with the conflict left in the working
   tree: resolve it, commit, and run the script again.
 
-  Usage: pwsh scripts/sync-upstreams.ps1 [-SkipTests]
+  Usage: mise run sync [-SkipTests]
 #>
 param([switch]$SkipTests)
 
@@ -31,10 +31,10 @@ $core = Get-CoreWebVersions
 if ($core.Used -ne $core.Latest) {
     Write-Host "web: @stremio/stremio-core-web $($core.Used) -> $($core.Latest)" -ForegroundColor Cyan
     Push-Location (Join-Path $root 'web')
-    try { corepack pnpm add --save-exact "@stremio/stremio-core-web@$($core.Latest)" } finally { Pop-Location }
+    try { pnpm add --save-exact "@stremio/stremio-core-web@$($core.Latest)" } finally { Pop-Location }
     git -C $root add web/package.json web/pnpm-lock.yaml
     git -C $root commit -m "web: @stremio/stremio-core-web $($core.Latest)"
 }
 
-if (-not $SkipTests) { Invoke-AllTests }
+if (-not $SkipTests) { & (Join-Path $PSScriptRoot 'test.ps1') }
 Write-Host "`nAll upstreams merged." -ForegroundColor Green
