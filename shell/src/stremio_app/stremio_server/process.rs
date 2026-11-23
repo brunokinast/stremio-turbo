@@ -281,7 +281,9 @@ mod tests {
     use super::*;
     use std::{net::TcpListener, path::PathBuf};
 
-    const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+    // Generous: the tests start node processes in parallel, and a CI runner's first launches of
+    // node can take over 10 s.
+    const TEST_TIMEOUT: Duration = Duration::from_secs(30);
     const HTTP_SERVER: &str = r#"
         const server = require('net').createServer();
         server.listen(0, '127.0.0.1', () => {
