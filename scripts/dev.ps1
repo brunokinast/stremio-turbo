@@ -24,7 +24,7 @@ if (-not $Shell) {
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $Shell) { throw 'no shell: build it (scripts/build.ps1) or install Stremio Turbo' }
 }
-if (-not (Test-Path $Rivulet)) { throw "no Rivulet at $Rivulet: run scripts/build.ps1 -SkipWeb -SkipShell" }
+if (-not (Test-Path $Rivulet)) { throw "no Rivulet at ${Rivulet}: run scripts/build.ps1 -SkipWeb -SkipShell" }
 $api = 'http://127.0.0.1:11470'
 $dataDir = Join-Path $env:LOCALAPPDATA 'rivulet-engine'
 New-Item -ItemType Directory -Force $dataDir | Out-Null

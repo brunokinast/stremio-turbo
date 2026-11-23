@@ -31,6 +31,16 @@ jobs:
       shell: ${{ steps.areas.outputs.shell }}
       any: ${{ steps.areas.outputs.any }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The PowerShell scripts parse
+        shell: pwsh
+        run: |
+          $bad = foreach ($f in Get-ChildItem scripts -Include *.ps1, *.psm1 -Recurse) {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
+            $errors | ForEach-Object { "$($f.Name):$($_.Extent.StartLineNumber): $($_.Message)" }
+          }
+          if ($bad) { $bad; throw 'scripts with syntax errors' }
       - name: Areas this push touches
         id: areas
         shell: pwsh
