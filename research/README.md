@@ -32,7 +32,7 @@ Where two findings disagree, the higher number wins.
 - [42](findings/42-supply-gap.md) why Turbo got fewer peers · [43](findings/43-supply-parity.md) supply parity · [44](findings/44-mid-file-starts.md) mid-file starts · [45](findings/45-steady-state-speed.md) steady-state speed: dropped seedboxes, the uTP window
 
 ## Lab
-- [`lab/bench`](lab/bench): the benchmark behind the README's numbers (Turbo, official Stremio and qBittorrent on the same torrent, fresh each run), and `ceiling.py`, one connection from a local libtorrent seeder with an optional delay.
+- [`lab/bench`](lab/bench): the benchmark behind the README's numbers (Turbo, official Stremio and qBittorrent on the same torrent, fresh each run), its README runs published anonymised in [`docs/readme/bench-runs.json`](../docs/readme/bench-runs.json); and `ceiling.py`, one connection from a local libtorrent seeder with an optional delay.
 - [`lab/player`](lab/player): mpv-driven plays and a smart-play emulator with its tests.
 - [`lab/addons`](lab/addons): a local add-on serving season packs for tests.
 - [`lab/tools`](lab/tools): `goexec`, which runs every `go test` binary from a fixed, firewall-allowed slot (set with `GOFLAGS=-exec=…\goexec.exe`), and the script that allows those slots.

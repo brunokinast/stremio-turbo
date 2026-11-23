@@ -1,8 +1,9 @@
 // README images (docs/readme/): rerun after UI changes or a new benchmark.
 //
 //   node scripts/readme-images.mjs bench <healthy bench dir> <thin bench dir>
-//       Summarises two research/lab/bench/compare.py runs into docs/readme/bench.json: medians
-//       and ranges only, no infohashes, addresses or release names.
+//       Summarises two research/lab/bench/compare.py runs into docs/readme/bench.json (medians
+//       and ranges, for the images), docs/readme/bench-runs.json (every run, with its MB at each
+//       second) and README's per-run tables. No infohashes, addresses, release names or network info.
 //   node scripts/readme-images.mjs capture
 //       Screenshots of the installed app over its DevTools port, into out/readme/ (ignored). Start
 //       the app with WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 first.
@@ -107,49 +108,127 @@ async function edge() {
     };
 }
 
-// ---- bench: compare.py results -> docs/readme/bench.json ----------------------------------------
+// ---- bench: compare.py results -> docs/readme/bench.json, bench-runs.json and README's run table --
+
+// MB on disk at each second 0..60 of a run (samples.json beside results.json; only the byte counts
+// are read, never the peers).
+function mbCurve(samplesPath) {
+    if (!fs.existsSync(samplesPath)) return null;
+    const s = JSON.parse(fs.readFileSync(samplesPath, 'utf8')).samples.filter((x) => x.t != null && x.downloaded != null);
+    if (!s.length) return null;
+    return Array.from({ length: 61 }, (_, sec) => {
+        const i = s.findIndex((x) => x.t >= sec);
+        if (i <= 0) return i === 0 && s[0].t === sec ? +(s[0].downloaded / 1e6).toFixed(1) : (i < 0 ? +(s.at(-1).downloaded / 1e6).toFixed(1) : 0);
+        const [p, q] = [s[i - 1], s[i]];
+        return +((p.downloaded + (q.downloaded - p.downloaded) * (sec - p.t) / (q.t - p.t)) / 1e6).toFixed(1);
+    });
+}
+
+const CLIENT_NAMES = { official: 'Stremio', turbo: 'Turbo', qbt: 'qBittorrent', lt: 'libtorrent' };
 
 function bench(healthyDir, thinDir) {
-    const summarise = (dir) => {
-        const runs = JSON.parse(fs.readFileSync(path.join(dir, 'results.json'), 'utf8')).runs;
+    const stat = (rs, k) => {
+        const v = rs.map((r) => r[k]).filter((x) => x != null).sort((a, b) => a - b);
+        if (!v.length) return null;
+        const mid = v.length / 2;
+        const median = v.length % 2 ? v[Math.floor(mid)] : (v[mid - 1] + v[mid]) / 2;
+        return { median: +median.toFixed(2), min: v[0], max: v.at(-1), n: v.length };
+    };
+    const readJson = (...p) => JSON.parse(fs.readFileSync(path.join(...p), 'utf8'));
+    // Every run, anonymised: only the fields picked here leave research/data (no infohash, no
+    // addresses, no release name, no network info).
+    const load = (dir) => {
+        const res = readJson(dir, 'results.json');
+        const order = {};
+        const runs = res.runs.map((r) => {
+            const runDir = path.join(dir, `r${r.round}-${r.client}`);
+            const play = fs.existsSync(path.join(runDir, 'play.json')) ? readJson(runDir, 'play.json') : null;
+            const samples = readJson(runDir, 'samples.json');
+            const mb = mbCurve(path.join(runDir, 'samples.json'));
+            order[r.round] = (order[r.round] || 0) + 1;
+            return {
+                round: r.round, order: order[r.round], client: r.client,
+                firstFrameS: r.firstFrameS ?? null, ...(r.firstFrameIsProxy ? { firstFrameIsProxy: true } : {}),
+                stalls: r.stalls ?? null, stallSeconds: r.stallSeconds ?? null,
+                pauses: play?.pauses?.map((p) => ({ atS: p.at, seconds: p.seconds })) ?? null,
+                metadataS: r.metadataS ?? null, firstByteS: r.firstByteS ?? null,
+                mbps: r.mbps, mbps0to30: mb && +(mb[30] / 30).toFixed(2), mbps30to60: mb && +((mb[60] - mb[30]) / 30).toFixed(2),
+                peakMBps: r.peakMBps, peersAt10s: r.peersAt10s, peersMax: r.peersMax, cpuS: r.cpuS ?? samples.row?.cpuS ?? null,
+                mb,
+            };
+        });
+        // The swarm's size as Turbo saw it, and the video as its player decoded it.
+        const turbo = res.runs.filter((r) => r.client === 'turbo');
+        const known = turbo.map((r) => Math.max(0, ...readJson(dir, `r${r.round}-turbo`, 'samples.json').samples.map((x) => x.swarmSize || 0)));
+        const info = turbo.length ? readJson(dir, `r${turbo[0].round}-turbo`, 'play.json').info : null;
+        return {
+            setup: res.setup ?? { secs: res.secs, settle: res.settle, rounds: res.rounds },
+            swarm: known.length ? { knownPeers: [Math.min(...known), Math.max(...known)] } : null,
+            video: info && { width: info.width, height: info.height, codec: info.videoCodec, gamma: info.gamma, primaries: info.primaries, player: info.mpv, hwdec: info.hwdec },
+            runs,
+        };
+    };
+    const summarise = (runs) => {
         const out = {};
         for (const name of [...new Set(runs.map((r) => r.client))]) {
             const rs = runs.filter((r) => r.client === name);
-            const stat = (k) => {
-                const v = rs.map((r) => r[k]).filter((x) => x != null).sort((a, b) => a - b);
-                if (!v.length) return null;
-                const mid = v.length / 2;
-                const median = v.length % 2 ? v[Math.floor(mid)] : (v[mid - 1] + v[mid]) / 2;
-                return { median: +median.toFixed(2), min: v[0], max: v.at(-1), n: v.length };
-            };
-            // The run whose speed is the median's: its MB on disk at each second, for the line
-            // chart (samples.json beside results.json; only the byte counts are read).
-            const mid = stat('mbps')?.median;
+            // The run whose speed is the median's draws the line chart.
+            const mid = stat(rs, 'mbps')?.median;
             const run = mid == null ? null : rs.reduce((a, r) => Math.abs(r.mbps - mid) < Math.abs(a.mbps - mid) ? r : a);
-            let mb = null;
-            const samples = run && path.join(dir, `r${run.round}-${name}`, 'samples.json');
-            if (samples && fs.existsSync(samples)) {
-                const s = JSON.parse(fs.readFileSync(samples, 'utf8')).samples.filter((x) => x.t != null && x.downloaded != null);
-                mb = Array.from({ length: 61 }, (_, sec) => {
-                    const i = s.findIndex((x) => x.t >= sec);
-                    if (i <= 0) return i === 0 && s[0].t === sec ? +(s[0].downloaded / 1e6).toFixed(1) : (i < 0 ? +(s.at(-1).downloaded / 1e6).toFixed(1) : 0);
-                    const [p, q] = [s[i - 1], s[i]];
-                    return +((p.downloaded + (q.downloaded - p.downloaded) * (sec - p.t) / (q.t - p.t)) / 1e6).toFixed(1);
-                });
-            }
             out[name] = {
                 runs: rs.length,
-                firstFrameS: stat('firstFrameS'), started: rs.filter((r) => r.firstFrameS != null).length,
-                mbps: stat('mbps'), peersMax: stat('peersMax'), stalls: stat('stalls'), stallSeconds: stat('stallSeconds'),
-                mb,
+                firstFrameS: stat(rs, 'firstFrameS'), started: rs.filter((r) => r.firstFrameS != null).length,
+                mbps: stat(rs, 'mbps'), peersMax: stat(rs, 'peersMax'), stalls: stat(rs, 'stalls'), stallSeconds: stat(rs, 'stallSeconds'),
+                mb: run?.mb ?? null,
             };
         }
         return out;
     };
-    const json = { date: new Date().toISOString().slice(0, 10), secs: 60, healthy: summarise(healthyDir), thin: summarise(thinDir) };
+    const healthy = load(healthyDir), thin = load(thinDir);
+    const date = healthy.setup.date ?? new Date().toISOString().slice(0, 10);
+    const json = { date, secs: healthy.setup.secs, healthy: summarise(healthy.runs), thin: summarise(thin.runs) };
     fs.mkdirSync(DOCS, { recursive: true });
     fs.writeFileSync(path.join(DOCS, 'bench.json'), JSON.stringify(json, null, 1) + '\n');
+    // One run per line, so a diff between benchmarks stays readable.
+    const block = (name, b) => [
+        `  "${name}": {`,
+        `   "setup": ${JSON.stringify(b.setup)},`,
+        `   "swarm": ${JSON.stringify(b.swarm)},`,
+        `   "video": ${JSON.stringify(b.video)},`,
+        '   "runs": [',
+        b.runs.map((r) => '    ' + JSON.stringify(r)).join(',\n'),
+        '   ]',
+        '  }',
+    ].join('\n');
+    fs.writeFileSync(path.join(DOCS, 'bench-runs.json'), `{\n "date": "${date}",\n "swarms": {\n${block('healthy', healthy)},\n${block('thin', thin)}\n }\n}\n`);
+    readmeRunTable(healthy, thin);
     console.log(JSON.stringify(json, null, 1));
+}
+
+// README's per-run tables, between its bench-runs markers.
+function readmeRunTable(healthy, thin) {
+    const sec = (v) => `${v.toFixed(1)} s`;
+    const num = (v) => (v == null ? '–' : v.toFixed(1));
+    const table = (b) => {
+        const rows = [...b.runs].sort((a, c) => a.round - c.round || a.order - c.order).map((r) => {
+            const proxy = r.client === 'qbt' || r.client === 'lt';
+            const ff = r.firstFrameS == null ? (proxy ? 'not ready' : '**none**') : sec(r.firstFrameS) + (proxy ? '*' : '');
+            const frozen = r.stalls == null ? '–' : r.stalls === 0 ? '0' : `${r.stalls} × ${sec(r.stallSeconds)}`;
+            return `| ${r.round} · ${r.order} | ${CLIENT_NAMES[r.client] ?? r.client} | ${ff} | ${frozen} | ${num(r.mbps)} | ${num(r.mbps0to30)} | ${num(r.mbps30to60)} | ${num(r.peakMBps)} | ${r.peersMax ?? '–'} |`;
+        });
+        return ['| Round · order | Client | First frame | Frozen | MB/s | 0–30 s | 30–60 s | Peak | Peers |', '|---|---|--:|--:|--:|--:|--:|--:|--:|', ...rows].join('\n');
+    };
+    const swarm = (b) => (b.swarm ? ` (${b.swarm.knownPeers[0]}–${b.swarm.knownPeers[1]} peers known)` : '');
+    const body = [
+        `**Healthy swarm**${swarm(healthy)}`, '', table(healthy), '',
+        `**Thin swarm**${swarm(thin)}`, '', table(thin), '',
+        '<sub>Order: when the client ran within its round. Frozen: the player\'s pauses for data after the first frame, count × total. MB/s: the average over the 60 s; Peak: the best second. Peers: most connected at once. *qBittorrent has no player: its first frame is when the first and last pieces are on disk (the file\'s headers and index), "not ready" if not within 60 s.</sub>',
+    ].join('\n');
+    const readme = path.join(ROOT, 'README.md');
+    const text = fs.readFileSync(readme, 'utf8');
+    const re = /(<!-- bench-runs:start -->)[\s\S]*?(<!-- bench-runs:end -->)/;
+    if (!re.test(text)) throw new Error('README.md has no <!-- bench-runs:start --> / <!-- bench-runs:end --> markers');
+    fs.writeFileSync(readme, text.replace(re, (_, a, z) => `${a}\n\n${body}\n\n${z}`));
 }
 
 // ---- capture: the installed app over its DevTools port ------------------------------------------

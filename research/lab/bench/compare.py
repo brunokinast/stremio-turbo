@@ -380,8 +380,44 @@ def summarize(samples, secs):
                 peersSeen=len(best), topPeerMBps=[round(x / 1e6, 2) for x in top])
 
 
+def file_version(path):
+    r = subprocess.run(['powershell', '-NoProfile', '-Command', f"(Get-Item '{path}').VersionInfo.ProductVersion"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() or None
+
+
+def sha256_12(path):
+    import hashlib
+    with open(path, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()[:12]
+
+
+def setup():
+    """What ran: client versions and the settings that shape their speed (published with the results)."""
+    s = dict(secs=SECS, settle=SETTLE, rounds=ROUNDS, date=time.strftime('%Y-%m-%d'), clients={})
+    if 'official' in ROWS:
+        o = dict(app=file_version(os.path.join(OFFICIAL_DIR, 'stremio-shell-ng.exe')))
+        try:  # the owner's Stremio settings: its torrent profile is what the official app downloads with
+            st = json.load(open(os.path.join(os.environ['APPDATA'], 'stremio', 'stremio-server', 'server-settings.json'), encoding='utf-8'))
+            o.update(server=st.get('serverVersion'), **{k: st.get(k) for k in ('btMaxConnections', 'btHandshakeTimeout', 'btRequestTimeout',
+                                                                                'btDownloadSpeedSoftLimit', 'btDownloadSpeedHardLimit', 'btMinPeersForStable')})
+        except Exception:
+            pass
+        s['clients']['official'] = o
+    if 'turbo' in ROWS or VARIANTS:
+        t = dict(app=file_version(os.path.join(TURBO_DIR, 'stremio-turbo.exe')), env=dict(RIVULET_SPEED_LIMITS='0', **TURBO_ENV))
+        t['engineSha256'] = sha256_12(os.path.join(TURBO_DIR, 'rivulet-engine.exe'))
+        if VARIANTS:
+            t['variants'] = {n: {k: (sha256_12(v) if k == '@EXE' else v) for k, v in e.items()} for n, e in VARIANTS}
+        s['clients']['turbo'] = t
+    if 'qbt' in ROWS:
+        s['clients']['qbt'] = dict(app=file_version(QBT), sequentialDownload=True, firstLastPiecePrio=True)
+    return s
+
+
 def main():
     turbos = [Turbo(n, e) for n, e in VARIANTS] or [Turbo()]
+    info = setup()
     clients = {c.name: c for c in (Official(), *turbos, Qbt(), Lt()) if c.name in ROWS or (VARIANTS and isinstance(c, Turbo))}
     order = list(clients)
     results = []
@@ -421,7 +457,7 @@ def main():
             vals = [r[k] for r in rs if r.get(k) is not None]
             agg[name][k] = dict(median=round(statistics.median(vals), 2), min=min(vals), max=max(vals), n=len(vals)) if vals else None
         agg[name]['failedStarts'] = sum(1 for r in rs if r.get('firstFrameS') is None)
-    out = dict(secs=SECS, settle=SETTLE, rounds=ROUNDS, runs=results, summary=agg)
+    out = dict(secs=SECS, settle=SETTLE, rounds=ROUNDS, setup=info, runs=results, summary=agg)
     with open(os.path.join(OUT, 'results.json'), 'w', encoding='utf-8') as f:
         json.dump(out, f, indent=1)
     print(json.dumps(agg, indent=1))

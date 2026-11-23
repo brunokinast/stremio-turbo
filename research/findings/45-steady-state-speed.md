@@ -100,7 +100,18 @@ Same rounds, healthy swarm, 30–60 s MB/s:
 | qBittorrent | 30 s | 7.5 | 8.0 | — |
 | Official Stremio | 5.8 s | 3.0 | 3.3 | 0 s |
 
-On the healthy swarm Turbo was ahead at 30–60 s in every round. qBittorrent didn't get the fast seedbox in any of them.
+On the healthy swarm Turbo was ahead at 30–60 s in every round. qBittorrent didn't get the fast seedbox in any of them. That makes this bench kinder to Turbo than the pooled 34.4 against 25.2 above, which is the fairer comparison of steady speed. Every run, anonymised, is in [`docs/readme/bench-runs.json`](../../docs/readme/bench-runs.json) and the README's run tables.
+
+How even the bench is:
+- **The same for all:** one client at a time on one PC and connection; 10 s warm-up; the same torrent and trackers; rotating order. Turbo and qBittorrent did no better by their position in the round. The official app's slowest run in both benches was the bench's very first (1.1 and 1.7 MB/s); without it, its medians move by 0.1 MB/s (3.4 healthy, 3.1 thin).
+- **Each client's settings:**
+  - Official Stremio runs with this PC's settings, its fastest torrent profile (200 connections, 4 MiB/s soft limit, 37.5 MiB/s hard limit). Its ~3–4 MB/s sits at that soft limit, by its own design.
+  - qBittorrent is stock plus sequential and first/last pieces.
+  - Turbo runs as the app starts it (`RIVULET_SPEED_LIMITS=0`, set by the shell).
+- **Not covered:**
+  - Only two torrents.
+  - The fixes here were measured on the healthy one; the thin one wasn't used for tuning.
+  - Incoming connections are rare on this network (23 of qBittorrent's 995 healthy-swarm peers), so how reachable each client's port is barely matters here, but may elsewhere.
 
 ## Next
 - **Dial order.** Reach the peers that deliver before their slots fill. libtorrent ranks connect candidates by how many sources reported them (tracker, DHT, PEX) before BEP 40. PEX's seed flag marks the seeds.
