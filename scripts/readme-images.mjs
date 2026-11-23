@@ -113,10 +113,26 @@ function bench(healthyDir, thinDir) {
                 const median = v.length % 2 ? v[Math.floor(mid)] : (v[mid - 1] + v[mid]) / 2;
                 return { median: +median.toFixed(2), min: v[0], max: v.at(-1), n: v.length };
             };
+            // The run whose speed is the median's: its MB on disk at each second, for the line
+            // chart (samples.json beside results.json; only the byte counts are read).
+            const mid = stat('mbps')?.median;
+            const run = mid == null ? null : rs.reduce((a, r) => Math.abs(r.mbps - mid) < Math.abs(a.mbps - mid) ? r : a);
+            let mb = null;
+            const samples = run && path.join(dir, `r${run.round}-${name}`, 'samples.json');
+            if (samples && fs.existsSync(samples)) {
+                const s = JSON.parse(fs.readFileSync(samples, 'utf8')).samples.filter((x) => x.t != null && x.downloaded != null);
+                mb = Array.from({ length: 61 }, (_, sec) => {
+                    const i = s.findIndex((x) => x.t >= sec);
+                    if (i <= 0) return i === 0 && s[0].t === sec ? +(s[0].downloaded / 1e6).toFixed(1) : (i < 0 ? +(s.at(-1).downloaded / 1e6).toFixed(1) : 0);
+                    const [p, q] = [s[i - 1], s[i]];
+                    return +((p.downloaded + (q.downloaded - p.downloaded) * (sec - p.t) / (q.t - p.t)) / 1e6).toFixed(1);
+                });
+            }
             out[name] = {
                 runs: rs.length,
                 firstFrameS: stat('firstFrameS'), started: rs.filter((r) => r.firstFrameS != null).length,
-                mbps: stat('mbps'), peersMax: stat('peersMax'), stalls: stat('stalls'),
+                mbps: stat('mbps'), peersMax: stat('peersMax'), stalls: stat('stalls'), stallSeconds: stat('stallSeconds'),
+                mb,
             };
         }
         return out;
@@ -132,7 +148,13 @@ function bench(healthyDir, thinDir) {
 // Hidden before anything is captured: release names (the expanded source lists, the full
 // stream list and the Downloads page's file names) are blurred, the account menu never opens.
 const PRIVACY_CSS = `[class*="sources"], [class*="streams-list"], [class*="stream-container"], [class^="file-"], [class*=" file-"] { filter: blur(7px) !important; }`;
-const FFMPEG = path.join(process.env.LOCALAPPDATA, 'Programs', 'Stremio Turbo', 'ffmpeg.exe');
+// The window size captures use, and the streams panel on a detail page.
+const WINDOW = [1280, 800];
+const PANEL = '[class*="streams"][class*="panel"]';
+// ffmpeg from FFMPEG or PATH, else the copy the app ships (older, but enough for gdigrab).
+const FFMPEG = process.env.FFMPEG
+    || spawnSync('where', ['ffmpeg'], { encoding: 'utf8' }).stdout?.split(/\r?\n/).find((l) => l.trim().endsWith('.exe'))?.trim()
+    || path.join(process.env.LOCALAPPDATA, 'Programs', 'Stremio Turbo', 'ffmpeg.exe');
 
 async function app() {
     const port = process.env.CDP_PORT || 9222;
@@ -181,15 +203,32 @@ async function app() {
 // The app window's rectangle on screen, in physical pixels. The window is brought to the front
 // first (a key tap lets a background process take the foreground; F24, as Alt would put the
 // window in menu mode and stall the web view), since the recording films whatever is on top.
-function windowRect() {
-    const ps = `Add-Type -Name W -Namespace R -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r); [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(System.IntPtr h, int a, out RECT r, int s); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c); [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, int f, int e); [DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h); public struct RECT { public int L, T, R, B; }';
-        $h = (Get-Process stremio-turbo | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1).MainWindowHandle
-        [R.W]::keybd_event(0x87, 0, 0, 0); [R.W]::keybd_event(0x87, 0, 2, 0); if ([R.W]::IsIconic($h)) { [void][R.W]::ShowWindow($h, 9) }; [void][R.W]::SetForegroundWindow($h); Start-Sleep -Milliseconds 300
-        $r = New-Object R.W+RECT; [void][R.W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); "$($r.L) $($r.T) $($r.R) $($r.B)"`;
-    const out = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' }).stdout.trim();
+// With a size, the window is first restored from maximised and resized to it (outer pixels), so
+// the UI reads larger in a small GIF; restoreWindow() puts it back as it was.
+const WIN_API = `Add-Type -Name W -Namespace R -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r); [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(System.IntPtr h, int a, out RECT r, int s); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c); [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, int f, int e); [DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h); [DllImport("user32.dll")] public static extern bool IsZoomed(System.IntPtr h); [DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr h, System.IntPtr a, int x, int y, int w, int t, uint f); public struct RECT { public int L, T, R, B; }';
+    $h = (Get-Process stremio-turbo | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1).MainWindowHandle`;
+const ps = (body) => spawnSync('powershell', ['-NoProfile', '-Command', `${WIN_API}
+${body}`], { encoding: 'utf8' }).stdout.trim();
+let savedWindow = null;
+
+function windowRect(size) {
+    if (size && !savedWindow) {
+        const [zoomed, l, t, r, b] = ps('$r = New-Object R.W+RECT; [void][R.W]::GetWindowRect($h, [ref]$r); "$([int][R.W]::IsZoomed($h)) $($r.L) $($r.T) $($r.R) $($r.B)"').split(/\s+/).map(Number);
+        savedWindow = { zoomed: zoomed === 1, l, t, w: r - l, h: b - t };
+    }
+    const resize = size ? `if ([R.W]::IsZoomed($h)) { [void][R.W]::ShowWindow($h, 9); Start-Sleep -Milliseconds 300 }; [void][R.W]::SetWindowPos($h, [System.IntPtr]::Zero, 80, 60, ${size[0]}, ${size[1]}, 4); Start-Sleep -Milliseconds 800;` : '';
+    const out = ps(`${resize} [R.W]::keybd_event(0x87, 0, 0, 0); [R.W]::keybd_event(0x87, 0, 2, 0); if ([R.W]::IsIconic($h)) { [void][R.W]::ShowWindow($h, 9) }; [void][R.W]::SetForegroundWindow($h); Start-Sleep -Milliseconds 300
+        $r = New-Object R.W+RECT; [void][R.W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16); "$($r.L) $($r.T) $($r.R) $($r.B)"`);
     const [l, t, r, b] = out.split(/\s+/).map(Number);
     if (![l, t, r, b].every(Number.isFinite)) throw new Error('app window not found: ' + out);
     return { x: l, y: t, w: (r - l) & ~1, h: (b - t) & ~1 };
+}
+
+function restoreWindow() {
+    if (!savedWindow) return;
+    const { zoomed, l, t, w, h } = savedWindow;
+    ps(`[void][R.W]::SetWindowPos($h, [System.IntPtr]::Zero, ${l}, ${t}, ${w}, ${h}, 4); ${zoomed ? '[void][R.W]::ShowWindow($h, 3)' : ''}`);
+    savedWindow = null;
 }
 
 // Records the app window's area of the screen while action runs (the player is mpv's own window
@@ -197,19 +236,38 @@ function windowRect() {
 // Evenly's recipe: 12 fps, a 96-colour palette from the moving parts, Bayer dithering. The
 // recording stops tail seconds after action finishes (a play's action ends at the first frame;
 // footage costs a lot of GIF), or at secs at the latest.
-async function record(dir, name, secs, action, { width = 640, tail = 2.5 } = {}) {
+// crop: a page rectangle (CSS pixels, from getBoundingClientRect) to keep, scaled by zoom.
+// endAtCut: the GIF ends just after the cut to the player (a crop of the player is only its backdrop).
+async function record(dir, name, secs, action, { width = 640, tail = 2.5, crop = null, zoom = 1.3, endAtCut = false } = {}) {
     const r = windowRect();
     const mp4 = path.join(dir, `${name}.mp4`);
     const ff = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'gdigrab', '-framerate', '24', '-offset_x', r.x, '-offset_y', r.y,
         '-video_size', `${r.w}x${r.h}`, '-draw_mouse', '0', '-i', 'desktop', '-t', String(secs), '-pix_fmt', 'yuv420p', mp4].map(String), { stdio: ['pipe', 'inherit', 'inherit'] });
+    const t0 = Date.now();
     const done = new Promise((res) => ff.on('exit', res));
     await sleep(400);
-    await action();
+    const endAt = await action();
     const stop = setTimeout(() => ff.stdin.write('q'), tail * 1000);
     await done;
     clearTimeout(stop);
     const gif = path.join(dir, `${name}.gif`);
-    makeGif(mp4, gif, '', width);
+    if (crop) {
+        // The web view fills the window below its title bar.
+        const x = Math.round(crop.x + crop.border), y = Math.round(crop.y + crop.top);
+        const cropF = `crop=${Math.round(crop.width) & ~1}:${Math.round(crop.height) & ~1}:${x}:${y}`;
+        // endAt (from the action, epoch ms) is when the page left for the player. The cropped
+        // panel then turns into the player's dark backdrop, too small a change for a fixed scene
+        // threshold, so the page's time is snapped to the nearest faint cut in the crop.
+        let trim = '';
+        if (endAtCut && endAt) {
+            const est = (endAt - t0) / 1000;
+            const near = sceneCuts(mp4, cropF, 0.05).filter((c) => Math.abs(c - est) < 1).sort((a, b) => Math.abs(a - est) - Math.abs(b - est))[0];
+            trim = `trim=end=${((near ?? est) - 0.05).toFixed(2)},`;
+        }
+        makeGif(mp4, gif, `${trim}${cropF},`, Math.round(crop.width * zoom) & ~1);
+    } else {
+        makeGif(mp4, gif, '', width);
+    }
     console.log('wrote', path.relative(ROOT, gif), `${Math.round(fs.statSync(gif).size / 1024)} KB`);
 }
 
@@ -219,9 +277,9 @@ async function record(dir, name, secs, action, { width = 640, tail = 2.5 } = {})
 const SETS = {
     library: {
         banner: '#/detail/series/tt2442560/tt2442560%3A6%3A5',
-        race: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A6', tier: '4k DV | HDR' },
+        race: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A2', tier: '4k DV | HDR' }, // an episode not on disk
         engine: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A8', tier: '4k DV | HDR' }, // the next, unplayed episode
-        resume: { tile: 'tt15398776' }, // Oppenheimer, top of Continue Watching
+        resume: { tile: 'tt15398776' }, // Oppenheimer: must be the first Continue Watching card (the one warmed up)
         download: { route: '#/detail/series/tt11198330/tt11198330%3A2%3A7', tier: '4k DV | HDR' },
     },
     open: {
@@ -243,7 +301,27 @@ async function capture(args) {
     const dir = path.join(RAW, args[0] + (blur ? '-blur' : ''));
     fs.mkdirSync(dir, { recursive: true });
     const a = await app();
+    // A smaller window: the UI reads larger in a GIF of the same size.
+    const win = windowRect(WINDOW);
     const server = 'http://127.0.0.1:11470';
+    // Where the page sits in the recorded window rectangle (title bar on top, borders around).
+    const frame = await a.evaluate('[innerWidth, innerHeight]').then(([w, h]) => ({ border: (win.w - w) / 2, top: win.h - h - (win.w - w) / 2 }));
+    const rectOf = async (sel, pad = 0) => ({ ...frame, ...(await a.evaluate(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => e.getBoundingClientRect().width > 0); const r = e.getBoundingClientRect(); return { x: r.x - ${pad}, y: r.y - ${pad}, width: r.width + ${2 * pad}, height: r.height + ${2 * pad} }; })()`)) });
+    // The player's first frame: its backdrop and loading layers, once seen, are gone.
+    const watchFirstFrame = () => a.evaluate(`(() => {
+        const f = window.__readmeFF = { seen: false, at: null, player: null };
+        const shown = (sel) => [...document.querySelectorAll(sel)].some((e) => e.getBoundingClientRect().width > 0);
+        const tick = () => {
+            const player = location.hash.startsWith('#/player');
+            if (player && f.player == null) f.player = performance.timeOrigin + performance.now();
+            const loading = player && (shown('[class*="background-layer"]') || shown('[class*="buffering-layer"]'));
+            if (loading) f.seen = true;
+            if (f.seen && player && !loading) { f.at = performance.now(); return; }
+            requestAnimationFrame(tick);
+        };
+        tick();
+    })()`);
+    const firstFrame = (secs = 45) => a.waitFor('window.__readmeFF?.at != null', secs);
     const before = new Set((await fetch(`${server}/downloads`).then((r) => r.json())).map((d) => `${d.infoHash}/${d.fileIdx}`));
     const tierButton = (label) => `[...document.querySelectorAll('[class*="quality-rows"] [title]')].find((b) => b.title === ${JSON.stringify(label)} && /(^|\\s)play-/.test(b.className))`;
     const open = async (route, ready) => {
@@ -273,18 +351,27 @@ async function capture(args) {
     };
     const steps = {
         async banner() {
+            // A close-up of the quality picker with some of the show's art beside it, at 2x.
             await open(set.banner, `!!document.querySelector('[class*="quality-rows"] [class*="play-"]')`);
             await sleep(1000);
-            const { data } = await a.c.send('Page.captureScreenshot', { format: 'png' });
+            const p = await rectOf(PANEL);
+            const vw = await a.evaluate('innerWidth');
+            const clip = { x: p.x - 300, y: p.y - 16, width: vw - (p.x - 300), height: 560, scale: 2 };
+            const { data } = await a.c.send('Page.captureScreenshot', { format: 'png', clip });
             fs.writeFileSync(path.join(dir, 'banner-app.png'), Buffer.from(data, 'base64'));
             console.log('wrote', path.relative(ROOT, path.join(dir, 'banner-app.png')));
         },
         async race() {
+            // Cropped to the panel's top: the quality rows, then the race in their place.
             await open(set.race.route, `!!(${tierButton(set.race.tier)})`);
+            const p = await rectOf(PANEL, 8);
             await record(dir, 'feature-race', 40, async () => {
-                await sleep(700);
+                await sleep(900);
+                await watchFirstFrame();
                 await play(`(${tierButton(set.race.tier)}).click()`);
-            });
+                await firstFrame();
+                return a.evaluate('window.__readmeFF.player');
+            }, { crop: { ...p, height: 440 }, tail: 1.5, endAtCut: true });
             await leave();
         },
         async engine() {
@@ -333,30 +420,76 @@ async function capture(args) {
             // The visible copy: routes left behind stay in the page, hidden.
             const card = `[...document.querySelectorAll('[class*="continue"] [data-board-tile="${set.resume.tile}"] [class*="play-icon-layer"]')].find((e) => e.getBoundingClientRect().width > 0)`;
             await open('#/', `!!(${card})`);
-            await record(dir, 'feature-resume', 20, async () => {
+            // The board warms up its first card in the background (the head, the tail and the
+            // window at the resume point, findings/22): give it time, as a user reading the
+            // board would.
+            await sleep(25000);
+            await record(dir, 'feature-resume', 25, async () => {
                 await sleep(700);
+                await watchFirstFrame();
                 // A real mouse click: the icon reacts to pointer events, not to element.click().
                 const at = await a.evaluate(`(() => { const r = (${card}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
                 await play(`void 0`, async () => {
                     for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await a.c.send('Input.dispatchMouseEvent', { type, x: at[0], y: at[1], button: 'left', clickCount: 1 });
                 });
-            });
+                // Then the picture playing.
+                await firstFrame();
+            }, { width: 800, tail: 3.5 });
             await leave();
         },
         async download() {
-            const dl = `[...document.querySelectorAll('[class*="quality-rows"] [class*="tier"]')].find((t) => [...t.querySelectorAll('[title]')].some((b) => b.title === ${JSON.stringify(set.download.tier)}))?.querySelector('[class*="download"]')`;
-            const downloading = `[...document.querySelectorAll('[class*="downloads"] [tabindex], [class*="downloads"] button')].find((b) => /^Downloading/.test(b.innerText.trim()) && b.getBoundingClientRect().width > 0)`;
-            await open(set.download.route, `!!(${dl})`);
-            await record(dir, 'feature-downloads', 20, async () => {
-                await sleep(800);
-                await a.evaluate(`(${dl}).click()`);
-                await sleep(4500);
-                await a.go('#/downloads');
-                // Only what is downloading now, so the new download is in view.
-                await a.waitFor(`!!${downloading}`, 10);
-                await sleep(1200);
-                await a.evaluate(`${downloading}.click()`);
-            }, { tail: 4 });
+            // The Downloads screen on mocked records (scripts/readme-fixtures/downloads.json):
+            // DevTools answers the page's /downloads calls, so the server is never asked or
+            // changed. Downloading rows advance at their rate, as on a real screen.
+            const fx = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'readme-fixtures', 'downloads.json'), 'utf8'));
+            const t0 = Date.now();
+            const records = () => fx.downloads.map((d) => {
+                if (d.state !== 'downloading') return d;
+                const done = Math.min(d.size - 1, d.bytesCompleted + d.rate * (Date.now() - t0) / 1000);
+                return { ...d, bytesCompleted: done, bytesOnDisk: done };
+            });
+            const answer = async ({ params }) => {
+                const u = new URL(params.request.url);
+                const body = params.request.method !== 'GET' ? {} : u.pathname === '/downloads' ? records() : u.pathname === '/downloads/disk' ? fx.disk : null;
+                if (body === null) return a.c.send('Fetch.continueRequest', { requestId: params.requestId });
+                await a.c.send('Fetch.fulfillRequest', { requestId: params.requestId, responseCode: 200,
+                    responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Access-Control-Allow-Origin', value: '*' }],
+                    body: Buffer.from(JSON.stringify(body)).toString('base64') });
+            };
+            const listener = (m) => { if (m.method === 'Fetch.requestPaused') answer(m).catch(() => {}); };
+            a.c.on(listener);
+            await a.c.send('Fetch.enable', { patterns: [{ urlPattern: 'http://127.0.0.1:11470/downloads*' }] });
+            const chip = (label) => `[...document.querySelectorAll('[class*="downloads"] [class*="chip"], [class*="downloads"] [tabindex]')].find((b) => b.innerText.trim().startsWith(${JSON.stringify(label)}) && b.getBoundingClientRect().width > 0 && b.innerText.trim().length < 30)`;
+            const list = `[...document.querySelectorAll('[class*="downloads"] *')].find((e) => e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY === 'auto' && e.getBoundingClientRect().width > 0)`;
+            try {
+                await a.evaluate(`location.hash = '#/'`);
+                await sleep(1500);
+                await a.evaluate(`location.hash = '#/downloads'`);
+                await a.waitFor(`!!(${chip('Downloading')}) && !!(${list})`, 20);
+                // A smaller window still, filmed near 1:1, for bigger text; the mocked file names
+                // unblurred.
+                windowRect([1040, 700]);
+                await a.evaluate(`document.getElementById('readme-privacy')?.remove()`);
+                await sleep(2500);
+                await record(dir, 'feature-downloads', 30, async () => {
+                    await sleep(1200);
+                    // A slow scroll to the bottom and back up.
+                    const glide = (to, ms) => a.evaluate(`new Promise((done) => { const e = ${list}; const from = e.scrollTop; const target = ${to} === -1 ? e.scrollHeight - e.clientHeight : ${to}; const t0 = performance.now();
+                        const f = (now) => { const k = Math.min(1, (now - t0) / ${ms}); const ease = k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2; e.scrollTop = from + (target - from) * ease; k < 1 ? requestAnimationFrame(f) : done(); }; requestAnimationFrame(f); })`);
+                    await glide(-1, 3500);
+                    await sleep(900);
+                    await glide(0, 1800);
+                    await sleep(900);
+                    await a.evaluate(`(${chip('Downloading')}).click()`);
+                    await sleep(2600);
+                    await a.evaluate(`(${chip('Stopped')}).click()`);
+                    await sleep(1800);
+                    await a.evaluate(`(${chip('All')}).click()`);
+                }, { width: 800, tail: 1.5 });
+            } finally {
+                windowRect(WINDOW);
+                await a.c.send('Fetch.disable');
+            }
         },
     };
     try {
@@ -366,16 +499,18 @@ async function capture(args) {
         }
     } finally {
         if (blur) await mpv('vf', '');
+        restoreWindow();
         // Downloads the captures started (the download step, and the plays' own records) are
         // removed again, so the captures leave the owner's downloads as they were. A play's
         // record and a manual download's record appear seconds after the click (after the race),
         // so the list is read until it stops changing.
         const list = () => fetch(`${server}/downloads`).then((r) => r.json());
+        // At least 15 s, and until two reads 5 s apart agree (a winner's record can take that long).
         let now = await list();
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0, still = 0; i < 12 && still < 3; i++) {
             await sleep(5000);
             const next = await list();
-            if (next.length === now.length) break;
+            still = next.length === now.length ? still + 1 : 0;
             now = next;
         }
         const owned = new Set([...before].map((k) => k.split('/')[0]));
@@ -451,6 +586,123 @@ function chartHtml(b, theme) {
     </body></html>`;
 }
 
+// Download speed as MB on disk over the first minute (the median run of each client), one panel
+// per swarm. Lines are direct-labelled at their ends; Turbo carries the colour.
+function speedHtml(b, theme) {
+    const t = THEMES[theme];
+    const W = 360, H = 210, L = 44, R = 86, T = 12, B = 28;
+    const panel = (g, title) => {
+        const short = { official: 'Official', turbo: 'Turbo', qbt: 'qBittorrent' };
+        const series = CLIENTS.map(([c]) => ({ c, name: short[c], mb: b[g][c]?.mb })).filter((s) => s.mb);
+        const max = Math.max(...series.flatMap((s) => s.mb));
+        const step = [50, 100, 250, 500, 1000].find((s) => max / s <= 4) ?? 1000;
+        const top = Math.ceil(max / step) * step;
+        const x = (sec) => L + (W - L - R) * sec / 60;
+        const y = (v) => T + (H - T - B) * (1 - v / top);
+        const fmt = (v) => v >= 1000 ? `${+(v / 1000).toFixed(1)} GB` : `${v} MB`;
+        const grid = Array.from({ length: top / step + 1 }, (_, i) => i * step).map((v) =>
+            `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${t.faint}" stroke-width="1"/>
+             <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" fill="${t.muted}" font-size="11">${fmt(v)}</text>`).join('');
+        const xs = [0, 15, 30, 45, 60].map((s) => `<text x="${x(s)}" y="${H - 8}" text-anchor="middle" fill="${t.muted}" font-size="11">${s} s</text>`).join('');
+        // End labels, nudged apart when two lines finish close together.
+        const ends = series.map((s) => ({ ...s, ly: y(s.mb[60]) })).sort((a, z) => a.ly - z.ly);
+        for (let i = 1; i < ends.length; i++) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + 26);
+        const lines = series.map((s) => `<polyline fill="none" stroke="${s.c === 'turbo' ? t.turbo : t.other}" stroke-width="${s.c === 'turbo' ? 3 : 2}" stroke-linejoin="round"
+            ${s.c === 'qbt' ? 'stroke-dasharray="5 4"' : ''} points="${s.mb.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}"/>`).join('');
+        const labels = ends.map((s) => `<circle cx="${x(60)}" cy="${y(s.mb[60])}" r="4" fill="${s.c === 'turbo' ? t.turbo : t.other}" stroke="${t.surface}" stroke-width="2"/>
+            <text x="${x(60) + 10}" y="${s.ly - 1}" fill="${t.ink}" font-size="12.5" font-weight="${s.c === 'turbo' ? 700 : 400}">${s.name}</text>
+            <text x="${x(60) + 10}" y="${s.ly + 13}" fill="${t.muted}" font-size="11.5">${b[g][s.c].mbps.median.toFixed(1)} MB/s</text>`).join('');
+        return `<div class="panel"><div class="title">${title}</div><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${FONT.replace(/'/g, '')}">${grid}${xs}${lines}${labels}</svg></div>`;
+    };
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+        * { box-sizing: border-box; margin: 0; }
+        body { width: 800px; background: ${t.surface}; color: ${t.ink}; font: 14px/1.35 ${FONT}; padding: 22px 28px 18px; }
+        h2 { font-size: 18px; font-weight: 600; }
+        .sub { color: ${t.muted}; margin: 2px 0 12px; }
+        .panels { display: flex; gap: 24px; }
+        .title { font-weight: 600; margin-bottom: 4px; }
+        .foot { color: ${t.muted}; font-size: 12px; margin-top: 8px; }
+    </style></head><body>
+        <h2>Downloaded in the first minute</h2>
+        <div class="sub">A fresh 4K HDR episode, nothing cached · median run of ${b.healthy.turbo?.runs ?? 3}</div>
+        <div class="panels">${panel('healthy', 'Healthy swarm · about 95 seeders')}${panel('thin', 'Thin swarm · about 14 seeders')}</div>
+        <div class="foot">qBittorrent (dashed) only downloads: no player is waiting on it.</div>
+    </body></html>`;
+}
+
+// The headline numbers as three tiles, with the official app's figure under each.
+function statsHtml(b, theme) {
+    const t = THEMES[theme];
+    const h = b.healthy, n = b.thin;
+    const sec = (v) => v === 0 ? '0 s' : `${v.toFixed(1)} s`;
+    const tiles = [
+        [`${h.turbo.firstFrameS.median.toFixed(1)} s`, 'click to first frame', `official ${h.official.firstFrameS.median.toFixed(1)} s · thin swarm ${n.turbo.firstFrameS.median.toFixed(1)} s vs ${n.official.firstFrameS.median.toFixed(1)} s`],
+        [`${Math.round(h.turbo.mbps.median / h.official.mbps.median)}×`, 'download speed', `${h.turbo.mbps.median.toFixed(1)} vs ${h.official.mbps.median.toFixed(1)} MB/s · thin swarm ${n.turbo.mbps.median.toFixed(1)} vs ${n.official.mbps.median.toFixed(1)}`],
+        [`${h.turbo.stallSeconds.median.toFixed(1)} s`, 'frozen in the first minute', `official ${sec(h.official.stallSeconds.median)} · thin swarm ${sec(n.turbo.stallSeconds.median)} vs ${sec(n.official.stallSeconds.median)}`],
+    ];
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+        * { box-sizing: border-box; margin: 0; }
+        body { width: 800px; background: ${t.surface}; color: ${t.ink}; font: 14px/1.35 ${FONT}; padding: 6px 0; display: flex; gap: 14px; }
+        .tile { flex: 1; border: 1px solid ${t.faint}; border-radius: 14px; padding: 18px 20px 16px; }
+        .big { font-size: 40px; font-weight: 700; letter-spacing: -1px; color: ${t.turbo}; font-variant-numeric: tabular-nums; line-height: 1.1; }
+        .what { font-size: 15px; font-weight: 600; margin-top: 2px; }
+        .vs { color: ${t.muted}; font-size: 12.5px; margin-top: 8px; }
+    </style></head><body>${tiles.map(([big, what, vs]) => `<div class="tile"><div class="big">${big}</div><div class="what">${what}</div><div class="vs">${vs}</div></div>`).join('')}</body></html>`;
+}
+
+// How it's built: every layer of Stremio, forked and improved, bundled by one installer.
+const STACK = [
+    // Top to bottom.
+    { name: 'Windows app', fork: 'stremio-shell-ng', tags: ['ed25519-signed self-updates', 'starts and adopts the server', 'mpv player'] },
+    { name: 'Web UI', fork: 'stremio-web', tags: ['races the sources', 'swaps a slow source mid-episode', 'downloads'] },
+    { name: 'Streaming server', fork: 'rivulet-engine', tags: ['replaces the closed server.js', 'live source tests', 'downloads API'] },
+    { name: 'Torrent engine', fork: 'anacrolix/torrent + go-utp', tags: ['6× download speed', 'uTP acks the whole reorder buffer', "player's bytes first, by deadline"] },
+];
+
+function stackHtml(theme, iconPng) {
+    const dark = theme === 'dark';
+    const t = THEMES[theme];
+    const img = `data:image/png;base64,${fs.readFileSync(iconPng).toString('base64')}`;
+    // Brand gradient steps, top (violet) to bottom (blue).
+    const steps = ['#8460ff', '#6c62f2', '#4f5de8', '#2f57e0'];
+    const slabs = STACK.map((l, i) => {
+        const inset = (STACK.length - 1 - i) * 14;
+        const bg = dark ? `linear-gradient(90deg, ${steps[i]}, ${steps[i]}cc)` : `linear-gradient(90deg, ${steps[i]}24, ${steps[i]}12)`;
+        return `<div class="slab" style="margin: 0 ${inset}px; background: ${bg}; border-color: ${dark ? 'rgba(255,255,255,.14)' : steps[i] + '55'}">
+            <div class="who"><div class="name">${l.name}</div><div class="fork">fork of ${l.fork}</div></div>
+            <div class="tags">${l.tags.map((tag, j) => `<span class="tag${j === 0 ? ' lead' : ''}">${tag}</span>`).join('')}</div>
+        </div>`;
+    }).join('');
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+        * { box-sizing: border-box; margin: 0; }
+        body { width: 960px; background: ${t.surface}; color: ${t.ink}; font: 14px/1.3 ${FONT}; padding: 18px 24px 22px; }
+        .box { position: relative; border: 2px solid ${dark ? '#8476f7' : '#6b5cf0'}; border-radius: 22px; padding: 46px 22px 22px;
+            background: ${dark ? 'rgba(132,118,247,.06)' : 'rgba(107,92,240,.035)'}; }
+        .badge { position: absolute; top: -17px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+            background: linear-gradient(135deg, ${BRAND.top}, ${BRAND.bottom}); color: #fff; border-radius: 999px; padding: 6px 18px 6px 8px;
+            font-weight: 600; white-space: nowrap; box-shadow: 0 4px 14px rgba(40,30,120,.3); }
+        .badge img { width: 22px; height: 22px; }
+        .badge .sep { opacity: .55; }
+        .badge code { font: 600 13px Consolas, 'Cascadia Mono', monospace; }
+        .stack { display: flex; flex-direction: column; gap: 10px; }
+        .slab { display: flex; align-items: center; gap: 18px; padding: 14px 18px; border-radius: 14px; border: 1px solid;
+            color: ${dark ? '#fff' : t.ink}; box-shadow: ${dark ? '0 6px 16px rgba(0,0,0,.35)' : '0 3px 10px rgba(60,50,140,.08)'}; }
+        .who { width: 300px; flex: none; }
+        .name { font-size: 17px; font-weight: 700; }
+        .fork { font: 12.5px Consolas, 'Cascadia Mono', monospace; opacity: .78; margin-top: 3px; }
+        .tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; flex: 1; }
+        .tag { font: 12.5px Consolas, 'Cascadia Mono', monospace; padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+            background: ${dark ? 'rgba(255,255,255,.14)' : '#ffffff'}; border: 1px solid ${dark ? 'rgba(255,255,255,.18)' : 'rgba(80,70,180,.22)'}; }
+        .tag.lead { font-weight: 700; background: ${dark ? 'rgba(255,255,255,.26)' : '#efeaff'}; }
+        .sync { position: absolute; bottom: 8px; right: 22px; font: 12px Consolas, 'Cascadia Mono', monospace; color: ${t.muted}; }
+        .box { padding-bottom: 34px; }
+    </style></head><body><div class="box">
+        <div class="badge"><img src="${img}">StremioTurbo-x64.exe <span class="sep">·</span> one installer <span class="sep">·</span> signed self-updates</div>
+        <div class="stack">${slabs}</div>
+        <div class="sync">↻ kept on every original project's latest code</div>
+    </div></body></html>`;
+}
+
 function buttonHtml() {
     return `<!doctype html><html><head><meta charset="utf-8"><style>
         * { margin: 0; box-sizing: border-box; }
@@ -484,23 +736,32 @@ function bannerHtml(appPng, iconPng) {
         .bar { height: 34px; background: #17151f; display: flex; align-items: center; padding: 0 14px; gap: 10px; font-size: 13px; color: #b9b5c9; }
         .bar img { width: 16px; height: 16px; }
         .bar .ctl { margin-left: auto; letter-spacing: 18px; color: #8d8a99; }
-        /* The right side of the page: the cast art and the quality rows. */
+        /* A close-up of the quality picker, with some of the show's art beside it. */
         .shot { height: 490px; overflow: hidden; position: relative; }
-        .shot img { position: absolute; right: 0; top: 0; height: 100%; }
+        .shot img { position: absolute; left: 0; top: 0; width: 100%; }
     </style></head><body><div class="glow"></div>
         <div class="left">
             <img class="mark" src="${img(iconPng)}">
             <h1>Stremio <span>Turbo</span></h1>
-            <p>Stremio for Windows, rebuilt for speed. 4K HDR starts in seconds and doesn't buffer.</p>
+            <p>Stremio for Windows, rebuilt for speed.</p>
         </div>
         <div class="win"><div class="bar"><img src="${img(iconPng)}">Stremio Turbo<span class="ctl">–▢✕</span></div><div class="shot"><img src="${img(appPng)}"></div></div>
     </body></html>`;
 }
 
-// The time of the clip's last scene cut: where the page gives way to the player.
-function playerCut(mp4) {
+// The time of the clip's last scene cut: where the page gives way to the player. With after, the
+// first cut past that many seconds instead (a cropped clip also films the race box appearing, and
+// the player's own scene changes after the cut).
+// Scene cuts (seconds) after a filter, at a threshold.
+function sceneCuts(mp4, pre, threshold) {
+    const r = spawnSync(FFMPEG, ['-hide_banner', '-i', mp4, '-vf', `${pre},select='gt(scene,${threshold})',showinfo`, '-f', 'null', '-'], { encoding: 'utf8' });
+    return [...r.stderr.matchAll(/pts_time:([0-9.]+)/g)].map((m) => Number(m[1]));
+}
+
+function playerCut(mp4, after = null) {
     const r = spawnSync(FFMPEG, ['-hide_banner', '-i', mp4, '-vf', "select='gt(scene,0.25)',showinfo", '-f', 'null', '-'], { encoding: 'utf8' });
     const cuts = [...r.stderr.matchAll(/pts_time:([0-9.]+)/g)].map((m) => Number(m[1]));
+    if (after !== null) return cuts.find((c) => c > after) ?? null;
     return cuts.length ? cuts[cuts.length - 1] : null;
 }
 
@@ -520,10 +781,14 @@ async function compose(set = 'library') {
     const b = JSON.parse(fs.readFileSync(path.join(DOCS, 'bench.json'), 'utf8'));
     const e = await edge();
     try {
-        for (const theme of ['light', 'dark']) await e.render(chartHtml(b, theme), 800, null, path.join(DOCS, `bench-${theme}.png`));
+        const icon = path.join(ROOT, 'shell', 'images', 'stremio.png');
+        for (const theme of ['light', 'dark']) {
+            await e.render(speedHtml(b, theme), 800, null, path.join(DOCS, `speed-${theme}.png`));
+            await e.render(statsHtml(b, theme), 800, null, path.join(DOCS, `stats-${theme}.png`));
+            await e.render(stackHtml(theme, icon), 960, null, path.join(DOCS, `stack-${theme}.png`));
+        }
         await e.render(buttonHtml(), 300, 64, path.join(DOCS, 'button-download.png'));
         const app = path.join(src, 'banner-app.png');
-        const icon = path.join(ROOT, 'shell', 'images', 'stremio.png');
         if (fs.existsSync(app)) await e.render(bannerHtml(app, fs.existsSync(icon) ? icon : app), 1280, 640, path.join(DOCS, 'banner.png'));
         else console.log('skipped banner.png: no banner-app.png in', path.relative(ROOT, src));
     } finally {
@@ -531,7 +796,7 @@ async function compose(set = 'library') {
     }
     const out = path.join(RAW, set);
     fs.mkdirSync(out, { recursive: true });
-    for (const name of ['feature-race', 'feature-engine', 'feature-resume', 'feature-downloads']) {
+    for (const name of ['feature-race', 'feature-resume', 'feature-downloads']) {
         let gif = path.join(src, `${name}.gif`);
         const cut = blur && name !== 'feature-downloads' ? playerCut(path.join(src, `${name}.mp4`)) : null;
         if (cut !== null) {

@@ -1,11 +1,11 @@
 <!-- DRAFT (branch `readme`): images from scripts/readme-images.mjs; numbers from research/lab/bench (2026-11-22). -->
 
 <p align="center">
-  <img src="docs/readme/banner.png" alt="Stremio Turbo: Stremio for Windows, rebuilt for speed. The episode page with its quality rows, in an app window." width="100%">
+  <img src="docs/readme/banner.png" alt="Stremio Turbo: Stremio for Windows, rebuilt for speed. A close-up of the quality picker: tiers with their seeders." width="100%">
 </p>
 
 <p align="center">
-  <b>Stremio for Windows, rebuilt for speed: 4K HDR starts in seconds and doesn't buffer.</b><br>
+  <b>Stremio for Windows, rebuilt for speed.</b><br>
   It races the sources and plays the fastest one that keeps up, on a faster open-source torrent engine.
 </p>
 
@@ -22,7 +22,7 @@
   <a href="https://github.com/brunokinast/stremio-turbo/releases/latest/download/StremioTurbo-x64.exe"><img src="docs/readme/button-download.png" alt="Download for Windows" height="60"></a>
 </p>
 
-<p align="center"><sub>Not code-signed yet: on “Windows protected your PC”, choose More info → Run anyway. The app updates itself, and every update is checked against this project's signing key.<br><a href="#how-its-built">How it's built ↓</a></sub></p>
+<p align="center"><sub>Windows Defender may flag the installer: it isn't code-signed yet. The app updates itself, and every update is verified.<br><a href="#how-its-built">How it's built ↓</a></sub></p>
 
 <hr>
 
@@ -32,27 +32,42 @@
 
 <table>
   <tr>
-    <td width="50%" valign="top">
-      <img src="docs/readme/feature-race.gif" alt="Pressing Play on the 4K HDR row: three sources are tested side by side and the fastest one that keeps up starts playing." width="100%"><br><br>
-      <b>Races the sources</b><br>
-      The top three sources of a quality are tested live, and the best picture that keeps up plays (at least 1.25× the speed it needs). If none does, it steps down a quality and says why. The test starts while you read the page, so Play is usually instant.
+    <td width="60%">
+      <img src="docs/readme/feature-race.gif" alt="Pressing Play on the 4K DV/HDR row: three sources are tested side by side with live speeds, and the fastest one that keeps up starts playing." width="100%">
     </td>
-    <td width="50%" valign="top">
-      <img src="docs/readme/feature-engine.gif" alt="A fresh 4K HDR episode starting: the first frame appears a few seconds after Play." width="100%"><br><br>
-      <b>A faster torrent engine</b><br>
-      Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. A fresh 4K HDR episode downloads 6× faster than in the official app, and on a thin swarm it starts in 5 s where the official app took 17 s or never started.
+    <td width="40%">
+      <h3>Races the sources</h3>
+      Press Play on a quality and its top three sources are tested live. The best one that keeps up plays: at least <b>1.25×</b> the speed the video needs. If none does, it steps down a quality and says why.
     </td>
   </tr>
   <tr>
-    <td valign="top">
-      <img src="docs/readme/feature-resume.gif" alt="Resume from Continue Watching starts in about two seconds; later a slow source is swapped mid-episode without a pause." width="100%"><br><br>
-      <b>Resume at once, no buffering</b><br>
-      The top of Continue Watching is prepared in the background, so Resume plays in about 2 s. A source that falls behind is swapped mid-episode at the same second, with a 0.3 s gap.
+    <td width="40%">
+      <h3>A faster torrent engine</h3>
+      Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. A fresh 4K HDR episode downloads <b>6× faster</b> than in the official app, close to qBittorrent.
     </td>
-    <td valign="top">
-      <img src="docs/readme/feature-downloads.gif" alt="Downloading a season, then the Downloads screen with disk use, progress and duplicates." width="100%"><br><br>
-      <b>Downloads</b><br>
-      An episode or a whole season, each from its fastest source. The next episode downloads while you watch, and downloads finish after the app is closed.
+    <td width="60%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/readme/speed-dark.png">
+        <img src="docs/readme/speed-light.png" alt="Megabytes downloaded over the first 60 seconds of a fresh 4K HDR episode, median run: Stremio Turbo and qBittorrent climb steeply, official Stremio stays low." width="100%">
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="60%">
+      <img src="docs/readme/feature-resume.gif" alt="Resuming a 4K movie from Continue Watching: the picture is playing about a second after the click." width="100%">
+    </td>
+    <td width="40%">
+      <h3>Resume at once</h3>
+      The top of Continue Watching is prepared in the background, so Resume plays in <b>about a second</b>. A source that falls behind is swapped mid-episode at the same second, with a 0.3 s gap.
+    </td>
+  </tr>
+  <tr>
+    <td width="40%">
+      <h3>Downloads</h3>
+      An episode or a whole season, each from its fastest source. The next episode downloads while you watch, and downloads <b>finish after the app is closed</b>.
+    </td>
+    <td width="60%">
+      <img src="docs/readme/feature-downloads.gif" alt="The Downloads screen: a season in progress, finished movies, disk use, and the Downloading and Done tabs." width="100%">
     </td>
   </tr>
 </table>
@@ -62,49 +77,35 @@
 ## How fast
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/bench-dark.png">
-  <img src="docs/readme/bench-light.png" alt="Click to first frame on a fresh 4K HDR episode, healthy swarm: official Stremio 4.4 s, Stremio Turbo 3.3 s. Thin swarm: official 16.7 s (2 of 3 started), Turbo 5.0 s. Download speed, healthy: official 3.8 MB/s, Turbo 22.2, qBittorrent 29.1; thin: 0.2, 7.3 and 4.9." width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/stats-dark.png">
+  <img src="docs/readme/stats-light.png" alt="A fresh 4K HDR episode on a healthy swarm: 3.3 s from click to first frame (official 4.4 s); 6× the download speed (22 vs 3.8 MB/s); 0.5 s frozen in the first minute (official 7.2 s)." width="100%">
 </picture>
 
-| A fresh 4K HDR episode, median of 3 runs (range) | Official Stremio | Stremio Turbo | qBittorrent* |
-| ------------------------------------------------ | ---------------: | ------------: | -----------: |
-| **Healthy swarm** (9.0 GB, about 95 seeders) | | | |
-| Click → first frame | 4.4 s (4.3–4.7) | **3.3 s** (2.7–3.6) | 23 s (21–39) |
-| Download speed, first 60 s | 3.8 MB/s | **22.2 MB/s** (19.8–23.0) | 29.1 MB/s (12.5–37.4) |
-| Time frozen in the first minute | 7.2 s (4.1–9.3) | **0.5 s** (0–0.6) | — |
-| **Thin swarm** (8.6 GB, about 14 seeders) | | | |
-| Click → first frame | 16.7 s; 1 of 3 never | **5.0 s** (4.9–7.1) | 51 s; 2 of 3 never |
-| Download speed, first 60 s | 0.2 MB/s | **7.3 MB/s** (1.9–9.5) | 4.9 MB/s (3.7–6.6) |
-| Time frozen in the first minute | 6.4 s (0–13.1) | **0 s** | — |
+On a thin swarm (about 14 seeders) Turbo starts in **5.0 s** against the official app's 16.7 s, and the official app never started in 1 run of 3.
 
-<sub>* qBittorrent has no player: its time is until the first and last pieces are on disk, what a player needs before its first frame. Each client starts fresh with nothing cached, in rotating order; the same player (the app's mpv) plays for Stremio and Turbo. Script and raw numbers: [research/lab/bench](research/lab/bench).</sub>
+<sub>Median of 3 runs per client, each starting fresh with nothing cached, in rotating order; the same player (the app's mpv) plays for Stremio and Turbo. qBittorrent has no player: its line is the same torrent downloading. Script and raw numbers: [research/lab/bench](research/lab/bench).</sub>
 
 <br>
 
 ## How it's built
 
-Stremio's Windows app and web UI, with the closed-source streaming server replaced by an open one. Every layer is a folder in this repository, so a fix lands where the cause is: the UI, the server, the BitTorrent library or the uTP transport.
+Every layer of Stremio, forked, improved and bundled into one installer.
 
-```mermaid
-flowchart LR
-  Shell["Windows app (shell/)<br/>Rust · WebView2 · mpv"] --> UI["Web UI (web/)<br/>React · stremio-core<br/>smart play, downloads"]
-  UI --> Server["Streaming server (server/)<br/>Rivulet · Go<br/>serves the UI, streams, downloads"]
-  Shell -- "starts, adopts" --> Server
-  Server --> Torrent["BitTorrent (deps/torrent)<br/>+ uTP (deps/go-utp)"]
-  Torrent --> Swarm(("Peers"))
-  Releases["GitHub Releases<br/>ed25519-signed"] -.-> Shell
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/stack-dark.png">
+  <img src="docs/readme/stack-light.png" alt="Four layers in one installer. Windows app (fork of stremio-shell-ng): starts and adopts the server, mpv, ed25519-signed updates. Web UI (fork of stremio-web): races the sources, downloads, swaps a slow source mid-episode. Streaming server (rivulet-engine, replacing Stremio's closed server.js): open source, downloads API, live source tests. Torrent engine (fork of anacrolix/torrent and go-utp): 6× download speed, uTP acks the whole reorder buffer, the player's bytes first." width="100%">
+</picture>
 
 **A few decisions worth a look**
 
-- **Own every layer, and fix the cause where it lives.** Stremio's closed `server.js` was replaced by Rivulet, and the app, the BitTorrent library and the uTP transport were forked in too. No patch scripts or runtime workarounds: each change is a normal commit in the layer that owns the problem. ([UPSTREAMS.md](UPSTREAMS.md))
-- **Prove it in a lab first.** A relay that adds 150 ms of latency, with a real libtorrent sender, showed that the uTP receiver's 30-packet selective ack freezes a stream for one round trip per lost packet. Acking the whole reorder buffer removed the freezes, in the lab and then on real swarms. ([lab results](research/findings/10-lab-results.md), [the fix](research/findings/12-transport-fixes.md))
-- **Only the player's bytes are urgent.** mpv needs under 1 MiB before its first frame, so those chunks are asked for first, ordered by when they're needed, and taken from a slow peer once overdue. ([start-up reads](research/findings/14-startup-reads.md), [critical chunks](research/findings/15-critical-chunks.md))
-- **One health rule for every choice.** A source is healthy when it downloads at least 1.25× faster than playback needs. The same rule picks the source, prepares the next episode, triggers a mid-episode switch and chooses download sources. ([the picker](research/findings/36-one-picker-next-slot-switching.md))
+- **Fix the cause in the layer that owns it.** No patch scripts or runtime workarounds: each change is a normal commit in its fork. ([UPSTREAMS.md](UPSTREAMS.md))
+- **Prove it in a lab first.** A 150 ms relay with a real libtorrent sender showed uTP's 30-packet selective ack freezing a stream once per lost packet; acking the whole reorder buffer removed it. ([lab](research/findings/10-lab-results.md), [fix](research/findings/12-transport-fixes.md))
+- **Only the player's bytes are urgent.** The chunks mpv needs are asked for first, by deadline, and taken from a slow peer once overdue. ([start-up reads](research/findings/14-startup-reads.md), [critical chunks](research/findings/15-critical-chunks.md))
+- **One health rule for every choice.** 1.25× playback speed picks the source, prepares the next episode, triggers a switch and chooses download sources. ([the picker](research/findings/36-one-picker-next-slot-switching.md))
 
-**Always ahead of the official app.** A release can't be built until the latest code of every original project is merged and every test passes ([scripts/release.ps1](scripts/release.ps1)). A daily job opens an issue when one of them moves.
+**Always ahead of the official app.** A release can't be built until every original project's latest code is merged and every test passes ([scripts/release.ps1](scripts/release.ps1)).
 
-**Quality.** About 2,200 tests across the web UI (Jest), the server and libraries (Go) and the app (Rust), run before every commit. 43 findings documents record each change with numbers from before and after. Built with Claude Code from written plans, one measured step at a time.
+**Quality.** About 2,200 tests (Jest, Go, Rust) before every commit; 44 findings documents with before-and-after numbers.
 
 **Stack.** Go · Rust · React · TypeScript · WebView2 · mpv · anacrolix/torrent · Inno Setup · GitHub Actions
 
