@@ -683,7 +683,7 @@ const STACK = [
     { name: 'Windows app', fork: 'stremio-shell-ng', tags: ['ed25519-signed self-updates', 'starts and adopts the server', 'mpv player'] },
     { name: 'Web UI', fork: 'stremio-web', tags: ['races the sources', 'swaps a slow source mid-episode', 'downloads'] },
     { name: 'Streaming server', fork: 'rivulet-engine', tags: ['replaces the closed server.js', 'live source tests', 'downloads API'] },
-    { name: 'Torrent engine', fork: 'anacrolix/torrent + go-utp', tags: ['6× download speed', 'uTP acks the whole reorder buffer', "player's bytes first, by deadline"] },
+    { name: 'Torrent engine', fork: 'anacrolix/torrent + go-utp', tags: ['8× download speed', 'uTP acks the whole reorder buffer', "player's bytes first, by deadline"] },
 ];
 
 function stackHtml(theme, iconPng) {
@@ -790,7 +790,7 @@ const FEATURES = [
     { name: 'engine', side: 'left', screen: [380, 252],
         eyebrow: 'Torrent engine', title: 'A faster engine',
         body: 'Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after.',
-        stat: '6×', statLabel: 'the official app’s download speed' },
+        stat: '8×', statLabel: 'the official app’s download speed' },
     { name: 'resume', side: 'right', screen: [400, 240], cropTop: 31, src: 'feature-resume.mp4',
         eyebrow: 'Continue watching', title: 'Resume at once',
         body: 'The top of Continue Watching is prepared in the background. A source that falls behind is swapped mid-episode at the same second.',

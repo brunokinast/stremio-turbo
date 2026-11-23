@@ -29,7 +29,7 @@ Where two findings disagree, the higher number wins.
 
 **Closing out, and parity with qBittorrent**
 - [38](findings/38-review-fixes-and-cleanup.md) review fixes · [39](findings/39-live-checks.md) live checks · [40](findings/40-plan10-closed.md), [41](findings/41-plan9-closed.md) the last plans closed
-- [42](findings/42-supply-gap.md) why Turbo got fewer peers · [43](findings/43-supply-parity.md) supply parity · [44](findings/44-mid-file-starts.md) mid-file starts · [45](findings/45-steady-state-speed.md) steady-state speed: one seedbox, not the engine
+- [42](findings/42-supply-gap.md) why Turbo got fewer peers · [43](findings/43-supply-parity.md) supply parity · [44](findings/44-mid-file-starts.md) mid-file starts · [45](findings/45-steady-state-speed.md) steady-state speed: dropped seedboxes, the uTP window
 
 ## Lab
 - [`lab/bench`](lab/bench): the benchmark behind the README's numbers (Turbo, official Stremio and qBittorrent on the same torrent, fresh each run), and `ceiling.py`, one connection from a local libtorrent seeder with an optional delay.
@@ -44,3 +44,4 @@ The transport lab of findings 10–15 (a latency relay, uTP downloaders, a swarm
 - The next-day check: the next episode on disk, a start under 2 s, no pauses.
 - A libtorrent-based engine as an alternative to anacrolix, if supply parity regresses (findings 42–43).
 - Prepare more than the first Continue Watching card, measured against the data it costs.
+- Dial order: reach the peers that deliver before their slots fill (finding 45).

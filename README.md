@@ -35,7 +35,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/card-engine-dark.png">
-  <img src="docs/readme/card-engine-light.png" alt="A faster engine: fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. Downloaded in the first minute of a fresh 4K HDR episode, median run: Turbo 22.2 MB/s, qBittorrent 29.1, official Stremio 3.8; 6× the official app." width="100%">
+  <img src="docs/readme/card-engine-light.png" alt="A faster engine: fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. Downloaded in the first minute of a fresh 4K HDR episode, median run: Turbo 27.2 MB/s, qBittorrent 15.8, official Stremio 3.3; 8× the official app." width="100%">
 </picture>
 
 <picture>
@@ -54,12 +54,12 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/stats-dark.png">
-  <img src="docs/readme/stats-light.png" alt="A fresh 4K HDR episode on a healthy swarm: 3.3 s from click to first frame (official 4.4 s); 6× the download speed (22 vs 3.8 MB/s); 0.5 s frozen in the first minute (official 7.2 s)." width="100%">
+  <img src="docs/readme/stats-light.png" alt="A fresh 4K HDR episode on a healthy swarm: 4.2 s from click to first frame (official 4.7 s); 8× the download speed (27.2 vs 3.3 MB/s); 2.3 s frozen in the first minute (official 4.2 s). Thin swarm: 4.0 s vs 5.8 s, 12.8 vs 3.0 MB/s." width="100%">
 </picture>
 
 On a thin swarm (about 14 seeders) Turbo starts in **5.0 s** against the official app's 16.7 s, and the official app never started in 1 run of 3.
 
-<sub>Median of 3 runs per client, each starting fresh with nothing cached, in rotating order; the same player (the app's mpv) plays for Stremio and Turbo. qBittorrent has no player: its line is the same torrent downloading. Script and raw numbers: [research/lab/bench](research/lab/bench).</sub>
+<sub>Median of 6 runs per client, each starting fresh with nothing cached, in rotating order; the same player (the app's mpv) plays for Stremio and Turbo. qBittorrent has no player: its line is the same torrent downloading. Script and raw numbers: [research/lab/bench](research/lab/bench).</sub>
 
 <br>
 
@@ -69,7 +69,7 @@ Every layer of Stremio, forked, improved and bundled into one installer.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/stack-dark.png">
-  <img src="docs/readme/stack-light.png" alt="Four layers in one installer. Windows app (fork of stremio-shell-ng): starts and adopts the server, mpv, ed25519-signed updates. Web UI (fork of stremio-web): races the sources, downloads, swaps a slow source mid-episode. Streaming server (rivulet-engine, replacing Stremio's closed server.js): open source, downloads API, live source tests. Torrent engine (fork of anacrolix/torrent and go-utp): 6× download speed, uTP acks the whole reorder buffer, the player's bytes first." width="100%">
+  <img src="docs/readme/stack-light.png" alt="Four layers in one installer. Windows app (fork of stremio-shell-ng): starts and adopts the server, mpv, ed25519-signed updates. Web UI (fork of stremio-web): races the sources, downloads, swaps a slow source mid-episode. Streaming server (rivulet-engine, replacing Stremio's closed server.js): open source, downloads API, live source tests. Torrent engine (fork of anacrolix/torrent and go-utp): 8× download speed, uTP acks the whole reorder buffer, the player's bytes first." width="100%">
 </picture>
 
 **A few decisions worth a look**
