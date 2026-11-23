@@ -586,34 +586,36 @@ function chartHtml(b, theme) {
     </body></html>`;
 }
 
+function speedPanelSvg(b, g, t, W = 360, H = 210, fs = 1) {
+    const L = 44 * fs, R = 86 * fs, T = 12, B = 28 * fs;
+    const short = { official: 'Official', turbo: 'Turbo', qbt: 'qBittorrent' };
+    const series = CLIENTS.map(([c]) => ({ c, name: short[c], mb: b[g][c]?.mb })).filter((s) => s.mb);
+    const max = Math.max(...series.flatMap((s) => s.mb));
+    const step = [50, 100, 250, 500, 1000].find((s) => max / s <= 4) ?? 1000;
+    const top = Math.ceil(max / step) * step;
+    const x = (sec) => L + (W - L - R) * sec / 60;
+    const y = (v) => T + (H - T - B) * (1 - v / top);
+    const fmt = (v) => v >= 1000 ? `${+(v / 1000).toFixed(1)} GB` : `${v} MB`;
+    const grid = Array.from({ length: top / step + 1 }, (_, i) => i * step).map((v) =>
+        `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${t.faint}" stroke-width="1"/>
+         <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" fill="${t.muted}" font-size="${11 * fs}">${fmt(v)}</text>`).join('');
+    const xs = [0, 15, 30, 45, 60].map((s) => `<text x="${x(s)}" y="${H - 8}" text-anchor="middle" fill="${t.muted}" font-size="${11 * fs}">${s} s</text>`).join('');
+    // End labels, nudged apart when two lines finish close together.
+    const ends = series.map((s) => ({ ...s, ly: y(s.mb[60]) })).sort((a, z) => a.ly - z.ly);
+    for (let i = 1; i < ends.length; i++) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + 26 * fs);
+    const lines = series.map((s) => `<polyline fill="none" stroke="${s.c === 'turbo' ? t.turbo : t.other}" stroke-width="${s.c === 'turbo' ? 3 : 2}" stroke-linejoin="round"
+        ${s.c === 'qbt' ? 'stroke-dasharray="5 4"' : ''} points="${s.mb.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}"/>`).join('');
+    const labels = ends.map((s) => `<circle cx="${x(60)}" cy="${y(s.mb[60])}" r="4" fill="${s.c === 'turbo' ? t.turbo : t.other}" stroke="${t.surface}" stroke-width="2"/>
+        <text x="${x(60) + 10}" y="${s.ly - 1}" fill="${t.ink}" font-size="${12.5 * fs}" font-weight="${s.c === 'turbo' ? 700 : 400}">${s.name}</text>
+        <text x="${x(60) + 10}" y="${s.ly + 13 * fs}" fill="${t.muted}" font-size="${11.5 * fs}">${b[g][s.c].mbps.median.toFixed(1)} MB/s</text>`).join('');
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${FONT.replace(/'/g, '')}">${grid}${xs}${lines}${labels}</svg>`;
+}
+
 // Download speed as MB on disk over the first minute (the median run of each client), one panel
 // per swarm. Lines are direct-labelled at their ends; Turbo carries the colour.
 function speedHtml(b, theme) {
     const t = THEMES[theme];
-    const W = 360, H = 210, L = 44, R = 86, T = 12, B = 28;
-    const panel = (g, title) => {
-        const short = { official: 'Official', turbo: 'Turbo', qbt: 'qBittorrent' };
-        const series = CLIENTS.map(([c]) => ({ c, name: short[c], mb: b[g][c]?.mb })).filter((s) => s.mb);
-        const max = Math.max(...series.flatMap((s) => s.mb));
-        const step = [50, 100, 250, 500, 1000].find((s) => max / s <= 4) ?? 1000;
-        const top = Math.ceil(max / step) * step;
-        const x = (sec) => L + (W - L - R) * sec / 60;
-        const y = (v) => T + (H - T - B) * (1 - v / top);
-        const fmt = (v) => v >= 1000 ? `${+(v / 1000).toFixed(1)} GB` : `${v} MB`;
-        const grid = Array.from({ length: top / step + 1 }, (_, i) => i * step).map((v) =>
-            `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${t.faint}" stroke-width="1"/>
-             <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" fill="${t.muted}" font-size="11">${fmt(v)}</text>`).join('');
-        const xs = [0, 15, 30, 45, 60].map((s) => `<text x="${x(s)}" y="${H - 8}" text-anchor="middle" fill="${t.muted}" font-size="11">${s} s</text>`).join('');
-        // End labels, nudged apart when two lines finish close together.
-        const ends = series.map((s) => ({ ...s, ly: y(s.mb[60]) })).sort((a, z) => a.ly - z.ly);
-        for (let i = 1; i < ends.length; i++) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + 26);
-        const lines = series.map((s) => `<polyline fill="none" stroke="${s.c === 'turbo' ? t.turbo : t.other}" stroke-width="${s.c === 'turbo' ? 3 : 2}" stroke-linejoin="round"
-            ${s.c === 'qbt' ? 'stroke-dasharray="5 4"' : ''} points="${s.mb.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}"/>`).join('');
-        const labels = ends.map((s) => `<circle cx="${x(60)}" cy="${y(s.mb[60])}" r="4" fill="${s.c === 'turbo' ? t.turbo : t.other}" stroke="${t.surface}" stroke-width="2"/>
-            <text x="${x(60) + 10}" y="${s.ly - 1}" fill="${t.ink}" font-size="12.5" font-weight="${s.c === 'turbo' ? 700 : 400}">${s.name}</text>
-            <text x="${x(60) + 10}" y="${s.ly + 13}" fill="${t.muted}" font-size="11.5">${b[g][s.c].mbps.median.toFixed(1)} MB/s</text>`).join('');
-        return `<div class="panel"><div class="title">${title}</div><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${FONT.replace(/'/g, '')}">${grid}${xs}${lines}${labels}</svg></div>`;
-    };
+    const panel = (g, title) => `<div class="panel"><div class="title">${title}</div>${speedPanelSvg(b, g, t)}</div>`;
     return `<!doctype html><html><head><meta charset="utf-8"><style>
         * { box-sizing: border-box; margin: 0; }
         body { width: 800px; background: ${t.surface}; color: ${t.ink}; font: 14px/1.35 ${FONT}; padding: 22px 28px 18px; }
@@ -749,6 +751,98 @@ function bannerHtml(appPng, iconPng) {
     </body></html>`;
 }
 
+// ---- feature cards: one per README row, the screen on alternating sides --------------------------
+// Each card is a dark brand panel (like the banner) with the text and one key number on one side
+// and a framed screen on the other, bleeding off the card's edge. Sizes are CSS pixels; cards
+// render at 2x. Light and dark versions differ only in the page colour behind the rounded corners.
+const CARD = { w: 640, h: 340, pad: 30, gap: 26, bleed: 26, radius: 18 };
+const PAGE = { light: '#ffffff', dark: '#0d1117' };
+const FEATURES = [
+    { name: 'race', side: 'right', screen: [260, 286], bleed: 10, src: 'feature-race.gif',
+        eyebrow: 'Smart play', title: 'Races the sources',
+        body: 'Press Play on a quality and its top three sources are tested live. The best one that keeps up plays; if none does, it steps down a quality and says why.',
+        stat: '≥ 1.25×', statLabel: 'the speed the video needs, or it doesn’t play' },
+    { name: 'engine', side: 'left', screen: [380, 252],
+        eyebrow: 'Torrent engine', title: 'A faster engine',
+        body: 'Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after.',
+        stat: '6×', statLabel: 'the official app’s download speed' },
+    { name: 'resume', side: 'right', screen: [400, 240], cropTop: 31, src: 'feature-resume.mp4',
+        eyebrow: 'Continue watching', title: 'Resume at once',
+        body: 'The top of Continue Watching is prepared in the background. A source that falls behind is swapped mid-episode at the same second.',
+        stat: '~1 s', statLabel: 'from Resume to the picture' },
+    { name: 'downloads', side: 'left', screen: [400, 258], cropTop: 31, src: 'feature-downloads.mp4',
+        eyebrow: 'Offline', title: 'Downloads',
+        body: 'An episode or a whole season, each from its fastest source. The next episode downloads while you watch.',
+        stat: 'Whole seasons', statLabel: 'and they finish after the app is closed' },
+];
+
+// The screen's rectangle in the card: vertically centred, past the card's edge by its bleed.
+// cropTop: source pixels cut from the clip's top (the window's title bar).
+const bleedOf = (f) => f.bleed ?? CARD.bleed;
+function cardScreen(f) {
+    const [w, h] = f.screen;
+    const x = f.side === 'right' ? CARD.w - w + bleedOf(f) : -bleedOf(f);
+    return { x, y: Math.round((CARD.h - h) / 2), w, h };
+}
+
+// The card with a hole where the screen goes (a clip is laid under it), or with inner HTML in it.
+function cardHtml(f, theme, inner = null) {
+    const r = cardScreen(f);
+    const textW = CARD.w - (f.screen[0] - bleedOf(f)) - CARD.gap - CARD.pad;
+    const textX = f.side === 'right' ? CARD.pad : CARD.w - CARD.pad - textW;
+    const k = 10; // the screen's corner radius
+    const hole = `M${r.x + k} ${r.y}H${r.x + r.w - k}A${k} ${k} 0 0 1 ${r.x + r.w} ${r.y + k}V${r.y + r.h - k}A${k} ${k} 0 0 1 ${r.x + r.w - k} ${r.y + r.h}H${r.x + k}A${k} ${k} 0 0 1 ${r.x} ${r.y + r.h - k}V${r.y + k}A${k} ${k} 0 0 1 ${r.x + k} ${r.y}Z`;
+    const clip = inner === null ? `clip-path: path(evenodd, "M0 0H${CARD.w}V${CARD.h}H0Z ${hole}");` : '';
+    const from = f.side === 'right' ? '0% 0%' : '100% 0%';
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+        * { margin: 0; box-sizing: border-box; }
+        html, body { width: ${CARD.w}px; height: ${CARD.h}px; background: transparent; }
+        /* The page colour behind the rounded corners, with the same hole as the card. */
+        .page { position: absolute; inset: 0; background: ${PAGE[theme]}; ${clip} }
+        .card { position: absolute; inset: 0; border-radius: ${CARD.radius}px; overflow: hidden; font-family: ${FONT}; color: #fff; ${clip}
+            background: radial-gradient(120% 150% at ${from}, #3a2a9e 0%, #1b1550 48%, #0c0b11 100%);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); }
+        .glow { position: absolute; width: 520px; height: 520px; border-radius: 50%; top: -90px; ${f.side === 'right' ? 'right: -170px' : 'left: -170px'};
+            background: radial-gradient(circle, rgba(132,96,255,.38), rgba(32,84,224,0) 65%); }
+        .frame { position: absolute; left: ${r.x - 1}px; top: ${r.y - 1}px; width: ${r.w + 2}px; height: ${r.h + 2}px; border-radius: ${k + 1}px;
+            border: 1px solid rgba(255,255,255,.16); box-shadow: 0 18px 50px rgba(0,0,0,.55); background: ${inner === null ? 'transparent' : '#0d1117'}; overflow: hidden; }
+        .text { position: absolute; left: ${textX}px; width: ${textW}px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; }
+        .eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: #b7a6ff; }
+        h3 { font-size: 25px; font-weight: 700; letter-spacing: -.5px; margin-top: 6px; line-height: 1.1; }
+        p { font-size: 12.5px; line-height: 1.5; color: #d9d4ff; margin-top: 10px; }
+        .stat { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.12); }
+        .big { font-size: 26px; font-weight: 700; letter-spacing: -.5px; line-height: 1.1; font-variant-numeric: tabular-nums;
+            background: linear-gradient(90deg, #c9bcff, #7fa6ff); -webkit-background-clip: text; color: transparent; }
+        .lbl { font-size: 11px; color: #a9a3c9; margin-top: 3px; }
+    </style></head><body><div class="page"></div><div class="card"><div class="glow"></div>
+        <div class="frame">${inner ?? ''}</div>
+        <div class="text"><div class="eyebrow">${f.eyebrow}</div><h3>${f.title}</h3><p>${f.body}</p>
+            <div class="stat"><div class="big">${f.stat}</div><div class="lbl">${f.statLabel}</div></div></div>
+    </div></body></html>`;
+}
+
+// The engine card's chart: the healthy swarm's first minute, in the dark chart theme. The frame
+// bleeds off the card's left edge, so the chart keeps clear of that part.
+function engineChart(b) {
+    const t = THEMES.dark;
+    const f = FEATURES.find((x) => x.name === 'engine');
+    const [w, h] = f.screen;
+    return `<div style="padding: 12px 14px 0 ${14 + CARD.bleed}px; color: ${t.ink}; font: 12px/1.3 ${FONT}">
+        <div style="font-weight: 600; font-size: 12.5px">Downloaded in the first minute</div>
+        <div style="color: ${t.muted}; font-size: 10.5px; margin: 1px 0 4px">fresh 4K HDR episode · healthy swarm · median run</div>
+        ${speedPanelSvg(b, 'healthy', t, w - 28 - CARD.bleed, h - 52, 0.95)}</div>`;
+}
+
+// Lays a clip under the card's hole and writes an animated GIF (2x, 12 fps).
+function cardGif(topPng, clip, f, gif) {
+    const r = cardScreen(f);
+    const S = 2;
+    const vf = `color=c=#0c0b11:s=${CARD.w * S}x${CARD.h * S}:r=12[bg];[1:v]${f.cropTop ? `crop=iw:ih-${f.cropTop}:0:${f.cropTop},` : ''}fps=12,scale=${r.w * S}:${r.h * S}:flags=lanczos[m];` +
+        `[bg][m]overlay=${r.x * S}:${r.y * S}:shortest=1[v];[v][0:v]overlay=0:0:shortest=1,split[a][b];` +
+        `[a]palettegen=max_colors=160:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
+    spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-loop', '1', '-i', topPng, '-i', clip, '-filter_complex', vf, gif], { stdio: 'inherit' });
+}
+
 // The time of the clip's last scene cut: where the page gives way to the player. With after, the
 // first cut past that many seconds instead (a cropped clip also films the race box appearing, and
 // the player's own scene changes after the cut).
@@ -783,11 +877,31 @@ async function compose(set = 'library') {
     try {
         const icon = path.join(ROOT, 'shell', 'images', 'stremio.png');
         for (const theme of ['light', 'dark']) {
-            await e.render(speedHtml(b, theme), 800, null, path.join(DOCS, `speed-${theme}.png`));
             await e.render(statsHtml(b, theme), 800, null, path.join(DOCS, `stats-${theme}.png`));
             await e.render(stackHtml(theme, icon), 960, null, path.join(DOCS, `stack-${theme}.png`));
         }
         await e.render(buttonHtml(), 300, 64, path.join(DOCS, 'button-download.png'));
+        // The feature cards: a still for the chart, GIFs with the clip under the card's hole.
+        const tmp = path.join(RAW, 'cards');
+        fs.mkdirSync(tmp, { recursive: true });
+        for (const f of FEATURES) {
+            for (const theme of ['light', 'dark']) {
+                if (!f.src) {
+                    await e.render(cardHtml(f, theme, engineChart(b)), CARD.w, CARD.h, path.join(DOCS, `card-${f.name}-${theme}.png`));
+                    continue;
+                }
+                const clip = path.join(src, f.src);
+                if (!fs.existsSync(clip)) {
+                    console.log('skipped card', f.name, '(not captured)');
+                    break;
+                }
+                const top = path.join(tmp, `${f.name}-${theme}.png`);
+                await e.render(cardHtml(f, theme), CARD.w, CARD.h, top);
+                const gif = path.join(DOCS, `card-${f.name}-${theme}.gif`);
+                cardGif(top, clip, f, gif);
+                console.log('wrote', path.relative(ROOT, gif), `${Math.round(fs.statSync(gif).size / 1024)} KB`);
+            }
+        }
         const app = path.join(src, 'banner-app.png');
         if (fs.existsSync(app)) await e.render(bannerHtml(app, fs.existsSync(icon) ? icon : app), 1280, 640, path.join(DOCS, 'banner.png'));
         else console.log('skipped banner.png: no banner-app.png in', path.relative(ROOT, src));
@@ -811,8 +925,9 @@ async function compose(set = 'library') {
             console.log('skipped', name, '(not captured)');
             continue;
         }
-        fs.copyFileSync(gif, path.join(DOCS, `${name}.gif`));
-        console.log('wrote', `docs/readme/${name}.gif`, `${Math.round(fs.statSync(gif).size / 1024)} KB`, cut !== null ? `(blurred from ${cut.toFixed(1)} s)` : '');
+        // The standalone GIFs stay in out/ (the README shows the feature cards).
+        if (path.dirname(gif) !== out) fs.copyFileSync(gif, path.join(out, `${name}.gif`));
+        console.log('wrote', path.relative(ROOT, path.join(out, `${name}.gif`)), `${Math.round(fs.statSync(gif).size / 1024)} KB`, cut !== null ? `(blurred from ${cut.toFixed(1)} s)` : '');
     }
 }
 

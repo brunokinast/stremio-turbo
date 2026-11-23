@@ -30,47 +30,25 @@
 
 ## Features
 
-<table>
-  <tr>
-    <td width="60%">
-      <img src="docs/readme/feature-race.gif" alt="Pressing Play on the 4K DV/HDR row: three sources are tested side by side with live speeds, and the fastest one that keeps up starts playing." width="100%">
-    </td>
-    <td width="40%">
-      <h3>Races the sources</h3>
-      Press Play on a quality and its top three sources are tested live. The best one that keeps up plays: at least <b>1.25×</b> the speed the video needs. If none does, it steps down a quality and says why.
-    </td>
-  </tr>
-  <tr>
-    <td width="40%">
-      <h3>A faster torrent engine</h3>
-      Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. A fresh 4K HDR episode downloads <b>6× faster</b> than in the official app, close to qBittorrent.
-    </td>
-    <td width="60%">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/readme/speed-dark.png">
-        <img src="docs/readme/speed-light.png" alt="Megabytes downloaded over the first 60 seconds of a fresh 4K HDR episode, median run: Stremio Turbo and qBittorrent climb steeply, official Stremio stays low." width="100%">
-      </picture>
-    </td>
-  </tr>
-  <tr>
-    <td width="60%">
-      <img src="docs/readme/feature-resume.gif" alt="Resuming a 4K movie from Continue Watching: the picture is playing about a second after the click." width="100%">
-    </td>
-    <td width="40%">
-      <h3>Resume at once</h3>
-      The top of Continue Watching is prepared in the background, so Resume plays in <b>about a second</b>. A source that falls behind is swapped mid-episode at the same second, with a 0.3 s gap.
-    </td>
-  </tr>
-  <tr>
-    <td width="40%">
-      <h3>Downloads</h3>
-      An episode or a whole season, each from its fastest source. The next episode downloads while you watch, and downloads <b>finish after the app is closed</b>.
-    </td>
-    <td width="60%">
-      <img src="docs/readme/feature-downloads.gif" alt="The Downloads screen: a season in progress, finished movies, disk use, and the Downloading and Done tabs." width="100%">
-    </td>
-  </tr>
-</table>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/card-race-dark.gif">
+  <img src="docs/readme/card-race-light.gif" alt="Races the sources: press Play on a quality and its top three sources are tested live; the best one that keeps up (at least 1.25× the speed the video needs) plays, and if none does it steps down a quality and says why. The clip shows three 4K DV sources racing and the 11.9 GB one winning at 5.1×." width="100%">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/card-engine-dark.png">
+  <img src="docs/readme/card-engine-light.png" alt="A faster engine: fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. Downloaded in the first minute of a fresh 4K HDR episode, median run: Turbo 22.2 MB/s, qBittorrent 29.1, official Stremio 3.8; 6× the official app." width="100%">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/card-resume-dark.gif">
+  <img src="docs/readme/card-resume-light.gif" alt="Resume at once: the top of Continue Watching is prepared in the background, so Resume shows the picture in about a second; a source that falls behind is swapped mid-episode at the same second." width="100%">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/card-downloads-dark.gif">
+  <img src="docs/readme/card-downloads-light.gif" alt="Downloads: an episode or a whole season, each from its fastest source; the next episode downloads while you watch, and downloads finish after the app is closed. The clip scrolls the Downloads screen and switches its tabs." width="100%">
+</picture>
 
 <br>
 
