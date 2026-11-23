@@ -1,4 +1,4 @@
-<!-- DRAFT (branch `readme`): images from scripts/readme-images.mjs; numbers from research/lab/bench (2026-11-22). -->
+> **README preview 1 of 3: your library.** The GIFs show your own titles (House of the Dragon, Oppenheimer), unblurred.
 
 <p align="center">
   <img src="docs/readme/banner.png" alt="Stremio Turbo: Stremio for Windows, rebuilt for speed. The episode page with its quality rows, in an app window." width="100%">
@@ -38,19 +38,19 @@
       The top three sources of a quality are tested live, and the best picture that keeps up plays (at least 1.25× the speed it needs). If none does, it steps down a quality and says why. The test starts while you read the page, so Play is usually instant.
     </td>
     <td width="50%" valign="top">
-      <img src="docs/readme/feature-engine.gif" alt="A fresh 4K HDR episode starting: the first frame appears a few seconds after Play." width="100%"><br><br>
+      <img src="docs/readme/feature-engine.gif" alt="A fresh 4K HDR episode starting from its quality row, with a stopwatch from the click to the first frame." width="100%"><br><br>
       <b>A faster torrent engine</b><br>
       Fixes in the uTP transport, the request queue, storage and peer dialling, each measured before and after. A fresh 4K HDR episode downloads 6× faster than in the official app, and on a thin swarm it starts in 5 s where the official app took 17 s or never started.
     </td>
   </tr>
   <tr>
     <td valign="top">
-      <img src="docs/readme/feature-resume.gif" alt="Resume from Continue Watching starts in about two seconds; later a slow source is swapped mid-episode without a pause." width="100%"><br><br>
+      <img src="docs/readme/feature-resume.gif" alt="Pressing play on a Continue Watching card: the first frame appears about a second later." width="100%"><br><br>
       <b>Resume at once, no buffering</b><br>
       The top of Continue Watching is prepared in the background, so Resume plays in about 2 s. A source that falls behind is swapped mid-episode at the same second, with a 0.3 s gap.
     </td>
     <td valign="top">
-      <img src="docs/readme/feature-downloads.gif" alt="Downloading a season, then the Downloads screen with disk use, progress and duplicates." width="100%"><br><br>
+      <img src="docs/readme/feature-downloads.gif" alt="Downloading an episode from its quality row, then the Downloads screen with it in progress." width="100%"><br><br>
       <b>Downloads</b><br>
       An episode or a whole season, each from its fastest source. The next episode downloads while you watch, and downloads finish after the app is closed.
     </td>
