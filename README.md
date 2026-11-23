@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://github.com/brunokinast/stremio-turbo/releases/latest"><img src="https://img.shields.io/github/v/release/brunokinast/stremio-turbo?style=flat-square&label=release&color=6b5cf0" alt="Latest release"></a>
-  <a href="https://github.com/brunokinast/stremio-turbo/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/brunokinast/stremio-turbo/release.yml?style=flat-square&label=release%20build" alt="Release build status"></a>
+  <a href="https://github.com/brunokinast/stremio-turbo/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/brunokinast/stremio-turbo/ci.yml?branch=main&style=flat-square&label=tests" alt="Tests status"></a>
   <img src="https://img.shields.io/badge/Windows%2010%20·%2011-x64-171a21?style=flat-square" alt="Windows 10 and 11, x64">
   <img src="https://img.shields.io/badge/licence-GPL--2.0%20·%20MIT%20·%20MPL--2.0-171a21?style=flat-square" alt="Licences: GPL-2.0, MIT, MPL-2.0">
 </p>

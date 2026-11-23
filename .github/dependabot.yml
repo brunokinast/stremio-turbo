@@ -1,0 +1,13 @@
+# Keeps the SHA-pinned GitHub Actions current. Web, Go and Rust dependencies follow the original
+# projects through scripts/sync-upstreams.ps1 instead.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

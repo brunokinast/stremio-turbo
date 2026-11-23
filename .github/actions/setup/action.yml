@@ -5,13 +5,15 @@ description: Node 24 with corepack, Go from server/go.mod, the Rust MSVC target
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: 24
+        # pnpm comes from corepack in the next step; the web install has its own lockfile check.
+        package-manager-cache: false
     - run: corepack enable
       shell: pwsh
 
-    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+    - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version-file: server/go.mod
         cache-dependency-path: |
