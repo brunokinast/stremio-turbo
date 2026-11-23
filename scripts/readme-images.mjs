@@ -90,8 +90,13 @@ async function edge() {
             console.log('wrote', path.relative(ROOT, out));
         },
         async close() {
+            // A clean shutdown: killing Edge leaves its tabs registered with Windows, and they
+            // linger in Alt+Tab as blank entries until Explorer restarts.
+            const exited = new Promise((res) => proc.once('exit', res));
+            await c.send('Browser.close').catch(() => {});
+            await Promise.race([exited, sleep(5000)]);
             c.close();
-            proc.kill();
+            if (proc.exitCode === null) proc.kill();
             await sleep(500);
             fs.rmSync(profile, { recursive: true, force: true });
         },
