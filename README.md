@@ -1,5 +1,3 @@
-<!-- DRAFT (branch `readme`): images from scripts/readme-images.mjs; numbers from research/lab/bench (2026-11-22). -->
-
 <p align="center">
   <img src="docs/readme/banner.png" alt="Stremio Turbo: Stremio for Windows, rebuilt for speed. A close-up of the quality picker: tiers with their seeders." width="100%">
 </p>
