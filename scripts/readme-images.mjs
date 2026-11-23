@@ -3,7 +3,7 @@
 //   node scripts/readme-images.mjs bench <healthy bench dir> <thin bench dir>
 //       Summarises two research/lab/bench/compare.py runs into docs/readme/bench.json (medians
 //       and ranges, for the images), docs/readme/bench-runs.json (every run, with its MB at each
-//       second) and README's per-run tables. No infohashes, addresses, release names or network info.
+//       second) and BENCHMARK.md's per-run tables. No infohashes, addresses, release names or network info.
 //   node scripts/readme-images.mjs capture
 //       Screenshots of the installed app over its DevTools port, into out/readme/ (ignored). Start
 //       the app with WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 first.
@@ -108,7 +108,7 @@ async function edge() {
     };
 }
 
-// ---- bench: compare.py results -> docs/readme/bench.json, bench-runs.json and README's run table --
+// ---- bench: compare.py results -> docs/readme/bench.json, bench-runs.json and BENCHMARK.md -------
 
 // MB on disk at each second 0..60 of a run (samples.json beside results.json; only the byte counts
 // are read, never the peers).
@@ -205,7 +205,7 @@ function bench(healthyDir, thinDir) {
     console.log(JSON.stringify(json, null, 1));
 }
 
-// README's per-run tables, between its bench-runs markers.
+// BENCHMARK.md's per-run tables, between its bench-runs markers.
 function readmeRunTable(healthy, thin) {
     const sec = (v) => `${v.toFixed(1)} s`;
     const num = (v) => (v == null ? '–' : v.toFixed(1));
@@ -224,11 +224,11 @@ function readmeRunTable(healthy, thin) {
         `**Thin swarm**${swarm(thin)}`, '', table(thin), '',
         '<sub>Order: when the client ran within its round. Frozen: the player\'s pauses for data after the first frame, count × total. MB/s: the average over the 60 s; Peak: the best second. Peers: most connected at once. *qBittorrent has no player: its first frame is when the first and last pieces are on disk (the file\'s headers and index), "not ready" if not within 60 s.</sub>',
     ].join('\n');
-    const readme = path.join(ROOT, 'README.md');
-    const text = fs.readFileSync(readme, 'utf8');
+    const page = path.join(ROOT, 'BENCHMARK.md');
+    const text = fs.readFileSync(page, 'utf8');
     const re = /(<!-- bench-runs:start -->)[\s\S]*?(<!-- bench-runs:end -->)/;
-    if (!re.test(text)) throw new Error('README.md has no <!-- bench-runs:start --> / <!-- bench-runs:end --> markers');
-    fs.writeFileSync(readme, text.replace(re, (_, a, z) => `${a}\n\n${body}\n\n${z}`));
+    if (!re.test(text)) throw new Error('BENCHMARK.md has no <!-- bench-runs:start --> / <!-- bench-runs:end --> markers');
+    fs.writeFileSync(page, text.replace(re, (_, a, z) => `${a}\n\n${body}\n\n${z}`));
 }
 
 // ---- capture: the installed app over its DevTools port ------------------------------------------

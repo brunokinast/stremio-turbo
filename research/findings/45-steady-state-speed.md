@@ -100,7 +100,7 @@ Same rounds, healthy swarm, 30–60 s MB/s:
 | qBittorrent | 30 s | 7.5 | 8.0 | — |
 | Official Stremio | 5.8 s | 3.0 | 3.3 | 0 s |
 
-On the healthy swarm Turbo was ahead at 30–60 s in every round. qBittorrent didn't get the fast seedbox in any of them. That makes this bench kinder to Turbo than the pooled 34.4 against 25.2 above, which is the fairer comparison of steady speed. Every run, anonymised, is in [`docs/readme/bench-runs.json`](../../docs/readme/bench-runs.json) and the README's run tables.
+On the healthy swarm Turbo was ahead at 30–60 s in every round. qBittorrent didn't get the fast seedbox in any of them. That makes this bench kinder to Turbo than the pooled 34.4 against 25.2 above, which is the fairer comparison of steady speed. Every run, anonymised, is in [`docs/readme/bench-runs.json`](../../docs/readme/bench-runs.json) and the run tables in [`BENCHMARK.md`](../../BENCHMARK.md).
 
 How even the bench is:
 - **The same for all:** one client at a time on one PC and connection; 10 s warm-up; the same torrent and trackers; rotating order. Turbo and qBittorrent did no better by their position in the round. The official app's slowest run in both benches was the bench's very first (1.1 and 1.7 MB/s); without it, its medians move by 0.1 MB/s (3.4 healthy, 3.1 thin).
