@@ -27,6 +27,7 @@ import (
 	"github.com/anacrolix/dht/v2/krpc"
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/generics/heap"
+	utp "github.com/anacrolix/go-utp"
 	"github.com/anacrolix/log"
 	"github.com/anacrolix/missinggo/v2"
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -442,14 +443,18 @@ func NewClient(cfg *ClientConfig) (cl *Client, err error) {
 		}
 	}()
 	builtinListenNetworks := cl.listenNetworks()
-	lf := listen
-	if lp := cl.config.ListenPacket; lp != nil {
-		lf = func(n network, addr string, f firewallCallback, logger *slog.Logger) (socket, error) {
-			if n.Udp {
-				return listenUtpFromPacketConn(n.String(), addr, f, logger, lp)
-			}
+	var utpOpts []utp.Option
+	if n := cl.config.UtpReceiveBuffer; n > 0 {
+		utpOpts = append(utpOpts, utp.WithBufferSizes(0, n))
+	}
+	lf := func(n network, addr string, f firewallCallback, logger *slog.Logger) (socket, error) {
+		if !n.Udp {
 			return listen(n, addr, f, logger)
 		}
+		if lp := cl.config.ListenPacket; lp != nil {
+			return listenUtpFromPacketConn(n.String(), addr, f, logger, lp, utpOpts...)
+		}
+		return listenUtp(n.String(), addr, f, logger, utpOpts...)
 	}
 	sockets, err := listenAllWithListenFunc(
 		builtinListenNetworks,

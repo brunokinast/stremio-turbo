@@ -396,6 +396,11 @@ func New(cfg types.Config) (types.EngineManager, error) {
 	cc.DisableTCP = false
 	// A 4 MiB OS receive buffer on the uTP socket, which the DHT shares.
 	cc.ListenPacket = bufferedListenPacket(net.ListenPacket)
+	// Each uTP connection's receive buffer, which its advertised window comes from. At the 1 MiB
+	// default the fastest uTP peers sat exactly at window / round trip, 5-6 MB/s at 175-210 ms; at
+	// 4 MiB the reorder buffer (2016 packets, about 2.8 MB) bounds the window instead
+	// (research/findings/45).
+	cc.UtpReceiveBuffer = 4 << 20
 
 	// Maximize peer sourcing + feature set.
 	cc.DisablePEX = false                        // BEP11 peer exchange

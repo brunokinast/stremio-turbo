@@ -1368,10 +1368,12 @@ func (c *PeerConn) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (err
 		return
 	case utHolepunch.ExtensionName:
 		var msg utHolepunch.Msg
-		err = msg.UnmarshalBinary(payload)
-		if err != nil {
-			err = fmt.Errorf("unmarshalling ut_holepunch message: %w", err)
-			return
+		if err := msg.UnmarshalBinary(payload); err != nil {
+			// An optional extension: a message we can't read isn't worth the connection, which may
+			// be a seeder delivering tens of MB/s (research/findings/45).
+			c.protocolLogger.Levelf(log.Debug, "ignoring ut_holepunch message %x: %v", payload, err)
+			torrent.Add("ut_holepunch messages ignored", 1)
+			return nil
 		}
 		err = c.t.handleReceivedUtHolepunchMsg(msg, c)
 		return

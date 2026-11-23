@@ -212,17 +212,21 @@ func listenAllRetry(
 
 type firewallCallback = utp.FirewallCallback
 
-func listenUtp(network, addr string, fc firewallCallback, logger *slog.Logger) (socket, error) {
-	us, err := NewUtpSocketSlogger(network, addr, fc, logger)
+func listenUtp(network, addr string, fc firewallCallback, logger *slog.Logger, opts ...utp.Option) (socket, error) {
+	us, err := newUtpSocket(func(o ...utp.Option) (utp.Socket, error) {
+		return utp.NewSocket(network, addr, o...)
+	}, fc, logger, opts...)
 	return utpSocketSocket{us, network}, err
 }
 
-func listenUtpFromPacketConn(network, addr string, fc firewallCallback, logger *slog.Logger, lp func(network, addr string) (net.PacketConn, error)) (socket, error) {
+func listenUtpFromPacketConn(network, addr string, fc firewallCallback, logger *slog.Logger, lp func(network, addr string) (net.PacketConn, error), opts ...utp.Option) (socket, error) {
 	pc, err := lp(network, addr)
 	if err != nil {
 		return nil, err
 	}
-	us, err := NewUtpSocketFromPacketConn(pc, fc, logger)
+	us, err := newUtpSocket(func(o ...utp.Option) (utp.Socket, error) {
+		return utp.NewSocketFromPacketConn(pc, o...)
+	}, fc, logger, opts...)
 	return utpSocketSocket{us, network}, err
 }
 

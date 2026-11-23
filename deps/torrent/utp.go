@@ -28,8 +28,8 @@ func newUtpSocket(
 	newSocket func(...utp.Option) (utp.Socket, error),
 	fc firewallCallback,
 	slogger *slog.Logger,
+	opts ...utp.Option,
 ) (_ utpSocket, err error) {
-	var opts []utp.Option
 	if slogger != nil {
 		opts = append(opts, utp.WithLogger(slogger))
 	}

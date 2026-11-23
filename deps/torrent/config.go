@@ -111,6 +111,10 @@ type ClientConfig struct {
 	// Defines ListenPacket func to use for the uTP socket (which the DHT server shares). If set,
 	// uTP and DHT run over the returned net.PacketConn.
 	ListenPacket func(network, addr string) (net.PacketConn, error)
+	// Receive buffer of each uTP connection in bytes, which its advertised window is computed from;
+	// zero keeps the uTP package's default (1 MiB). A connection can't deliver more than its window
+	// per round trip: 1 MiB is 5 MB/s at 200 ms, where a fast peer's uTP connection levels off.
+	UtpReceiveBuffer int
 	// cfg.NoDefaultPortForwarding aka cfg.DisableUpnp
 	NoDefaultPortForwarding bool
 	UpnpID                  string
