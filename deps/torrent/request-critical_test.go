@@ -326,3 +326,43 @@ func TestReaderWaitReplanOnlyWhenAStealCouldPay(t *testing.T) {
 	qt.Check(t, qt.IsTrue(tor.readerWaitMayNeedReplan(2*offsetFirstPieceLength+14*defaultChunkSize, now)),
 		qt.Commentf("31st: ~480 ms"))
 }
+
+// A blocked read's chunk queued behind requests for less urgent pieces: those are cancelled, the
+// chunk and anything as urgent ahead of it stay.
+func TestClearWayForCriticalCancelsLessUrgentAhead(t *testing.T) {
+	tor, p := offsetFirstSetup(t, false) // pieces 0 and 3 are Now, 1 and 2 Normal
+	p.initMessageWriter()
+	now := time.Now()
+	setRecentRate(p, now, 16<<10)
+	tor.cl.lock()
+	defer tor.cl.unlock()
+	p.lastUsefulChunkReceived = now
+	holdRequests(p, req(1, 0), req(3, 0), req(1, 1), req(2, 0), req(0, 3), req(1, 2))
+	tor.clearWayForCritical(req(0, 3), now)
+	var left []RequestIndex
+	p.requestState.Requests.Iterate(func(x RequestIndex) bool {
+		left = append(left, x)
+		return true
+	})
+	qt.Check(t, qt.DeepEquals(left, []RequestIndex{req(3, 0), req(0, 3), req(1, 2)}))
+	qt.Check(t, qt.IsFalse(p.snubbed))
+}
+
+// A holder that has delivered nothing for criticalSnubAfter while a read waits on its chunk is
+// snubbed: all its requests can move.
+func TestClearWayForCriticalSnubsASilentHolder(t *testing.T) {
+	tor, p := offsetFirstSetup(t, false)
+	p.initMessageWriter()
+	now := time.Now()
+	tor.cl.lock()
+	defer tor.cl.unlock()
+	p.lastUsefulChunkReceived = now.Add(-3 * time.Second)
+	holdRequests(p, req(0, 3), req(0, 4))
+	tor.requestState[req(0, 3)] = requestState{peer: tor.requestState[req(0, 3)].peer, when: now.Add(-1 * time.Second)}
+	tor.clearWayForCritical(req(0, 3), now)
+	qt.Check(t, qt.IsFalse(p.snubbed), qt.Commentf("requested only a second ago"))
+	tor.requestState[req(0, 3)] = requestState{peer: tor.requestState[req(0, 3)].peer, when: now.Add(-2500 * time.Millisecond)}
+	tor.clearWayForCritical(req(0, 3), now)
+	qt.Check(t, qt.IsTrue(p.snubbed))
+	qt.Check(t, qt.IsTrue(p.requestState.Requests.IsEmpty()))
+}

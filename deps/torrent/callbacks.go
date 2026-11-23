@@ -217,6 +217,9 @@ type ChunkWaitState struct {
 	RequestedAgo          time.Duration
 	// Requests the holder was given before this one and hasn't delivered yet.
 	Ahead int
+	// Of those, how many are for chunks after this one in the torrent (less urgent for a
+	// sequential reader), and how many are in other pieces.
+	AheadLater, AheadOtherPieces int
 	// The holder's recent useful rate, bytes per second.
 	HolderRate     float64
 	HolderEstimate time.Duration

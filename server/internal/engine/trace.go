@@ -257,7 +257,7 @@ func (tr *tracer) onReaderWaited(ev torrent.ReaderWaitedEvent) {
 			AtMs: tt.ms(now.Add(-ev.Waited)), File: tt.fileOfPiece(piece), Offset: ev.Offset,
 			WaitedMs: msf(ev.Waited), Requested: w.Requested,
 			Holder: w.Holder, HolderNetwork: w.HolderNetwork, RequestedAgoMs: msf(w.RequestedAgo),
-			Ahead: w.Ahead, HolderRateKiBs: w.HolderRate / 1024, HolderEstimateMs: estimateMs(w.HolderEstimate),
+			Ahead: w.Ahead, AheadLater: w.AheadLater, AheadOtherPieces: w.AheadOtherPieces, HolderRateKiBs: w.HolderRate / 1024, HolderEstimateMs: estimateMs(w.HolderEstimate),
 			BestOther: w.BestOther, BestOtherNetwork: w.BestOtherNetwork, BestOtherEstimateMs: estimateMs(w.BestOtherEstimate),
 		})
 	})

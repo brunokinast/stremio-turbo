@@ -501,6 +501,8 @@ type ReaderWait struct {
 	HolderNetwork    string  `json:"holderNetwork,omitempty"`
 	RequestedAgoMs   float64 `json:"requestedAgoMs"`
 	Ahead            int     `json:"ahead"`
+	AheadLater       int     `json:"aheadLater,omitempty"`
+	AheadOtherPieces int     `json:"aheadOtherPieces,omitempty"`
 	HolderRateKiBs   float64 `json:"holderRateKiBs"`
 	HolderEstimateMs float64 `json:"holderEstimateMs"`
 	// The other peer expected to deliver a new request soonest.

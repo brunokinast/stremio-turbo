@@ -25,6 +25,9 @@ const (
 	criticalOverdueMin = 500 * time.Millisecond
 	// How often a blocked read looks for its chunk's request becoming overdue.
 	criticalOverdueCheck = 250 * time.Millisecond
+	// A holder of a blocked read's chunk that has delivered nothing useful for this long, with the
+	// chunk requested at least this long ago, is snubbed at once (PieceTimeout is far longer).
+	criticalSnubAfter = 2 * time.Second
 	// Shorter reader waits aren't reported.
 	readerWaitReportMin = 20 * time.Millisecond
 	unknownDelivery     = time.Duration(1<<63 - 1)
@@ -175,6 +178,18 @@ func (t *Torrent) chunkWaitState(off int64, now time.Time) (ret ChunkWaitState) 
 		var est time.Duration
 		est, ret.Ahead = t.heldRequestDelivery(holder, r, now)
 		ret.HolderEstimate = estimateOrUnknown(est)
+		holder.requestState.Requests.Iterate(func(x RequestIndex) bool {
+			if x == r {
+				return false
+			}
+			if x > r {
+				ret.AheadLater++
+			}
+			if t.pieceIndexOfRequestIndex(x) != piece {
+				ret.AheadOtherPieces++
+			}
+			return true
+		})
 		ret.HolderRate = holder.reqQueue.shortRate(now)
 	}
 	best := unknownDelivery
@@ -231,9 +246,43 @@ func (r *reader) beginWait(off int64) *readerWait {
 		w.state = t.chunkWaitState(off, w.start)
 	}
 	if cfg.ReaderCriticalBytes > 0 && t.readerWaitMayNeedReplan(off, w.start) {
+		t.clearWayForCritical(t.requestIndexAtOffset(off), w.start)
 		t.replanPeersWithPieceAt(off)
 	}
 	return w
+}
+
+// Clears the way for a blocked read's chunk r on its holder. Peers serve requests in the order
+// they got them, so a chunk that became urgent after the holder's queue filled waits behind it:
+// after a seek, behind requests for the old position or for the rest of a file being downloaded
+// whole (a resume in a 4K film waited behind 230 such requests, an estimated 10 s). The holder's
+// requests ahead of r in less urgent pieces are cancelled, so r moves up (a peer drops cancelled
+// requests it hasn't sent yet) and the cancelled ones return to the pool. A holder that has
+// delivered nothing useful for criticalSnubAfter is snubbed instead, so every request it holds can
+// move, not only the one the reader reached. Called with the Client lock held.
+func (t *Torrent) clearWayForCritical(r RequestIndex, now time.Time) {
+	holder := t.requestingPeer(r)
+	if holder == nil {
+		return
+	}
+	if !holder.snubbed && now.Sub(holder.lastUsefulChunkReceived) >= criticalSnubAfter && now.Sub(t.requestState[r].when) >= criticalSnubAfter {
+		holder.snub()
+		return
+	}
+	prio := t.piece(t.pieceIndexOfRequestIndex(r)).effectivePriority()
+	var behind []RequestIndex
+	holder.requestState.Requests.Iterate(func(x RequestIndex) bool {
+		if x == r {
+			return false
+		}
+		if t.piece(t.pieceIndexOfRequestIndex(x)).effectivePriority() < prio {
+			behind = append(behind, x)
+		}
+		return true
+	})
+	for _, x := range behind {
+		holder.cancel(x)
+	}
 }
 
 func (t *Torrent) replanPeersWithPieceAt(off int64) {
@@ -265,6 +314,7 @@ func (r *reader) checkWaitOverdue(w *readerWait) {
 		return
 	}
 	w.replanned = t.requestState[req].when
+	t.clearWayForCritical(req, now)
 	t.replanPeersWithPieceAt(w.off)
 }
 
