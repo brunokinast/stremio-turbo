@@ -1,0 +1,68 @@
+# The build caches a job needs, all on D: (cache archives extract 3.4x faster there than on C:,
+# plan 21's profile): Go's build and module caches for one module, the shell's cargo target and
+# registry, and the pinned media binaries. Only jobs on pushes to main save, so caches roll forward
+# with main and every branch can read them.
+name: Build caches
+description: Go, cargo and media-binary caches on D:
+
+inputs:
+  go:
+    description: Go module whose cache to restore (server, torrent, utp), or empty for none
+    default: ''
+  rust:
+    description: Restore the shell's cargo cache
+    default: 'false'
+  media:
+    description: Restore the pinned media binaries (out/cache)
+    default: 'false'
+  save:
+    description: Save the Go and cargo caches at the end of the job
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Go cache location
+      if: inputs.go != ''
+      shell: pwsh
+      run: |
+        "GOCACHE=D:\go-build" >> $env:GITHUB_ENV
+        "GOMODCACHE=D:\go-mod" >> $env:GITHUB_ENV
+    - name: Go cache
+      if: inputs.go != '' && inputs.save == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          D:\go-build
+          D:\go-mod
+        # A new key per run so the cache rolls forward (setup-go's fixed key froze it).
+        key: go-${{ inputs.go }}-${{ hashFiles('server/go.sum', 'deps/torrent/go.sum', 'deps/go-utp/go.sum') }}-${{ github.run_id }}
+        restore-keys: |
+          go-${{ inputs.go }}-${{ hashFiles('server/go.sum', 'deps/torrent/go.sum', 'deps/go-utp/go.sum') }}-
+          go-${{ inputs.go }}-
+    - name: Go cache (restore only)
+      if: inputs.go != '' && inputs.save != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          D:\go-build
+          D:\go-mod
+        key: go-${{ inputs.go }}-${{ hashFiles('server/go.sum', 'deps/torrent/go.sum', 'deps/go-utp/go.sum') }}-${{ github.run_id }}
+        restore-keys: |
+          go-${{ inputs.go }}-${{ hashFiles('server/go.sum', 'deps/torrent/go.sum', 'deps/go-utp/go.sum') }}-
+          go-${{ inputs.go }}-
+
+    - name: Cargo cache
+      if: inputs.rust == 'true'
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        workspaces: shell
+        shared-key: shell
+        save-if: ${{ inputs.save == 'true' }}
+
+    - name: Media binaries
+      if: inputs.media == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: out/cache
+        key: media-${{ hashFiles('scripts/binaries.json') }}

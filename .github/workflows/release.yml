@@ -1,66 +1,107 @@
-# Builds and publishes a release when a version tag is pushed
-# (scripts/release.ps1 creates it). Installed apps find it through
-# releases/latest/download/update.json and update themselves.
+# Releases main's HEAD as x.y.z (`mise run release x.y.z`, or Run workflow in the Actions tab).
+# CI already tested this code, so nothing is re-tested: the gate checks CI passed on it and that
+# every original project's latest code is merged, then the commit is built with the version
+# stamped, the update files are signed in a step of their own, and the release (with its tag) is
+# published. Installed apps find it through releases/latest/download/update.json.
 name: Release
 
 on:
-  push:
-    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version (x.y.z)
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: windows-latest
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      notes: ${{ steps.upstreams.outputs.notes }}
     steps:
+      - name: Version and branch
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:VERSION -notmatch '^\d+\.\d+\.\d+$') { throw "version must be x.y.z: $env:VERSION" }
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'release from main' }
+          $tag = gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/v$env:VERSION" --jq "map(select(.ref == `"refs/tags/v$env:VERSION`")) | length"
+          if ($tag -ne '0') { throw "v$env:VERSION already exists" }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # the upstream check compares histories
-
-      - uses: ./.github/actions/setup
-
+          fetch-depth: 0 # the CI and upstream checks compare histories
+      - name: CI passed on this code
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci-passed.ps1 $env:GITHUB_SHA
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
       - run: pip install git-filter-repo==2.47.0
-
-      - name: Inno Setup
-        run: choco install innosetup --version 6.7.1 --no-progress -y
-
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: out/cache
-          key: build-cache-${{ hashFiles('scripts/binaries.json') }}
-
+          path: out/cache/shell-upstream.git
+          key: shell-upstream-${{ github.run_id }}
+          restore-keys: shell-upstream-
       - name: Every upstream merged (the release rule)
-        run: pwsh scripts/check-upstreams.ps1
-
-      - name: Tests
-        run: pwsh -Command "Import-Module ./scripts/Upstreams.psm1; Invoke-AllTests"
-
-      - name: Build
-        env:
-          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
-        run: pwsh scripts/build.ps1
-
-      - name: Check the version matches the tag
+        id: upstreams
         shell: pwsh
         run: |
-          $v = (Get-Content out/update.json -Raw | ConvertFrom-Json).version
-          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "built $v for tag $env:GITHUB_REF_NAME" }
+          $report = pwsh scripts/check-upstreams.ps1 -Markdown
+          if ($LASTEXITCODE -ne 0) { $report; throw 'an upstream has unmerged code: mise run sync, push, then release' }
+          $notes = (@('Includes the latest code of every original project:', '') + $report) -join "`n"
+          "notes<<NOTES_EOF`n$notes`nNOTES_EOF" >> $env:GITHUB_OUTPUT
 
+  release:
+    needs: gate
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/caches
+        with:
+          go: server
+          rust: 'true'
+          media: 'true'
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.11.12
+      - name: Inno Setup
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+      - name: Build
+        shell: pwsh
+        run: mise run build -Version ${{ inputs.version }} -NoSign
+      - name: Sign the update files
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: ./scripts/sign-update.ps1
       - name: Publish
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ needs.gate.outputs.notes }}
+          VERSION: ${{ inputs.version }}
         run: |
-          $notes = @("Includes the latest code of every original project:", "") + (pwsh scripts/check-upstreams.ps1 -Markdown)
-          $notes -join "`n" | Set-Content -Encoding utf8 out/notes.md
+          $v = (Get-Content out/update.json -Raw | ConvertFrom-Json).version
+          if ($v -ne $env:VERSION) { throw "built $v, asked for $env:VERSION" }
+          $env:NOTES | Set-Content -Encoding utf8 out/notes.md
           # The installer also goes up under a fixed name, so releases/latest/download/StremioTurbo-x64.exe
           # (the README's download button) always points at the newest one.
-          $installer = (Get-Item out/StremioTurbo-*-x64.exe).FullName
+          $installer = (Get-Item "out/StremioTurbo-$env:VERSION-x64.exe").FullName
           New-Item -ItemType Directory -Force out/latest | Out-Null
           Copy-Item $installer out/latest/StremioTurbo-x64.exe
-          gh release create $env:GITHUB_REF_NAME --title "Stremio Turbo $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file out/notes.md `
+          gh release create "v$env:VERSION" --target $env:GITHUB_SHA --title "Stremio Turbo $env:VERSION" --notes-file out/notes.md `
             $installer out/latest/StremioTurbo-x64.exe out/update.json out/descriptor.json out/descriptor.json.sig

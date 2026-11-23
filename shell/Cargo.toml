@@ -1,6 +1,6 @@
 [package]
 name = "stremio-turbo"
-version = "1.0.2"
+version = "0.0.0" # stamped at release (scripts/build.ps1 -Version); a dev build reads as older than any release
 edition = "2018"
 
 [dependencies]

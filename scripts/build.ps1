@@ -8,14 +8,16 @@
     update.json                   what the app's updater checks (latest release)
     descriptor.json(.sig)         the installer's URL and sha256, signed
 
-  The version is shell/Cargo.toml's. Signing needs the private update key in
-  UPDATE_SIGNING_KEY, or a file in UPDATE_SIGNING_KEY_FILE (default
-  ~/.stremio-turbo/update-signing-key.pem); without it the update files are
-  skipped (-NoSign does that on purpose).
+  -Version x.y.z stamps that version (releases); without it the build is
+  shell/Cargo.toml's dev version, which any release reads as newer. The update
+  files come from scripts/sign-update.ps1, which needs the private update key
+  (UPDATE_SIGNING_KEY or a key file); without one, or with -NoSign, they are
+  skipped.
 
-  Usage: pwsh scripts/build.ps1 [-NoSign] [-SkipWeb] [-SkipServer] [-SkipShell]
+  Usage: mise run build [-Version x.y.z] [-NoSign] [-SkipWeb] [-SkipServer] [-SkipShell]
 #>
 param(
+    [string]$Version,
     [switch]$NoSign,
     [switch]$SkipWeb,
     [switch]$SkipServer,
@@ -32,8 +34,11 @@ $repo = 'brunokinast/stremio-turbo'
 
 function Step($name) { Write-Host "`n== $name" -ForegroundColor Cyan }
 
-$version = (Select-String -Path (Join-Path $root 'shell/Cargo.toml') -Pattern '^version = "(.+)"' |
-    Select-Object -First 1).Matches[0].Groups[1].Value
+$cargoToml = Join-Path $root 'shell/Cargo.toml'
+$version = if ($Version) { $Version } else {
+    (Select-String -Path $cargoToml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+}
+if ($Version -and $Version -notmatch '^\d+\.\d+\.\d+$') { throw "version must be x.y.z: $Version" }
 $commit = (git -C $root rev-parse --short HEAD).Trim()
 Write-Host "Stremio Turbo $version ($commit)"
 
@@ -50,11 +55,11 @@ if (-not $SkipWeb) {
     Step 'Web UI'
     Push-Location (Join-Path $root 'web')
     try {
-        corepack pnpm install --frozen-lockfile
+        pnpm install --frozen-lockfile
         # The UI is installed with the app: no offline cache, which would keep serving an
         # earlier version's files after an update.
         $env:SERVICE_WORKER_DISABLED = 'true'
-        corepack pnpm run build
+        pnpm run build
     } finally { Pop-Location }
 }
 $webBuild = Join-Path $root 'web/build'
@@ -66,7 +71,6 @@ if (-not $SkipServer) {
     Step 'Server'
     Push-Location (Join-Path $root 'server')
     try {
-        $env:GOWORK = 'off'
         $env:CGO_ENABLED = '0'
         $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         go build -trimpath -ldflags "-s -w -X main.buildVersion=turbo-$version -X main.buildCommit=$commit -X main.buildDate=$date" -o $serverExe ./cmd/rivulet-engine
@@ -77,12 +81,21 @@ Copy-Item $serverExe $stage
 $shellExe = Join-Path $root 'shell/target/x86_64-pc-windows-msvc/release/stremio-turbo.exe'
 if (-not $SkipShell) {
     Step 'Shell'
+    # The version is compiled in (CARGO_PKG_VERSION, the exe's version resource the installer
+    # reads): stamped into Cargo.toml for this build only, then put back.
+    $cargoLock = Join-Path $root 'shell/Cargo.lock'
+    $saved = @{ $cargoToml = [IO.File]::ReadAllText($cargoToml); $cargoLock = [IO.File]::ReadAllText($cargoLock) }
     Push-Location (Join-Path $root 'shell')
     try {
-        $cargo = Get-Command cargo -ErrorAction SilentlyContinue
-        if (-not $cargo) { $env:PATH = "$HOME\.cargo\bin;$env:PATH" }
+        if ($Version) {
+            $stamped = [regex]::new('(?m)^version = "[^"]+"').Replace($saved[$cargoToml], "version = `"$Version`"", 1)
+            [IO.File]::WriteAllText($cargoToml, $stamped)
+        }
         cargo build --release --target x86_64-pc-windows-msvc
-    } finally { Pop-Location }
+    } finally {
+        Pop-Location
+        foreach ($f in $saved.Keys) { [IO.File]::WriteAllText($f, $saved[$f]) }
+    }
 }
 Copy-Item $shellExe $stage
 Copy-Item (Join-Path $root 'shell/libmpv-2.dll') $stage
@@ -128,25 +141,6 @@ if (-not (Test-Path $installer)) { throw "installer not produced: $installer" }
 Write-Host "installer: $installer"
 
 Step 'Update files'
-$keyFile = if ($env:UPDATE_SIGNING_KEY_FILE) { $env:UPDATE_SIGNING_KEY_FILE } else { Join-Path $HOME '.stremio-turbo/update-signing-key.pem' }
-if ($NoSign -or (-not $env:UPDATE_SIGNING_KEY -and -not (Test-Path $keyFile))) {
-    Write-Host 'skipped (no signing key)'
-    return
-}
-$base = "https://github.com/$repo/releases/download/v$version"
-$descriptor = [ordered]@{
-    version = $version
-    files   = @([ordered]@{
-            name     = Split-Path -Leaf $installer
-            url      = "$base/$(Split-Path -Leaf $installer)"
-            checksum = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
-            os       = 'windows'
-        })
-}
-$descriptorFile = Join-Path $out 'descriptor.json'
-[IO.File]::WriteAllText($descriptorFile, ($descriptor | ConvertTo-Json -Depth 4))
-$env:UPDATE_SIGNING_KEY_FILE = $keyFile
-node (Join-Path $PSScriptRoot 'sign-descriptor.mjs') $descriptorFile
-$update = [ordered]@{ version = $version; versionDesc = "$base/descriptor.json" }
-[IO.File]::WriteAllText((Join-Path $out 'update.json'), ($update | ConvertTo-Json))
-Write-Host "update files: $out\update.json, descriptor.json, descriptor.json.sig"
+$hasKey = $env:UPDATE_SIGNING_KEY -or (Test-Path ($env:UPDATE_SIGNING_KEY_FILE ?? (Join-Path $HOME '.stremio-turbo/update-signing-key.pem')))
+if ($NoSign -or -not $hasKey) { Write-Host 'skipped (no signing key, or -NoSign)'; return }
+& (Join-Path $PSScriptRoot 'sign-update.ps1') -Installer $installer

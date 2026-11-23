@@ -1,11 +1,15 @@
-# Runs every folder's checks (web lint and tests, Go vet and tests, Rust tests) on each push to
-# main and on pull requests, the same checks the release runs.
+# Checks what a push changed, in parallel, with the same commands as a PC (mise.toml tasks,
+# scripts/test.ps1), and packages an unsigned installer so every code change is proven to build.
+# The Release workflow promotes a commit only once this passed on its code.
 name: CI
 
 on:
   push:
     branches: [main]
+    # Docs only: nothing to check. Keep equal to scripts/ci-passed.ps1's list.
+    paths-ignore: ['docs/**', 'research/**', '**.md', 'scripts/readme-images.mjs']
   pull_request:
+  workflow_dispatch: # checks everything
 
 permissions:
   contents: read
@@ -14,11 +18,139 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  MISE_VERSION: 2026.11.12
+
 jobs:
-  test:
-    runs-on: windows-latest
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.areas.outputs.web }}
+      go: ${{ steps.areas.outputs.go }}
+      shell: ${{ steps.areas.outputs.shell }}
+      any: ${{ steps.areas.outputs.any }}
+    steps:
+      - name: Areas this push touches
+        id: areas
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          $all = $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -or -not $env:BEFORE -or $env:BEFORE -match '^0+$'
+          $files = @()
+          if (-not $all) {
+            $cmp = gh api "repos/$env:GITHUB_REPOSITORY/compare/$env:BEFORE...$env:GITHUB_SHA" | ConvertFrom-Json
+            $files = @($cmp.files.filename)
+            if ($files.Count -ge 300) { $all = $true } # the compare API lists at most 300 files
+          }
+          $has = { param($re) $all -or [bool]($files | Where-Object { $_ -match $re }) }
+          # The workflow, the scripts and the toolchains affect every area.
+          $all = $all -or [bool]($files | Where-Object { $_ -match '^(\.github/|mise\.toml$|scripts/)' -and $_ -ne 'scripts/readme-images.mjs' })
+          # server builds on deps/torrent, which builds on deps/go-utp.
+          $go = @()
+          if (& $has '^(server|deps)/') { $go += 'server' }
+          if (& $has '^deps/') { $go += 'torrent' }
+          if (& $has '^deps/go-utp/') { $go += 'utp' }
+          $web = & $has '^web/'
+          $shell = & $has '^shell/'
+          "web=$($web.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "go=$(ConvertTo-Json -Compress @($go))" >> $env:GITHUB_OUTPUT
+          "shell=$($shell.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "any=$(($web -or $shell -or $go.Count -gt 0).ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "changed: $($files.Count) files; web=$web go=$($go -join ',') shell=$shell"
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
-      - name: Tests
-        run: pwsh -Command "Import-Module ./scripts/Upstreams.psm1; Invoke-AllTests"
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: node pnpm
+      - run: pwsh -NoProfile -File scripts/test.ps1 web
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.go) }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/caches
+        with:
+          go: ${{ matrix.module }}
+          save: ${{ github.event_name == 'push' }}
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: go
+      - run: pwsh -NoProfile -File scripts/test.ps1 ${{ matrix.module }}
+
+  shell:
+    needs: changes
+    if: needs.changes.outputs.shell == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/caches
+        with:
+          rust: 'true'
+          media: 'true'
+          save: ${{ github.event_name == 'push' }}
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: rust
+      - run: pwsh -NoProfile -File scripts/test.ps1 shell
+
+  # The whole app, as the Release workflow builds it but unsigned and with the dev version: runs
+  # beside the checks (its own caches), so a packaging break shows on the push that caused it.
+  package:
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/caches
+        with:
+          go: server
+          rust: 'true'
+          media: 'true'
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: ${{ env.MISE_VERSION }}
+      - name: Inno Setup
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+      - run: mise run build -NoSign
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-${{ github.sha }}
+          path: out/StremioTurbo-*-x64.exe
+          retention-days: 14
+          compression-level: 0
+
+  # One result per commit: green when every needed job passed (skipped ones didn't need to run).
+  ci:
+    if: always()
+    needs: [changes, web, go, shell, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: pwsh
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          $bad = @($env:RESULTS | ConvertFrom-Json | Where-Object { $_ -notin 'success', 'skipped' })
+          if ($bad) { throw "failed: $($bad -join ', ')" }
+          Write-Host 'all needed checks passed'
