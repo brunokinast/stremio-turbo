@@ -35,7 +35,7 @@ SECS, SETTLE, PORT = float(cfg['secs']), float(cfg['settle']), int(cfg['port'])
 DRY = cfg.get('dry') == '1'  # loopback only, no LSD/UPnP: checks the script without a firewall rule
 os.makedirs(OUT, exist_ok=True)
 SAVE = os.path.join(OUT, 'files')
-with open(os.path.join(HERE, '..', 'transport', 'trackers.txt'), encoding='utf-8') as f:
+with open(os.path.join(HERE, 'trackers.txt'), encoding='utf-8') as f:
     TRACKERS = [l.strip() for l in f if l.strip()]
 
 # qBittorrent's defaults where they differ from libtorrent's (qBittorrent 5: 500 connections in all,

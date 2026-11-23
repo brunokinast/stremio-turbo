@@ -58,7 +58,7 @@ QBT_PROFILE = os.path.join(OUT, '..', 'bench-qbt-profile')  # kept between bench
 QBT_UI = 'http://127.0.0.1:8089'
 BT_PORT = 49881  # Turbo's listening port; qBittorrent gets the same one (only one client runs at a time)
 SERVER = 'http://127.0.0.1:11470'
-with open(os.path.join(LAB, 'transport', 'trackers.txt'), encoding='utf-8') as f:
+with open(os.path.join(LAB, 'bench', 'trackers.txt'), encoding='utf-8') as f:
     TRACKERS = [l.strip() for l in f if l.strip()]
 
 

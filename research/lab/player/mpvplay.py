@@ -6,7 +6,7 @@ usage: mpvplay.py <infoHash> <fileIdx> <label> [key=value ...]
   remove=1 (remove the torrent and its cache after capturing, so the next play is cold)
   mpvconf=1 (apply %APPDATA%/Stremio/mpv.conf after the shell's options, as the shell does)
   hwdec=auto-copy  out=<dir> (default: research/data/play-<time>-<label>)
-  trackers=<file> (one announce URL per line; default ../transport/trackers.txt)
+  trackers=<file> (one announce URL per line; default ../bench/trackers.txt)
   seek=AT:PCT (one seek, AT seconds into the run and after the first frame, to PCT % of the file;
   play.json gets seekRestartS, the seek's time to its playback-restart)
   switch=AT:IH:IDX (plan 11 step 5: AT seconds after the first frame, switch to another release of
@@ -57,7 +57,7 @@ def get(path, timeout=30, body=None):
         return r.read()
 
 
-TRACKERS = cfg['trackers'] or os.path.join(HERE, '..', 'transport', 'trackers.txt')
+TRACKERS = cfg['trackers'] or os.path.join(HERE, '..', 'bench', 'trackers.txt')
 with open(TRACKERS, encoding='utf-8') as f:
     sources = ['tracker:' + l.strip() for l in f if l.strip()] + ['dht:' + IH]
 
