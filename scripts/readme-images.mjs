@@ -586,6 +586,8 @@ function chartHtml(b, theme) {
     </body></html>`;
 }
 
+// Download speed as MB on disk over the first minute (the median run of each client) for one
+// swarm. Lines are direct-labelled at their ends; Turbo carries the colour.
 function speedPanelSvg(b, g, t, W = 360, H = 210, fs = 1) {
     const L = 44 * fs, R = 86 * fs, T = 12, B = 28 * fs;
     const short = { official: 'Official', turbo: 'Turbo', qbt: 'qBittorrent' };
@@ -609,27 +611,6 @@ function speedPanelSvg(b, g, t, W = 360, H = 210, fs = 1) {
         <text x="${x(60) + 10}" y="${s.ly - 1}" fill="${t.ink}" font-size="${12.5 * fs}" font-weight="${s.c === 'turbo' ? 700 : 400}">${s.name}</text>
         <text x="${x(60) + 10}" y="${s.ly + 13 * fs}" fill="${t.muted}" font-size="${11.5 * fs}">${b[g][s.c].mbps.median.toFixed(1)} MB/s</text>`).join('');
     return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${FONT.replace(/'/g, '')}">${grid}${xs}${lines}${labels}</svg>`;
-}
-
-// Download speed as MB on disk over the first minute (the median run of each client), one panel
-// per swarm. Lines are direct-labelled at their ends; Turbo carries the colour.
-function speedHtml(b, theme) {
-    const t = THEMES[theme];
-    const panel = (g, title) => `<div class="panel"><div class="title">${title}</div>${speedPanelSvg(b, g, t)}</div>`;
-    return `<!doctype html><html><head><meta charset="utf-8"><style>
-        * { box-sizing: border-box; margin: 0; }
-        body { width: 800px; background: ${t.surface}; color: ${t.ink}; font: 14px/1.35 ${FONT}; padding: 22px 28px 18px; }
-        h2 { font-size: 18px; font-weight: 600; }
-        .sub { color: ${t.muted}; margin: 2px 0 12px; }
-        .panels { display: flex; gap: 24px; }
-        .title { font-weight: 600; margin-bottom: 4px; }
-        .foot { color: ${t.muted}; font-size: 12px; margin-top: 8px; }
-    </style></head><body>
-        <h2>Downloaded in the first minute</h2>
-        <div class="sub">A fresh 4K HDR episode, nothing cached · median run of ${b.healthy.turbo?.runs ?? 3}</div>
-        <div class="panels">${panel('healthy', 'Healthy swarm · about 95 seeders')}${panel('thin', 'Thin swarm · about 14 seeders')}</div>
-        <div class="foot">qBittorrent (dashed) only downloads: no player is waiting on it.</div>
-    </body></html>`;
 }
 
 // The headline numbers as three tiles, with the official app's figure under each.
